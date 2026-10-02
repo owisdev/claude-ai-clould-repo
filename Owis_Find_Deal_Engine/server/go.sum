@@ -1,0 +1,4 @@
+github.com/rs/cors v1.11.1 h1:eU3gRzXLRK57F5rKMGMZURNdIG4EoAmX8k94r9wXWHA=
+github.com/rs/cors v1.11.1/go.mod h1:XyqrcTp5zjWr1wsJ8PIRZssZ8b/WMcMf71DJnit4EMU=
+github.com/serpapi/google-search-results-golang v0.0.0-20260216165834-0f349178cf10 h1:6jXmy6syhft5Od/Ad/ny0xsKAxFPWUcVJOftvN+ZTts=
+github.com/serpapi/google-search-results-golang v0.0.0-20260216165834-0f349178cf10/go.mod h1:B4KcaaGbSpn3vq3FxSCsEJrBirStags89KTusB2of58=
