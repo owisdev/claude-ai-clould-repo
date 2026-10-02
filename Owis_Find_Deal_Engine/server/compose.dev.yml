@@ -1,0 +1,21 @@
+# Development override: run only SearXNG and Redis in Docker and the Go
+# server on your machine (go run). Publishes them on 127.0.0.1 only.
+#
+#   docker compose -f docker-compose.yml -f compose.dev.yml up -d searxng redis
+#   set -a; . ./.env; set +a; go run ./cmd/owis_find_deal_engine
+#
+# .env must then use SEARXNG_URL=http://127.0.0.1:8888 and
+# REDIS_URL=redis://:<REDIS_PASSWORD>@127.0.0.1:6379/0
+
+services:
+  searxng:
+    ports:
+      - "127.0.0.1:8888:8080"
+  redis:
+    # The data network is internal (no port publishing); add a normal one.
+    networks: [data, devports]
+    ports:
+      - "127.0.0.1:6379:6379"
+
+networks:
+  devports: {}

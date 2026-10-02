@@ -22,12 +22,31 @@ app ──POST /api/v1/search, Authorization: Bearer <JWT>──► server
 
 ## Run
 
-Requires Go 1.24+ and Docker (for SearXNG and Redis).
+### Full stack in Docker (production-like)
 
 ```sh
-cp .env.example .env    # fill in AUTH_*, SEARXNG_SECRET (and SERPAPI_KEY)
-docker compose up -d    # SearXNG on 127.0.0.1:8888, Redis on 127.0.0.1:6379
-set -a; . ./.env; set +a
+cp .env.example .env        # AUTH_*, SEARXNG_SECRET, REDIS_PASSWORD (+ SERPAPI_KEY)
+docker compose up -d --build
+curl localhost:3002/api/v1/health
+```
+
+- `server`, `searxng`, `redis` run as non-root users, with read-only file
+  systems, all Linux capabilities dropped and memory limits.
+- Networks: `edge` (server + SearXNG, internet access) and `data`
+  (server + Redis, **internal**: no internet, nothing published).
+- Only the API is published, on `127.0.0.1:3002` (`API_BIND`/`API_PORT`).
+  In production put Caddy/Nginx or a Cloudflare Tunnel in front for HTTPS.
+- Redis needs a password, keeps usage counters across restarts (AOF), and
+  under memory pressure evicts cache entries before usage counters.
+- `docker compose stop` shuts the server down gracefully.
+
+### Server on your machine (development)
+
+Requires Go 1.26+.
+
+```sh
+docker compose -f docker-compose.yml -f compose.dev.yml up -d searxng redis
+set -a; . ./.env; set +a    # SEARXNG_URL / REDIS_URL point to 127.0.0.1
 go run ./cmd/owis_find_deal_engine
 ```
 
@@ -148,11 +167,18 @@ internal/usage              plans, daily quotas, Redis/memory counters
 internal/ratelimit          per-user token bucket
 internal/api                router, handlers, middleware
 deploy/searxng              SearXNG settings
-docker-compose.yml          local SearXNG + Redis
+Dockerfile                  distroless, non-root image (~19 MB)
+docker-compose.yml          full stack on private networks
+compose.dev.yml             dev override: SearXNG + Redis on 127.0.0.1
 ```
 
 ## Test
 
 ```sh
-go vet ./... && go test -race ./...
+gofmt -l . && go vet ./... && go test -race ./...
+go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 ```
+
+CI ([`.github/workflows/server.yml`](../../.github/workflows/server.yml))
+runs these on every push touching the server, then validates the compose
+files and builds and smoke-tests the Docker image.

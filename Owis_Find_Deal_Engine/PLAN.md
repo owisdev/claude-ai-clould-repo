@@ -69,8 +69,8 @@ only the plan lookup changes.
 The JWT check runs **inside** the service, so there is no separate gateway
 to secure internally for now. When deploying:
 
-- **Private network**: the Go service listens only on an internal Docker
-  network / private subnet. The only public entry point is a reverse proxy
+- **Private network** (✅ in `docker-compose.yml`): the Go service listens
+  only on Docker networks; Redis is on an internal network. The only public entry point is a reverse proxy
   (Caddy or Nginx) or a **Cloudflare Tunnel** — then the server has no open
   inbound port at all.
 - **HTTPS only**, terminated at the proxy / Cloudflare.
@@ -274,8 +274,12 @@ and is pushed.
    `docker-compose` with SearXNG + Redis for local dev.
 5. ✅ Cache: stale-while-revalidate in Redis (or in-memory LRU), request
    coalescing, pull-to-refresh, stale-if-error (section 4b).
-6. Dockerfile + `docker-compose` (server, SearXNG, Redis, Postgres on an
-   internal network); CI running vet + tests on every push.
+6. ✅ Distroless non-root Docker image; `docker-compose` with server,
+   SearXNG and Redis on private networks (Redis on an internal network,
+   only the API published, all containers read-only, no capabilities);
+   GitHub Actions: gofmt, mod tidy, vet, race tests, govulncheck, compose
+   validation, image build + smoke test. Go 1.26 (supported release).
+   Postgres joins the stack in phase 2.
 
 3b. ✅ Security: JWT auth middleware (JWKS, RS256/ES256), per-user burst
    limit, daily quota by plan in Redis with 402/429, refunds on failure.

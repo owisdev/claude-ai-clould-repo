@@ -28,11 +28,39 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// version is set at build time: -ldflags "-X main.version=..."
+var version = "dev"
+
 func main() {
+	// "healthcheck" lets the container check the server without a shell or
+	// curl in the image (distroless).
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		os.Exit(healthcheck())
+	}
 	if err := run(); err != nil {
 		slog.Error("server stopped", "err", err)
 		os.Exit(1)
 	}
+}
+
+// healthcheck returns 0 when the local server answers /api/v1/health.
+func healthcheck() int {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "3002"
+	}
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("http://" + net.JoinHostPort("127.0.0.1", port) + "/api/v1/health")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "healthcheck:", err)
+		return 1
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintln(os.Stderr, "healthcheck: status", resp.StatusCode)
+		return 1
+	}
+	return 0
 }
 
 func run() error {
@@ -154,7 +182,7 @@ func run() error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info("server started", "addr", srv.Addr, "countries", len(catalog.Countries()))
+		log.Info("server started", "addr", srv.Addr, "version", version, "countries", len(catalog.Countries()))
 		errCh <- srv.ListenAndServe()
 	}()
 

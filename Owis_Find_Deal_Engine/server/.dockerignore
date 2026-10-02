@@ -1,0 +1,10 @@
+# Keep secrets and local files out of the build context.
+.env
+.env.*
+!.env.example
+*.md
+deploy/
+docker-compose*.yml
+compose*.yml
+/owis_find_deal_engine
+**/*_test.go

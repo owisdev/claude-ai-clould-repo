@@ -1,40 +1,117 @@
-# Local development dependencies for owis_find_deal_engine.
-#   cp .env.example .env    # set SEARXNG_SECRET (openssl rand -hex 32)
-#   docker compose up -d
-# The Go service then runs on the host with:
-#   SEARXNG_URL=http://127.0.0.1:8888  REDIS_URL=redis://127.0.0.1:6379/0
-# Ports are bound to 127.0.0.1 only: nothing is exposed to the network.
-# (Step 6 adds the server itself to this file on an internal network.)
+# owis_find_deal_engine — full stack: API server + SearXNG + Redis.
+#
+#   cp .env.example .env      # fill in secrets (see comments there)
+#   docker compose up -d --build
+#
+# Networks:
+#   edge  - server and SearXNG; has internet access (SearXNG queries search
+#           engines, the server calls SerpApi and the auth provider's JWKS).
+#   data  - server and Redis only; internal: no internet, no published ports.
+# Only the API port is published, on 127.0.0.1 by default: put a reverse
+# proxy (Caddy/Nginx) or a Cloudflare Tunnel in front of it in production.
+# SearXNG and Redis are never reachable from outside Docker.
 
 name: owis_find_deal_engine
 
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
 services:
-  searxng:
-    image: docker.io/searxng/searxng:latest
-    restart: unless-stopped
+  server:
+    <<: *hardening
+    build:
+      context: .
+      args:
+        VERSION: ${VERSION:-dev}
+    image: owis_find_deal_engine:${VERSION:-dev}
+    env_file:
+      - path: .env
+        required: true
+    environment:
+      # Service addresses inside the Docker networks override .env.
+      PORT: "3002"
+      SEARXNG_URL: http://searxng:8080
+      REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis:6379/0
     ports:
-      - "127.0.0.1:8888:8080"
-    volumes:
-      - ./deploy/searxng/settings.yml:/etc/searxng/settings.yml:ro
+      - "${API_BIND:-127.0.0.1}:${API_PORT:-3002}:3002"
+    networks: [edge, data]
+    depends_on:
+      redis: { condition: service_healthy }
+      searxng: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "/owis_find_deal_engine", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    mem_limit: 256m
+    pids_limit: 256
+
+  searxng:
+    <<: *hardening
+    image: docker.io/searxng/searxng:latest
+    user: "977:977" # the image's searxng user; the image default is root
     environment:
       SEARXNG_SECRET: ${SEARXNG_SECRET:?set SEARXNG_SECRET in .env}
-      # IPv4 inside the container; works on hosts without IPv6.
-      GRANIAN_HOST: 0.0.0.0
+      GRANIAN_HOST: 0.0.0.0 # IPv4; works on hosts without IPv6
+    volumes:
+      - ./deploy/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    tmpfs:
+      - /var/cache/searxng:uid=977,gid=977
+      - /tmp
+    networks: [edge]
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
       interval: 30s
       timeout: 5s
+      start_period: 20s
       retries: 3
+    mem_limit: 512m
+    pids_limit: 256
 
   redis:
+    <<: *hardening
     image: docker.io/library/redis:7-alpine
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:6379:6379"
-    # Usage counters only: no persistence needed in development.
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    user: "999:1000" # the image's redis user; skips the root entrypoint step
+    # Usage counters + search cache. AOF keeps counters across restarts.
+    # volatile-ttl: when memory is full, evict keys closest to expiry first
+    # (cache entries, 24h) before usage counters (48h).
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
+      - --appendonly
+      - "yes"
+      - --save
+      - ""
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - volatile-ttl
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
+    volumes:
+      - redis-data:/data
+    networks: [data]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 30s
       timeout: 5s
+      start_period: 5s
       retries: 3
+    mem_limit: 320m
+    pids_limit: 128
+
+networks:
+  edge: {}
+  data:
+    internal: true
+
+volumes:
+  redis-data: {}
