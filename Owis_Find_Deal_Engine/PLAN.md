@@ -114,6 +114,37 @@ Implemented behaviour:
 - Results are mapped to their marketplace by link domain, numbered per
   marketplace, and interleaved (best result of each shop first).
 
+## 4b. Cache and price freshness ✅ implemented
+
+Goal: popular searches cost nothing, while prices shown stay reasonably
+current. Strategy, in layers:
+
+1. **Stale-while-revalidate** (per country + normalized title):
+   fresh for 2 h → served from cache; 2–24 h → served instantly *and*
+   refreshed in the background so the next user gets new prices; > 24 h →
+   fetched live. Identical concurrent searches share one upstream call.
+2. **Shorter life for doubtful answers**: a result where a shop failed is
+   fresh 10 min, an empty result 30 min.
+3. **User-driven refresh**: `"refresh": true` (pull to refresh) fetches
+   live, at most once per 10 min per query, so it cannot be abused.
+4. **Stale-if-error**: if a live fetch fails, the last good answer is
+   returned (marked stale) instead of an error.
+5. **Transparency**: `fetched_at` / `stale` in every response; the app
+   shows "prices updated X ago", and the product link always opens the
+   shop with its live price.
+6. **Automatic invalidation** when `markets.json` changes (the shop list
+   is part of the cache key).
+
+Later (phase 2+):
+- **Saved-item price tracker**: a scheduled job re-checks items in users'
+  saved carts (e.g. every 6–12 h, popular ones more often) and sends a
+  price-drop notification. Uses the same cache, so shared items are
+  fetched once.
+- **Pre-warm** the most searched queries per country before they expire.
+- **Shop APIs with real prices** (eBay, AliExpress) get their own, shorter
+  TTL since their prices are exact.
+- **Purchase reports** feed back real paid prices per shop.
+
 ## 5. Users and features (after the service is finished)
 
 ### 5.1 Saved cart
@@ -181,8 +212,9 @@ Owis_Find_Deal_Engine/
 │   └── internal/
 │       ├── config/                  # environment variables
 │       ├── markets/                 # countries -> marketplaces (markets.json)
-│       ├── search/                  # worker pool, merge, ordering
-│       ├── providers/serpapi/       # + searxng, ebay, aliexpress later
+│       ├── search/                  # worker pool, merge, fallback chain
+│       ├── cache/                   # stale-while-revalidate search cache
+│       ├── providers/               # searxng, serpapi (+ ebay, aliexpress later)
 │       ├── auth/                    # JWT verification, JWKS cache
 │       ├── usage/                   # plans, daily quotas (Redis / memory)
 │       ├── ratelimit/               # per-user token bucket
@@ -211,9 +243,8 @@ and is pushed.
 4. ✅ SearXNG provider (free) + fallback chain (SearXNG first, SerpApi if
    it fails) with per-attempt timeout and circuit breaker;
    `docker-compose` with SearXNG + Redis for local dev.
-5. Cache: in-memory TTL cache keyed by country + normalized title, with
-   request coalescing (`singleflight`) so identical concurrent searches make
-   one upstream call.
+5. ✅ Cache: stale-while-revalidate in Redis (or in-memory LRU), request
+   coalescing, pull-to-refresh, stale-if-error (section 4b).
 6. Dockerfile + `docker-compose` (server, SearXNG, Redis, Postgres on an
    internal network); CI running vet + tests on every push.
 
@@ -224,7 +255,7 @@ and is pushed.
 **Phase 2 — users**
 7. `users` table (created on first login), `/me`.
 8. Plans in the database + payment webhook.
-9. Saved cart.
+9. Saved cart + saved-item price tracker (section 4b).
 10. Clicks + purchase reports.
 11. Notifications: inbox, devices, FCM push, purchase-prompt background job.
 

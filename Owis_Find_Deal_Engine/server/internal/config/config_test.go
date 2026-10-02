@@ -26,6 +26,9 @@ func TestLoadDefaults(t *testing.T) {
 	if len(cfg.SearchProviders) != 2 || cfg.SearchProviders[0] != "searxng" || cfg.ProviderAttemptTimeout != 8*time.Second {
 		t.Errorf("unexpected provider defaults: %+v", cfg)
 	}
+	if !cfg.CacheEnabled || cfg.CacheFreshTTL != 2*time.Hour || cfg.CacheStaleTTL != 24*time.Hour {
+		t.Errorf("unexpected cache defaults: %+v", cfg)
+	}
 	if len(cfg.CORSOrigins) != 2 {
 		t.Errorf("CORSOrigins = %v", cfg.CORSOrigins)
 	}
@@ -64,5 +67,22 @@ func TestLoadProviderValidation(t *testing.T) {
 		if _, err := Load(); (err == nil) != tt.ok {
 			t.Errorf("providers=%q searxng=%q serpapi=%q: err = %v, want ok=%v", tt.providers, tt.searxng, tt.serpapi, err, tt.ok)
 		}
+	}
+}
+
+func TestLoadCacheValidation(t *testing.T) {
+	t.Setenv("AUTH_JWKS_URL", "https://example.com/jwks")
+	t.Setenv("AUTH_ISSUER", "i")
+	t.Setenv("AUTH_AUDIENCE", "a")
+	t.Setenv("SEARCH_PROVIDERS", "searxng")
+	t.Setenv("SEARXNG_URL", "http://s")
+
+	t.Setenv("CACHE_FRESH_TTL", "48h") // longer than the 24h stale TTL
+	if _, err := Load(); err == nil {
+		t.Error("fresh TTL longer than stale TTL accepted")
+	}
+	t.Setenv("CACHE_ENABLED", "false")
+	if _, err := Load(); err != nil {
+		t.Errorf("disabled cache still validated: %v", err)
 	}
 }

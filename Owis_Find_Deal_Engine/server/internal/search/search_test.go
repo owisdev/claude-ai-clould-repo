@@ -78,7 +78,7 @@ func TestSearchBatchedUsesOneCall(t *testing.T) {
 	p := &fakeProvider{batch: true}
 	svc := newTestService(t, p, Options{})
 
-	res, err := svc.Search(context.Background(), "  samsung   s pen ", "JOR")
+	res, err := svc.Search(context.Background(), Request{Title: "  samsung   s pen ", Country: "JOR"})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestSearchPerTargetIsParallelAndBounded(t *testing.T) {
 	p := &fakeProvider{delay: 50 * time.Millisecond}
 	svc := newTestService(t, p, Options{MaxConcurrency: 2})
 
-	res, err := svc.Search(context.Background(), "usb hub", "usa")
+	res, err := svc.Search(context.Background(), Request{Title: "usb hub", Country: "usa"})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestSearchPartialFailure(t *testing.T) {
 	p := &fakeProvider{failFor: map[string]bool{"temu": true}, panicFor: map[string]bool{"shein": true}}
 	svc := newTestService(t, p, Options{})
 
-	res, err := svc.Search(context.Background(), "usb hub", "jor")
+	res, err := svc.Search(context.Background(), Request{Title: "usb hub", Country: "jor"})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestSearchAllFailed(t *testing.T) {
 	p := &fakeProvider{batch: true, failFor: map[string]bool{"amazon": true}}
 	svc := newTestService(t, p, Options{})
 
-	_, err := svc.Search(context.Background(), "usb hub", "jor")
+	_, err := svc.Search(context.Background(), Request{Title: "usb hub", Country: "jor"})
 	if !errors.Is(err, ErrAllFailed) {
 		t.Fatalf("err = %v, want ErrAllFailed", err)
 	}
@@ -152,7 +152,7 @@ func TestSearchTimeout(t *testing.T) {
 	svc := newTestService(t, p, Options{Timeout: 30 * time.Millisecond})
 
 	start := time.Now()
-	_, err := svc.Search(context.Background(), "usb hub", "jor")
+	_, err := svc.Search(context.Background(), Request{Title: "usb hub", Country: "jor"})
 	if !errors.Is(err, ErrAllFailed) {
 		t.Fatalf("err = %v, want ErrAllFailed", err)
 	}
@@ -165,17 +165,17 @@ func TestSearchValidation(t *testing.T) {
 	svc := newTestService(t, &fakeProvider{}, Options{})
 	ctx := context.Background()
 
-	if _, err := svc.Search(ctx, "usb hub", "fra"); !errors.Is(err, ErrUnknownCountry) {
+	if _, err := svc.Search(ctx, Request{Title: "usb hub", Country: "fra"}); !errors.Is(err, ErrUnknownCountry) {
 		t.Errorf("unknown country: err = %v", err)
 	}
-	if _, err := svc.Search(ctx, " a ", "usa"); !errors.Is(err, ErrInvalidTitle) {
+	if _, err := svc.Search(ctx, Request{Title: " a ", Country: "usa"}); !errors.Is(err, ErrInvalidTitle) {
 		t.Errorf("short title: err = %v", err)
 	}
 	long := make([]byte, MaxTitleLen+1)
 	for i := range long {
 		long[i] = 'a'
 	}
-	if _, err := svc.Search(ctx, string(long), "usa"); !errors.Is(err, ErrInvalidTitle) {
+	if _, err := svc.Search(ctx, Request{Title: string(long), Country: "usa"}); !errors.Is(err, ErrInvalidTitle) {
 		t.Errorf("long title: err = %v", err)
 	}
 }
@@ -184,7 +184,7 @@ func TestSearchMissingProvider(t *testing.T) {
 	cat, _ := markets.Load("")
 	svc := NewService(cat, map[string]Provider{}, Options{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
-	res, err := svc.Search(context.Background(), "usb hub", "jor")
+	res, err := svc.Search(context.Background(), Request{Title: "usb hub", Country: "jor"})
 	if !errors.Is(err, ErrAllFailed) {
 		t.Fatalf("err = %v, want ErrAllFailed", err)
 	}

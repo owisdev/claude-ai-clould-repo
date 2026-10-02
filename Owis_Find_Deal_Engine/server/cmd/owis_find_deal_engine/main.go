@@ -15,6 +15,7 @@ import (
 
 	"owis_find_deal_engine/internal/api"
 	"owis_find_deal_engine/internal/auth"
+	"owis_find_deal_engine/internal/cache"
 	"owis_find_deal_engine/internal/config"
 	"owis_find_deal_engine/internal/markets"
 	"owis_find_deal_engine/internal/providers/searxng"
@@ -83,13 +84,16 @@ func run() error {
 		return err
 	}
 
-	// Usage counters: Redis when configured (shared by all instances),
-	// otherwise in memory (single instance only).
+	// Redis (when configured) holds usage counters and the search cache so
+	// several instances share them; otherwise both live in memory.
 	plans, err := usage.ParsePlans(cfg.Plans, cfg.DefaultPlan)
 	if err != nil {
 		return err
 	}
-	var store usage.Store
+	var (
+		usageStore usage.Store
+		cacheStore cache.Store
+	)
 	if cfg.RedisURL != "" {
 		opts, err := redis.ParseURL(cfg.RedisURL)
 		if err != nil {
@@ -103,22 +107,40 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("redis: %w", err)
 		}
-		store = usage.NewRedisStore(rdb)
-		log.Info("usage counters in redis")
+		usageStore = usage.NewRedisStore(rdb)
+		cacheStore = cache.NewRedisStore(rdb)
+		log.Info("usage counters and search cache in redis")
 	} else {
 		mem := usage.NewMemoryStore()
 		go mem.Cleanup(ctx, 10*time.Minute)
-		store = mem
-		log.Warn("REDIS_URL not set: usage counters in memory, reset on restart")
+		usageStore = mem
+		cacheStore = cache.NewMemoryStore(cfg.CacheMaxEntries)
+		log.Warn("REDIS_URL not set: usage counters and search cache in memory, reset on restart")
+	}
+
+	var apiSearcher api.Searcher = searcher
+	var searchCache *cache.Cache
+	if cfg.CacheEnabled {
+		searchCache = cache.New(searcher, cacheStore, catalog, cache.Options{
+			FreshTTL:             cfg.CacheFreshTTL,
+			PartialTTL:           cfg.CachePartialTTL,
+			EmptyTTL:             cfg.CacheEmptyTTL,
+			StaleTTL:             cfg.CacheStaleTTL,
+			MinRefresh:           cfg.CacheMinRefresh,
+			FetchTimeout:         cfg.SearchTimeout + 5*time.Second,
+			MaxBackgroundRefresh: cfg.CacheMaxBackgroundRefresh,
+		}, log)
+		apiSearcher = searchCache
+		log.Info("search cache enabled", "fresh", cfg.CacheFreshTTL.String(), "stale", cfg.CacheStaleTTL.String())
 	}
 
 	srv := &http.Server{
 		Addr: net.JoinHostPort("", cfg.Port),
 		Handler: api.NewRouter(api.Deps{
 			Catalog:     catalog,
-			Searcher:    searcher,
+			Searcher:    apiSearcher,
 			Verifier:    verifier,
-			Quota:       usage.NewQuota(store, plans),
+			Quota:       usage.NewQuota(usageStore, plans),
 			Limiter:     limiter,
 			CORSOrigins: cfg.CORSOrigins,
 			Log:         log,
@@ -150,6 +172,14 @@ func run() error {
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
+	}
+	if searchCache != nil {
+		// Let running background refreshes finish (they write to the cache).
+		if err := searchCache.Close(shutdownCtx); err != nil {
+			log.Warn("cache refreshes still running at shutdown", "err", err)
+		}
+		hits, stale, misses := searchCache.Stats()
+		log.Info("search cache stats", "hits", hits, "stale", stale, "misses", misses)
 	}
 	log.Info("server stopped cleanly")
 	return nil

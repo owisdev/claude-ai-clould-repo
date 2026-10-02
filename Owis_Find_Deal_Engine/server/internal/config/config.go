@@ -32,6 +32,16 @@ type Config struct {
 	DefaultPlan string
 	RedisURL    string // empty: in-memory counters (single instance only)
 
+	// Search cache (stale-while-revalidate).
+	CacheEnabled              bool
+	CacheFreshTTL             time.Duration
+	CachePartialTTL           time.Duration
+	CacheEmptyTTL             time.Duration
+	CacheStaleTTL             time.Duration
+	CacheMinRefresh           time.Duration
+	CacheMaxEntries           int
+	CacheMaxBackgroundRefresh int
+
 	SearchCombined  bool // one provider call per search instead of one per market
 	MarketsFile     string
 	CORSOrigins     []string
@@ -48,29 +58,37 @@ type Config struct {
 func Load() (Config, error) {
 	var errs []error
 	cfg := Config{
-		Port:                   env("PORT", "3002"),
-		AuthJWKSURL:            os.Getenv("AUTH_JWKS_URL"),
-		AuthIssuer:             os.Getenv("AUTH_ISSUER"),
-		AuthAudience:           os.Getenv("AUTH_AUDIENCE"),
-		AuthPlanClaim:          env("AUTH_PLAN_CLAIM", "plan"),
-		Plans:                  env("PLANS", "free:20,pro:500"),
-		DefaultPlan:            env("DEFAULT_PLAN", "free"),
-		RedisURL:               os.Getenv("REDIS_URL"),
-		SearchProviders:        splitList(env("SEARCH_PROVIDERS", "searxng,serpapi")),
-		SearXNGURL:             os.Getenv("SEARXNG_URL"),
-		SerpAPIKey:             os.Getenv("SERPAPI_KEY"),
-		ProviderAttemptTimeout: parse(&errs, "PROVIDER_ATTEMPT_TIMEOUT", 8*time.Second, time.ParseDuration),
-		ProviderFailThreshold:  parse(&errs, "PROVIDER_FAILURE_THRESHOLD", 3, strconv.Atoi),
-		ProviderCooldown:       parse(&errs, "PROVIDER_COOLDOWN", time.Minute, time.ParseDuration),
-		MarketsFile:            os.Getenv("MARKETS_FILE"),
-		CORSOrigins:            splitList(os.Getenv("CORS_ALLOWED_ORIGINS")),
-		LogLevel:               env("LOG_LEVEL", "info"),
-		SearchCombined:         parse(&errs, "SEARCH_COMBINED", true, strconv.ParseBool),
-		RateLimitRPS:           parse(&errs, "RATE_LIMIT_RPS", 1.0, func(s string) (float64, error) { return strconv.ParseFloat(s, 64) }),
-		RateLimitBurst:         parse(&errs, "RATE_LIMIT_BURST", 5, strconv.Atoi),
-		MaxConcurrency:         parse(&errs, "SEARCH_MAX_CONCURRENCY", 4, strconv.Atoi),
-		SearchTimeout:          parse(&errs, "SEARCH_TIMEOUT", 15*time.Second, time.ParseDuration),
-		ShutdownTimeout:        parse(&errs, "SHUTDOWN_TIMEOUT", 10*time.Second, time.ParseDuration),
+		Port:                      env("PORT", "3002"),
+		AuthJWKSURL:               os.Getenv("AUTH_JWKS_URL"),
+		AuthIssuer:                os.Getenv("AUTH_ISSUER"),
+		AuthAudience:              os.Getenv("AUTH_AUDIENCE"),
+		AuthPlanClaim:             env("AUTH_PLAN_CLAIM", "plan"),
+		Plans:                     env("PLANS", "free:20,pro:500"),
+		DefaultPlan:               env("DEFAULT_PLAN", "free"),
+		RedisURL:                  os.Getenv("REDIS_URL"),
+		SearchProviders:           splitList(env("SEARCH_PROVIDERS", "searxng,serpapi")),
+		SearXNGURL:                os.Getenv("SEARXNG_URL"),
+		SerpAPIKey:                os.Getenv("SERPAPI_KEY"),
+		ProviderAttemptTimeout:    parse(&errs, "PROVIDER_ATTEMPT_TIMEOUT", 8*time.Second, time.ParseDuration),
+		ProviderFailThreshold:     parse(&errs, "PROVIDER_FAILURE_THRESHOLD", 3, strconv.Atoi),
+		ProviderCooldown:          parse(&errs, "PROVIDER_COOLDOWN", time.Minute, time.ParseDuration),
+		CacheEnabled:              parse(&errs, "CACHE_ENABLED", true, strconv.ParseBool),
+		CacheFreshTTL:             parse(&errs, "CACHE_FRESH_TTL", 2*time.Hour, time.ParseDuration),
+		CachePartialTTL:           parse(&errs, "CACHE_PARTIAL_TTL", 10*time.Minute, time.ParseDuration),
+		CacheEmptyTTL:             parse(&errs, "CACHE_EMPTY_TTL", 30*time.Minute, time.ParseDuration),
+		CacheStaleTTL:             parse(&errs, "CACHE_STALE_TTL", 24*time.Hour, time.ParseDuration),
+		CacheMinRefresh:           parse(&errs, "CACHE_MIN_REFRESH", 10*time.Minute, time.ParseDuration),
+		CacheMaxEntries:           parse(&errs, "CACHE_MAX_ENTRIES", 10000, strconv.Atoi),
+		CacheMaxBackgroundRefresh: parse(&errs, "CACHE_MAX_BACKGROUND_REFRESH", 4, strconv.Atoi),
+		MarketsFile:               os.Getenv("MARKETS_FILE"),
+		CORSOrigins:               splitList(os.Getenv("CORS_ALLOWED_ORIGINS")),
+		LogLevel:                  env("LOG_LEVEL", "info"),
+		SearchCombined:            parse(&errs, "SEARCH_COMBINED", true, strconv.ParseBool),
+		RateLimitRPS:              parse(&errs, "RATE_LIMIT_RPS", 1.0, func(s string) (float64, error) { return strconv.ParseFloat(s, 64) }),
+		RateLimitBurst:            parse(&errs, "RATE_LIMIT_BURST", 5, strconv.Atoi),
+		MaxConcurrency:            parse(&errs, "SEARCH_MAX_CONCURRENCY", 4, strconv.Atoi),
+		SearchTimeout:             parse(&errs, "SEARCH_TIMEOUT", 15*time.Second, time.ParseDuration),
+		ShutdownTimeout:           parse(&errs, "SHUTDOWN_TIMEOUT", 10*time.Second, time.ParseDuration),
 	}
 
 	if cfg.AuthJWKSURL == "" || cfg.AuthIssuer == "" || cfg.AuthAudience == "" {
@@ -95,6 +113,16 @@ func Load() (Config, error) {
 	}
 	if cfg.RateLimitRPS <= 0 || cfg.RateLimitBurst <= 0 || cfg.MaxConcurrency <= 0 || cfg.ProviderFailThreshold <= 0 {
 		errs = append(errs, errors.New("RATE_LIMIT_RPS, RATE_LIMIT_BURST, SEARCH_MAX_CONCURRENCY and PROVIDER_FAILURE_THRESHOLD must be positive"))
+	}
+	if cfg.CacheEnabled {
+		if cfg.CacheFreshTTL <= 0 || cfg.CachePartialTTL <= 0 || cfg.CacheEmptyTTL <= 0 || cfg.CacheStaleTTL <= 0 {
+			errs = append(errs, errors.New("CACHE_*_TTL must be positive"))
+		} else if cfg.CacheFreshTTL > cfg.CacheStaleTTL {
+			errs = append(errs, errors.New("CACHE_FRESH_TTL must not be longer than CACHE_STALE_TTL"))
+		}
+		if cfg.CacheMaxEntries <= 0 || cfg.CacheMaxBackgroundRefresh <= 0 {
+			errs = append(errs, errors.New("CACHE_MAX_ENTRIES and CACHE_MAX_BACKGROUND_REFRESH must be positive"))
+		}
 	}
 	return cfg, errors.Join(errs...)
 }

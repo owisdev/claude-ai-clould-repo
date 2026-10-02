@@ -46,6 +46,28 @@ Each provider gets `PROVIDER_ATTEMPT_TIMEOUT`; after
 `PROVIDER_COOLDOWN` (circuit breaker), so a broken SearXNG adds no delay.
 Every result carries `"provider"` so you can see who answered.
 
+## Cache and price freshness
+
+Searches are cached per country + normalized title (case and spacing do
+not matter), in Redis when `REDIS_URL` is set:
+
+| Age of the cached answer | What happens | `X-Cache` |
+|---|---|---|
+| < `CACHE_FRESH_TTL` (2h) | served from cache | `HIT` |
+| up to `CACHE_STALE_TTL` (24h) | served instantly, refreshed in the background for the next user | `STALE` |
+| older / not cached | fetched live | `MISS` |
+
+- Results with a failed shop are fresh only 10 min, empty results 30 min.
+- `"refresh": true` in the request forces a live fetch (pull to refresh),
+  at most once per `CACHE_MIN_REFRESH` (10 min) per query.
+- If a live fetch fails but an older answer exists, the older answer is
+  returned (`stale: true`) instead of an error.
+- Identical searches arriving together make one upstream call.
+- Editing `markets.json` changes the cache keys, so old answers are not
+  served for a changed shop list.
+- Responses carry `fetched_at`, `cached`, `stale`: show "prices updated 3h
+  ago" in the app. The shop's page always has the live price.
+
 All settings are environment variables; see [`.env.example`](.env.example).
 
 ## API
@@ -57,6 +79,8 @@ curl localhost:3002/api/v1/countries              # public
 curl -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
      -d '{"title":"samsung s pen","country":"jor"}' \
      localhost:3002/api/v1/search
+
+# pull to refresh: add "refresh": true
 ```
 
 Search response:
@@ -70,7 +94,10 @@ Search response:
      "price": 29.99, "currency": "$", "position": 1, "provider": "serpapi"}
   ],
   "markets": {"amazon": "ok", "aliexpress": "ok", "temu": "ok", "shein": "error"},
-  "took_ms": 812
+  "took_ms": 812,
+  "fetched_at": "2026-10-02T12:00:00Z",
+  "cached": false,
+  "stale": false
 }
 ```
 
@@ -107,6 +134,7 @@ internal/config             environment variables
 internal/markets            countries -> marketplaces catalog
 internal/search             search service: worker pool, merge, ordering
 internal/search/fallback.go provider chain + circuit breaker
+internal/cache              stale-while-revalidate cache (Redis / LRU)
 internal/providers/searxng  SearXNG provider (free)
 internal/providers/serpapi  SerpApi Google provider (paid fallback)
 internal/auth               JWT verification + JWKS key cache

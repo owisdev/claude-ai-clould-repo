@@ -65,6 +65,14 @@ const (
 	StatusError = "error"
 )
 
+// Request is one search as asked by a client.
+type Request struct {
+	Title   string
+	Country string
+	// Refresh asks for live results instead of cached ones (pull to refresh).
+	Refresh bool
+}
+
 // Result is the merged search response.
 type Result struct {
 	Query   string            `json:"query"`
@@ -72,6 +80,28 @@ type Result struct {
 	Results []Product         `json:"results"`
 	Markets map[string]string `json:"markets"`
 	TookMS  int64             `json:"took_ms"`
+	// FetchedAt is when the results were fetched from the providers; for
+	// cached answers it tells the user how old the prices are.
+	FetchedAt time.Time `json:"fetched_at"`
+	Cached    bool      `json:"cached"`
+	// Stale is set when a cached answer is past its fresh period; a
+	// background refresh has been started.
+	Stale bool `json:"stale"`
+}
+
+// Partial reports whether at least one marketplace failed.
+func (r *Result) Partial() bool {
+	for _, status := range r.Markets {
+		if status != StatusOK {
+			return true
+		}
+	}
+	return false
+}
+
+// NormalizeTitle trims and collapses whitespace.
+func NormalizeTitle(title string) string {
+	return strings.Join(strings.Fields(title), " ")
 }
 
 // Options tunes the service.
@@ -115,14 +145,14 @@ type outcome struct {
 // Search validates the input, searches every marketplace of the country with
 // a bounded worker pool and merges the results. A failing marketplace is
 // reported in Result.Markets; only when all fail is ErrAllFailed returned.
-func (s *Service) Search(ctx context.Context, title, countryCode string) (*Result, error) {
+func (s *Service) Search(ctx context.Context, req Request) (*Result, error) {
 	start := time.Now()
 
-	title = strings.Join(strings.Fields(title), " ")
+	title := NormalizeTitle(req.Title)
 	if n := len([]rune(title)); n < MinTitleLen || n > MaxTitleLen {
 		return nil, fmt.Errorf("%w: must be %d-%d characters", ErrInvalidTitle, MinTitleLen, MaxTitleLen)
 	}
-	country, ok := s.catalog.Country(countryCode)
+	country, ok := s.catalog.Country(req.Country)
 	if !ok {
 		return nil, ErrUnknownCountry
 	}
@@ -154,6 +184,7 @@ func (s *Service) Search(ctx context.Context, title, countryCode string) (*Resul
 
 	sortProducts(result.Results, country.Targets)
 	result.TookMS = time.Since(start).Milliseconds()
+	result.FetchedAt = time.Now().UTC()
 
 	for _, status := range result.Markets {
 		if status == StatusOK {

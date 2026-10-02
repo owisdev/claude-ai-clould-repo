@@ -27,12 +27,12 @@ type fakeSearcher struct {
 	err error
 }
 
-func (f fakeSearcher) Search(_ context.Context, title, country string) (*search.Result, error) {
+func (f fakeSearcher) Search(_ context.Context, req search.Request) (*search.Result, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
 	r := *f.res
-	r.Query, r.Country = title, country
+	r.Query, r.Country = req.Title, req.Country
 	return &r, nil
 }
 
@@ -293,7 +293,7 @@ func TestQuotaStoreDownFailsClosed(t *testing.T) {
 
 type panicSearcher struct{}
 
-func (panicSearcher) Search(context.Context, string, string) (*search.Result, error) { panic("boom") }
+func (panicSearcher) Search(context.Context, search.Request) (*search.Result, error) { panic("boom") }
 
 func TestPanicRecovered(t *testing.T) {
 	e := newEnv(t, envOpts{searcher: panicSearcher{}})
