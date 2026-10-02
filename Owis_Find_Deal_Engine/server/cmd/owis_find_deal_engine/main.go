@@ -18,6 +18,7 @@ import (
 	"owis_find_deal_engine/internal/cache"
 	"owis_find_deal_engine/internal/config"
 	"owis_find_deal_engine/internal/markets"
+	"owis_find_deal_engine/internal/metering"
 	"owis_find_deal_engine/internal/providers/searxng"
 	"owis_find_deal_engine/internal/providers/serpapi"
 	"owis_find_deal_engine/internal/ratelimit"
@@ -118,7 +119,7 @@ func run() error {
 		log.Warn("REDIS_URL not set: usage counters and search cache in memory, reset on restart")
 	}
 
-	apiSearcher := api.WithoutCache(searcher)
+	cacheOrLive := metering.WithoutCache(searcher)
 	var searchCache *cache.Cache
 	if cfg.CacheEnabled {
 		searchCache = cache.New(searcher, cacheStore, catalog, cache.Options{
@@ -130,7 +131,7 @@ func run() error {
 			FetchTimeout:         cfg.SearchTimeout + 5*time.Second,
 			MaxBackgroundRefresh: cfg.CacheMaxBackgroundRefresh,
 		}, log)
-		apiSearcher = searchCache
+		cacheOrLive = searchCache
 		log.Info("search cache enabled", "fresh", cfg.CacheFreshTTL.String(), "stale", cfg.CacheStaleTTL.String())
 	}
 
@@ -138,9 +139,8 @@ func run() error {
 		Addr: net.JoinHostPort("", cfg.Port),
 		Handler: api.NewRouter(api.Deps{
 			Catalog:     catalog,
-			Searcher:    apiSearcher,
+			Searcher:    metering.New(cacheOrLive, usage.NewQuota(usageStore, plans), log),
 			Verifier:    verifier,
-			Quota:       usage.NewQuota(usageStore, plans),
 			Limiter:     limiter,
 			CORSOrigins: cfg.CORSOrigins,
 			Log:         log,

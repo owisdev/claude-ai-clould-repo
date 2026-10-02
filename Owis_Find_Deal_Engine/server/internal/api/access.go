@@ -11,19 +11,11 @@ import (
 
 	"owis_find_deal_engine/internal/auth"
 	"owis_find_deal_engine/internal/ratelimit"
-	"owis_find_deal_engine/internal/usage"
 )
 
 // TokenVerifier checks a bearer token and returns its user.
 type TokenVerifier interface {
 	Verify(ctx context.Context, token string) (auth.User, error)
-}
-
-// QuotaTaker consumes, refunds and reports per-user quota.
-type QuotaTaker interface {
-	Take(ctx context.Context, userID, plan string) (usage.Decision, error)
-	Refund(ctx context.Context, d usage.Decision) error
-	Status(ctx context.Context, userID, plan string) (usage.Decision, error)
 }
 
 // requireUser accepts only requests with a valid "Authorization: Bearer <JWT>".

@@ -17,6 +17,7 @@ import (
 	"owis_find_deal_engine/internal/auth"
 	"owis_find_deal_engine/internal/auth/authtest"
 	"owis_find_deal_engine/internal/markets"
+	"owis_find_deal_engine/internal/metering"
 	"owis_find_deal_engine/internal/ratelimit"
 	"owis_find_deal_engine/internal/search"
 	"owis_find_deal_engine/internal/usage"
@@ -57,10 +58,10 @@ type testEnv struct {
 }
 
 type envOpts struct {
-	searcher Searcher
+	searcher metering.Searcher
 	burst    int
 	plans    string
-	quota    QuotaTaker
+	quota    metering.Quota
 }
 
 func newEnv(t *testing.T, o envOpts) *testEnv {
@@ -102,9 +103,8 @@ func newEnv(t *testing.T, o envOpts) *testEnv {
 	return &testEnv{
 		handler: NewRouter(Deps{
 			Catalog:     cat,
-			Searcher:    o.searcher,
+			Searcher:    metering.New(o.searcher, o.quota, log),
 			Verifier:    verifier,
-			Quota:       o.quota,
 			Limiter:     ratelimit.New(0.001, o.burst, time.Minute),
 			CORSOrigins: []string{"https://app.example"},
 			Log:         log,
@@ -200,7 +200,7 @@ func TestSearchOK(t *testing.T) {
 func TestSearchErrors(t *testing.T) {
 	tests := []struct {
 		name     string
-		searcher Searcher
+		searcher metering.Searcher
 		body     string
 		status   int
 		code     string
@@ -220,11 +220,16 @@ func TestSearchErrors(t *testing.T) {
 			if rec.Code != tt.status || errorCode(t, rec) != tt.code {
 				t.Errorf("status = %d body = %s, want %d %s", rec.Code, rec.Body, tt.status, tt.code)
 			}
-			// Failed searches are not counted: a following valid search
-			// sees the full allowance minus itself.
+			// Failed searches are not counted. The next valid search either
+			// succeeds (99 left: only itself counted) or fails the same way
+			// and is refunded too (100 left).
+			want := "99"
+			if f, ok := tt.searcher.(fakeSearcher); ok && f.err != nil {
+				want = "100"
+			}
 			rec = e.do(http.MethodPost, "/api/v1/search", tok, searchBody)
-			if got := rec.Header().Get("X-RateLimit-Remaining"); got != "99" {
-				t.Errorf("remaining after refund = %s, want 99", got)
+			if got := rec.Header().Get("X-RateLimit-Remaining"); got != want {
+				t.Errorf("remaining after refund = %s, want %s", got, want)
 			}
 		})
 	}

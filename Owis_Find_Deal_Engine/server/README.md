@@ -139,6 +139,7 @@ internal/markets            countries -> marketplaces catalog
 internal/search             search service: worker pool, merge, ordering
 internal/search/fallback.go provider chain + circuit breaker
 internal/cache              stale-while-revalidate cache (Redis / LRU)
+internal/metering           what a search costs: cached free, live counted
 internal/providers/searxng  SearXNG provider (free)
 internal/providers/serpapi  SerpApi Google provider (paid fallback)
 internal/auth               JWT verification + JWKS key cache

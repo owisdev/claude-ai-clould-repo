@@ -12,9 +12,8 @@ import (
 // Deps are the router's dependencies.
 type Deps struct {
 	Catalog     *markets.Catalog
-	Searcher    Searcher
+	Searcher    MeteredSearcher
 	Verifier    TokenVerifier
-	Quota       QuotaTaker
 	Limiter     *ratelimit.Limiter
 	CORSOrigins []string
 	Log         *slog.Logger
@@ -24,10 +23,10 @@ type Deps struct {
 //
 //	GET  /api/v1/health     public
 //	GET  /api/v1/countries  public
-//	POST /api/v1/search     user JWT -> burst rate limit -> cache (free)
-//	                        or daily quota -> live search
+//	POST /api/v1/search     user JWT -> burst rate limit -> metered search
+//	                        (cached answers free, live searches counted)
 func NewRouter(d Deps) http.Handler {
-	h := &handlers{catalog: d.Catalog, searcher: d.Searcher, quota: d.Quota, log: d.Log}
+	h := &handlers{catalog: d.Catalog, searcher: d.Searcher}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", h.health)

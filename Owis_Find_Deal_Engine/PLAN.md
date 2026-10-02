@@ -149,6 +149,30 @@ Later (phase 2+):
   TTL since their prices are exact.
 - **Purchase reports** feed back real paid prices per shop.
 
+## 4c. Background jobs and queues (phase 2)
+
+The search request itself stays **synchronous**: the user waits for
+results, and its robustness comes from the fallback chain, circuit
+breaker, cache (stale-if-error) and request merging, not from a queue.
+
+A queue becomes useful for work that does not need to answer the user
+immediately:
+
+| Job | Trigger |
+|---|---|
+| saved-item price tracker | schedule (every 6–12 h) |
+| price-drop / "did you buy it?" notifications | tracker, link clicks |
+| pre-warming popular searches | schedule |
+| analytics events (searches, clicks, purchases) | every request |
+
+Choice: start with a **Redis-backed job queue** (e.g. `asynq`, or Redis
+Streams) because Redis is already deployed: retries with backoff,
+scheduled jobs, dead-letter queue, at no extra cost. Jobs go through a
+small Go interface, so moving to NATS JetStream or Kafka later is a
+swap of one adapter. Kafka is worth it only at high event volume (many
+services consuming the same event stream); for this service it would
+add a cluster to run and pay for without a matching benefit today.
+
 ## 5. Users and features (after the service is finished)
 
 ### 5.1 Saved cart
@@ -218,6 +242,7 @@ Owis_Find_Deal_Engine/
 │       ├── markets/                 # countries -> marketplaces (markets.json)
 │       ├── search/                  # worker pool, merge, fallback chain
 │       ├── cache/                   # stale-while-revalidate search cache
+│       ├── metering/                # cached answers free, live searches counted
 │       ├── providers/               # searxng, serpapi (+ ebay, aliexpress later)
 │       ├── auth/                    # JWT verification, JWKS cache
 │       ├── usage/                   # plans, daily quotas (Redis / memory)
@@ -261,7 +286,8 @@ and is pushed.
 8. Plans in the database + payment webhook.
 9. Saved cart + saved-item price tracker (section 4b).
 10. Clicks + purchase reports.
-11. Notifications: inbox, devices, FCM push, purchase-prompt background job.
+11. Notifications: inbox, devices, FCM push, purchase-prompt background job
+    (Redis job queue, section 4c).
 
 **Phase 3 — more sources and reach**
 12. eBay provider (usa, ksa) — when keys are approved.
