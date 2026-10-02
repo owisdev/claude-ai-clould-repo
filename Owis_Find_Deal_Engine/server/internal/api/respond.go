@@ -17,6 +17,9 @@ const (
 	CodeUnsupportedCountry = "unsupported_country"
 	CodeUnauthorized       = "unauthorized"
 	CodeRateLimited        = "rate_limited"
+	CodeQuotaExceeded      = "quota_exceeded"
+	CodePaymentRequired    = "payment_required"
+	CodeUnavailable        = "service_unavailable"
 	CodeUpstream           = "upstream_error"
 	CodeInternal           = "internal_error"
 )

@@ -5,15 +5,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"log/slog"
-	"math"
 	"net/http"
 	"runtime/debug"
-	"strconv"
-	"strings"
 	"time"
-
-	"owis_find_deal_engine/internal/auth"
-	"owis_find_deal_engine/internal/ratelimit"
 )
 
 // Middleware wraps a handler.
@@ -64,7 +58,7 @@ func requestIDFrom(ctx context.Context) string {
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
-	client string // set by requireAPIKey so the outer logger can report it
+	user   string // set by requireUser so the outer logger can report it
 }
 
 func (s *statusRecorder) WriteHeader(code int) {
@@ -87,8 +81,8 @@ func logRequests(log *slog.Logger) Middleware {
 				"duration_ms", time.Since(start).Milliseconds(),
 				"request_id", requestIDFrom(r.Context()),
 			}
-			if rec.client != "" {
-				attrs = append(attrs, "client", rec.client)
+			if rec.user != "" {
+				attrs = append(attrs, "user", rec.user)
 			}
 			log.InfoContext(r.Context(), "request", attrs...)
 		})
@@ -134,45 +128,11 @@ func cors(origins []string) Middleware {
 				h.Add("Vary", "Origin")
 				if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
 					h.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-					h.Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization, X-Request-ID")
+					h.Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
 					h.Set("Access-Control-Max-Age", "600")
 					w.WriteHeader(http.StatusNoContent)
 					return
 				}
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
-// requireAPIKey rejects requests without a valid X-API-Key.
-func requireAPIKey(keys *auth.KeyStore) Middleware {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			key := strings.TrimSpace(r.Header.Get("X-API-Key"))
-			client, ok := keys.Lookup(key)
-			if !ok {
-				writeError(w, http.StatusUnauthorized, CodeUnauthorized, "missing or invalid API key")
-				return
-			}
-			if rec, ok := w.(*statusRecorder); ok {
-				rec.client = client.Name
-			}
-			next.ServeHTTP(w, r.WithContext(auth.WithClient(r.Context(), client)))
-		})
-	}
-}
-
-// rateLimit limits requests per API client. Must run after requireAPIKey.
-func rateLimit(l *ratelimit.Limiter) Middleware {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			client, _ := auth.ClientFrom(r.Context())
-			if ok, wait := l.Allow("client:" + client.Name); !ok {
-				secs := int(math.Ceil(wait.Seconds()))
-				w.Header().Set("Retry-After", strconv.Itoa(max(secs, 1)))
-				writeError(w, http.StatusTooManyRequests, CodeRateLimited, "too many requests")
-				return
 			}
 			next.ServeHTTP(w, r)
 		})

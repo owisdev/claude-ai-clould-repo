@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -11,10 +12,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
+
 	"owis_find_deal_engine/internal/auth"
+	"owis_find_deal_engine/internal/auth/authtest"
 	"owis_find_deal_engine/internal/markets"
 	"owis_find_deal_engine/internal/ratelimit"
 	"owis_find_deal_engine/internal/search"
+	"owis_find_deal_engine/internal/usage"
 )
 
 type fakeSearcher struct {
@@ -31,42 +36,89 @@ func (f fakeSearcher) Search(_ context.Context, title, country string) (*search.
 	return &r, nil
 }
 
-func newTestRouter(t *testing.T, s Searcher, burst int) (http.Handler, string) {
+var okSearcher = fakeSearcher{res: &search.Result{
+	Results: []search.Product{{Market: "amazon", Title: "S Pen", Link: "https://amazon.com/x", Position: 1}},
+	Markets: map[string]string{"amazon": "ok"},
+}}
+
+type testEnv struct {
+	handler  http.Handler
+	provider *authtest.Provider
+	store    *usage.MemoryStore
+}
+
+type envOpts struct {
+	searcher Searcher
+	burst    int
+	plans    string
+	quota    QuotaTaker
+}
+
+func newEnv(t *testing.T, o envOpts) *testEnv {
 	t.Helper()
-	key, hash, err := auth.GenerateKey()
+	if o.searcher == nil {
+		o.searcher = okSearcher
+	}
+	if o.burst == 0 {
+		o.burst = 100
+	}
+	if o.plans == "" {
+		o.plans = "free:100,pro:1000"
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	p := authtest.New(t)
+	jwks := auth.NewJWKS(p.URL(), log)
+	if err := jwks.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	verifier, err := auth.NewVerifier(jwks, auth.VerifierConfig{
+		Issuer: authtest.Issuer, Audience: authtest.Audience, PlanClaim: "plan",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	keys, err := auth.ParseKeyStore("test:" + hash)
+	plans, err := usage.ParsePlans(o.plans, "free")
 	if err != nil {
 		t.Fatal(err)
+	}
+	store := usage.NewMemoryStore()
+	if o.quota == nil {
+		o.quota = usage.NewQuota(store, plans)
 	}
 	cat, err := markets.Load("")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return NewRouter(Deps{
-		Catalog:     cat,
-		Searcher:    s,
-		Keys:        keys,
-		Limiter:     ratelimit.New(0.001, burst, time.Minute),
-		CORSOrigins: []string{"https://app.example"},
-		Log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
-	}), key
+	return &testEnv{
+		handler: NewRouter(Deps{
+			Catalog:     cat,
+			Searcher:    o.searcher,
+			Verifier:    verifier,
+			Quota:       o.quota,
+			Limiter:     ratelimit.New(0.001, o.burst, time.Minute),
+			CORSOrigins: []string{"https://app.example"},
+			Log:         log,
+		}),
+		provider: p,
+		store:    store,
+	}
 }
 
-func do(h http.Handler, method, path, key, body string) *httptest.ResponseRecorder {
+func (e *testEnv) do(method, path, token, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
-	if key != "" {
-		req.Header.Set("X-API-Key", key)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	e.handler.ServeHTTP(rec, req)
 	return rec
 }
+
+const searchBody = `{"title":"s pen","country":"jor"}`
 
 func errorCode(t *testing.T, rec *httptest.ResponseRecorder) string {
 	t.Helper()
@@ -77,38 +129,15 @@ func errorCode(t *testing.T, rec *httptest.ResponseRecorder) string {
 	return body.Error.Code
 }
 
-var okSearcher = fakeSearcher{res: &search.Result{
-	Results: []search.Product{{Market: "amazon", Title: "S Pen", Link: "https://amazon.com/x", Position: 1}},
-	Markets: map[string]string{"amazon": "ok"},
-}}
+func TestPublicEndpoints(t *testing.T) {
+	e := newEnv(t, envOpts{})
 
-func TestHealthIsPublic(t *testing.T) {
-	h, _ := newTestRouter(t, okSearcher, 5)
-	rec := do(h, http.MethodGet, "/api/v1/health", "", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d", rec.Code)
+	rec := e.do(http.MethodGet, "/api/v1/health", "", "")
+	if rec.Code != http.StatusOK || rec.Header().Get("X-Request-ID") == "" {
+		t.Errorf("health: status = %d", rec.Code)
 	}
-	if rec.Header().Get("X-Request-ID") == "" {
-		t.Error("missing X-Request-ID")
-	}
-}
 
-func TestAPIKeyRequired(t *testing.T) {
-	h, _ := newTestRouter(t, okSearcher, 5)
-	for _, key := range []string{"", "ofde_wrong"} {
-		rec := do(h, http.MethodPost, "/api/v1/search", key, `{"title":"s pen","country":"jor"}`)
-		if rec.Code != http.StatusUnauthorized || errorCode(t, rec) != CodeUnauthorized {
-			t.Errorf("key %q: status = %d body = %s", key, rec.Code, rec.Body)
-		}
-	}
-}
-
-func TestCountries(t *testing.T) {
-	h, key := newTestRouter(t, okSearcher, 5)
-	rec := do(h, http.MethodGet, "/api/v1/countries", key, "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d", rec.Code)
-	}
+	rec = e.do(http.MethodGet, "/api/v1/countries", "", "")
 	var body struct {
 		Countries []struct {
 			Code    string `json:"code"`
@@ -121,13 +150,28 @@ func TestCountries(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(body.Countries) != 3 || body.Countries[0].Code != "jor" || len(body.Countries[0].Markets) != 4 {
-		t.Errorf("unexpected countries: %s", rec.Body)
+		t.Errorf("countries: %s", rec.Body)
+	}
+}
+
+func TestSearchRequiresValidToken(t *testing.T) {
+	e := newEnv(t, envOpts{})
+	expired := e.provider.Token(t, "u1", jwt.MapClaims{"exp": time.Now().Add(-time.Hour).Unix()})
+
+	for name, tok := range map[string]string{"none": "", "garbage": "abc", "expired": expired} {
+		rec := e.do(http.MethodPost, "/api/v1/search", tok, searchBody)
+		if rec.Code != http.StatusUnauthorized || errorCode(t, rec) != CodeUnauthorized {
+			t.Errorf("%s: status = %d body = %s", name, rec.Code, rec.Body)
+		}
+		if rec.Header().Get("WWW-Authenticate") == "" {
+			t.Errorf("%s: missing WWW-Authenticate", name)
+		}
 	}
 }
 
 func TestSearchOK(t *testing.T) {
-	h, key := newTestRouter(t, okSearcher, 5)
-	rec := do(h, http.MethodPost, "/api/v1/search", key, `{"title":"s pen","country":"jor"}`)
+	e := newEnv(t, envOpts{})
+	rec := e.do(http.MethodPost, "/api/v1/search", e.provider.Token(t, "u1", nil), searchBody)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body)
 	}
@@ -137,6 +181,10 @@ func TestSearchOK(t *testing.T) {
 	}
 	if res.Country != "jor" || len(res.Results) != 1 {
 		t.Errorf("unexpected result: %+v", res)
+	}
+	h := rec.Header()
+	if h.Get("X-Plan") != "free" || h.Get("X-RateLimit-Limit") != "100" || h.Get("X-RateLimit-Remaining") != "99" {
+		t.Errorf("quota headers = %v", h)
 	}
 }
 
@@ -151,41 +199,94 @@ func TestSearchErrors(t *testing.T) {
 		{"bad json", okSearcher, `{`, 400, CodeInvalidRequest},
 		{"unknown field", okSearcher, `{"title":"x","foo":1}`, 400, CodeInvalidRequest},
 		{"empty body", okSearcher, ``, 400, CodeInvalidRequest},
-		{"bad title", fakeSearcher{err: search.ErrInvalidTitle}, `{"title":"x","country":"jor"}`, 400, CodeInvalidRequest},
-		{"bad country", fakeSearcher{err: search.ErrUnknownCountry}, `{"title":"xx","country":"fra"}`, 400, CodeUnsupportedCountry},
-		{"upstream", fakeSearcher{err: search.ErrAllFailed}, `{"title":"xx","country":"jor"}`, 502, CodeUpstream},
+		{"bad title", fakeSearcher{err: search.ErrInvalidTitle}, searchBody, 400, CodeInvalidRequest},
+		{"bad country", fakeSearcher{err: search.ErrUnknownCountry}, searchBody, 400, CodeUnsupportedCountry},
+		{"upstream", fakeSearcher{err: search.ErrAllFailed}, searchBody, 502, CodeUpstream},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h, key := newTestRouter(t, tt.searcher, 5)
-			rec := do(h, http.MethodPost, "/api/v1/search", key, tt.body)
+			e := newEnv(t, envOpts{searcher: tt.searcher})
+			tok := e.provider.Token(t, "u1", nil)
+			rec := e.do(http.MethodPost, "/api/v1/search", tok, tt.body)
 			if rec.Code != tt.status || errorCode(t, rec) != tt.code {
 				t.Errorf("status = %d body = %s, want %d %s", rec.Code, rec.Body, tt.status, tt.code)
+			}
+			// Failed searches are refunded: the next one still sees 99 left.
+			rec = e.do(http.MethodPost, "/api/v1/search", tok, tt.body)
+			if got := rec.Header().Get("X-RateLimit-Remaining"); got != "99" {
+				t.Errorf("remaining after refund = %s, want 99", got)
 			}
 		})
 	}
 }
 
-func TestRateLimit(t *testing.T) {
-	h, key := newTestRouter(t, okSearcher, 2)
+func TestFreePlanQuotaReturns402(t *testing.T) {
+	e := newEnv(t, envOpts{plans: "free:2,pro:3"})
+	tok := e.provider.Token(t, "u1", nil)
 	for i := 0; i < 2; i++ {
-		if rec := do(h, http.MethodGet, "/api/v1/countries", key, ""); rec.Code != http.StatusOK {
-			t.Fatalf("request %d: status = %d", i, rec.Code)
+		if rec := e.do(http.MethodPost, "/api/v1/search", tok, searchBody); rec.Code != http.StatusOK {
+			t.Fatalf("search %d: status = %d", i, rec.Code)
 		}
 	}
-	rec := do(h, http.MethodGet, "/api/v1/countries", key, "")
-	if rec.Code != http.StatusTooManyRequests || errorCode(t, rec) != CodeRateLimited {
-		t.Fatalf("status = %d", rec.Code)
+	rec := e.do(http.MethodPost, "/api/v1/search", tok, searchBody)
+	if rec.Code != http.StatusPaymentRequired || errorCode(t, rec) != CodePaymentRequired {
+		t.Errorf("status = %d body = %s", rec.Code, rec.Body)
+	}
+	if rec.Header().Get("X-RateLimit-Remaining") != "0" {
+		t.Errorf("remaining = %s", rec.Header().Get("X-RateLimit-Remaining"))
+	}
+
+	// Another user has their own allowance.
+	if rec := e.do(http.MethodPost, "/api/v1/search", e.provider.Token(t, "u2", nil), searchBody); rec.Code != http.StatusOK {
+		t.Errorf("other user: status = %d", rec.Code)
+	}
+}
+
+func TestPaidPlanQuotaReturns429(t *testing.T) {
+	e := newEnv(t, envOpts{plans: "free:1,pro:2"})
+	tok := e.provider.Token(t, "u1", jwt.MapClaims{"plan": "pro"})
+	for i := 0; i < 2; i++ {
+		if rec := e.do(http.MethodPost, "/api/v1/search", tok, searchBody); rec.Code != http.StatusOK {
+			t.Fatalf("search %d: status = %d", i, rec.Code)
+		}
+	}
+	rec := e.do(http.MethodPost, "/api/v1/search", tok, searchBody)
+	if rec.Code != http.StatusTooManyRequests || errorCode(t, rec) != CodeQuotaExceeded {
+		t.Errorf("status = %d body = %s", rec.Code, rec.Body)
 	}
 	if rec.Header().Get("Retry-After") == "" {
 		t.Error("missing Retry-After")
 	}
 }
 
-func TestPanicRecovered(t *testing.T) {
-	h, key := newTestRouter(t, panicSearcher{}, 5)
-	rec := do(h, http.MethodPost, "/api/v1/search", key, `{"title":"xx","country":"jor"}`)
-	if rec.Code != http.StatusInternalServerError || errorCode(t, rec) != CodeInternal {
+func TestBurstRateLimit(t *testing.T) {
+	e := newEnv(t, envOpts{burst: 2})
+	tok := e.provider.Token(t, "u1", nil)
+	for i := 0; i < 2; i++ {
+		if rec := e.do(http.MethodPost, "/api/v1/search", tok, searchBody); rec.Code != http.StatusOK {
+			t.Fatalf("request %d: status = %d", i, rec.Code)
+		}
+	}
+	rec := e.do(http.MethodPost, "/api/v1/search", tok, searchBody)
+	if rec.Code != http.StatusTooManyRequests || errorCode(t, rec) != CodeRateLimited {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body)
+	}
+	if rec.Header().Get("Retry-After") == "" {
+		t.Error("missing Retry-After")
+	}
+}
+
+type brokenQuota struct{}
+
+func (brokenQuota) Take(context.Context, string, string) (usage.Decision, error) {
+	return usage.Decision{}, errors.New("redis down")
+}
+func (brokenQuota) Refund(context.Context, usage.Decision) error { return nil }
+
+func TestQuotaStoreDownFailsClosed(t *testing.T) {
+	e := newEnv(t, envOpts{quota: brokenQuota{}})
+	rec := e.do(http.MethodPost, "/api/v1/search", e.provider.Token(t, "u1", nil), searchBody)
+	if rec.Code != http.StatusServiceUnavailable || errorCode(t, rec) != CodeUnavailable {
 		t.Errorf("status = %d body = %s", rec.Code, rec.Body)
 	}
 }
@@ -194,21 +295,29 @@ type panicSearcher struct{}
 
 func (panicSearcher) Search(context.Context, string, string) (*search.Result, error) { panic("boom") }
 
+func TestPanicRecovered(t *testing.T) {
+	e := newEnv(t, envOpts{searcher: panicSearcher{}})
+	rec := e.do(http.MethodPost, "/api/v1/search", e.provider.Token(t, "u1", nil), searchBody)
+	if rec.Code != http.StatusInternalServerError || errorCode(t, rec) != CodeInternal {
+		t.Errorf("status = %d body = %s", rec.Code, rec.Body)
+	}
+}
+
 func TestCORSPreflight(t *testing.T) {
-	h, _ := newTestRouter(t, okSearcher, 5)
+	e := newEnv(t, envOpts{})
 
 	req := httptest.NewRequest(http.MethodOptions, "/api/v1/search", nil)
 	req.Header.Set("Origin", "https://app.example")
 	req.Header.Set("Access-Control-Request-Method", "POST")
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	e.handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNoContent || rec.Header().Get("Access-Control-Allow-Origin") != "https://app.example" {
 		t.Errorf("allowed origin: status = %d headers = %v", rec.Code, rec.Header())
 	}
 
 	req.Header.Set("Origin", "https://evil.example")
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	e.handler.ServeHTTP(rec, req)
 	if rec.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Error("CORS header set for unknown origin")
 	}

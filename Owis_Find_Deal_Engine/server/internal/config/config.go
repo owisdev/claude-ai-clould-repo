@@ -12,13 +12,23 @@ import (
 
 // Config holds all runtime settings.
 type Config struct {
-	Port            string
-	APIKeys         string // "name:sha256hex,..." of client apps
-	SerpAPIKey      string
+	Port       string
+	SerpAPIKey string
+
+	// End-user JWTs from the auth provider (Firebase, Supabase, Clerk, ...).
+	AuthJWKSURL   string
+	AuthIssuer    string
+	AuthAudience  string
+	AuthPlanClaim string
+
+	Plans       string // "free:20,pro:500" daily searches per plan
+	DefaultPlan string
+	RedisURL    string // empty: in-memory counters (single instance only)
+
 	SearchCombined  bool // one SerpApi call per search instead of one per market
 	MarketsFile     string
 	CORSOrigins     []string
-	RateLimitRPS    float64
+	RateLimitRPS    float64 // per user, burst smoothing
 	RateLimitBurst  int
 	SearchTimeout   time.Duration
 	MaxConcurrency  int
@@ -26,12 +36,18 @@ type Config struct {
 	LogLevel        string
 }
 
-// Load reads the environment. Required: API_KEYS, SERPAPI_KEY.
+// Load reads the environment. Required: SERPAPI_KEY and the AUTH_* settings.
 func Load() (Config, error) {
 	var errs []error
 	cfg := Config{
 		Port:            env("PORT", "3002"),
-		APIKeys:         os.Getenv("API_KEYS"),
+		AuthJWKSURL:     os.Getenv("AUTH_JWKS_URL"),
+		AuthIssuer:      os.Getenv("AUTH_ISSUER"),
+		AuthAudience:    os.Getenv("AUTH_AUDIENCE"),
+		AuthPlanClaim:   env("AUTH_PLAN_CLAIM", "plan"),
+		Plans:           env("PLANS", "free:20,pro:500"),
+		DefaultPlan:     env("DEFAULT_PLAN", "free"),
+		RedisURL:        os.Getenv("REDIS_URL"),
 		SerpAPIKey:      os.Getenv("SERPAPI_KEY"),
 		MarketsFile:     os.Getenv("MARKETS_FILE"),
 		CORSOrigins:     splitList(os.Getenv("CORS_ALLOWED_ORIGINS")),
@@ -44,8 +60,8 @@ func Load() (Config, error) {
 		ShutdownTimeout: parse(&errs, "SHUTDOWN_TIMEOUT", 10*time.Second, time.ParseDuration),
 	}
 
-	if cfg.APIKeys == "" {
-		errs = append(errs, errors.New("API_KEYS is required (generate one with: go run ./cmd/keygen)"))
+	if cfg.AuthJWKSURL == "" || cfg.AuthIssuer == "" || cfg.AuthAudience == "" {
+		errs = append(errs, errors.New("AUTH_JWKS_URL, AUTH_ISSUER and AUTH_AUDIENCE are required"))
 	}
 	if cfg.SerpAPIKey == "" {
 		errs = append(errs, errors.New("SERPAPI_KEY is required"))

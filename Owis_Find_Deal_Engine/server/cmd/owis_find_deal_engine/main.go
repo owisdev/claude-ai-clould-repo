@@ -20,6 +20,9 @@ import (
 	"owis_find_deal_engine/internal/providers/serpapi"
 	"owis_find_deal_engine/internal/ratelimit"
 	"owis_find_deal_engine/internal/search"
+	"owis_find_deal_engine/internal/usage"
+
+	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -46,10 +49,6 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	keys, err := auth.ParseKeyStore(cfg.APIKeys)
-	if err != nil {
-		return err
-	}
 	web, err := serpapi.New(serpapi.Config{APIKey: cfg.SerpAPIKey, Combined: cfg.SearchCombined})
 	if err != nil {
 		return err
@@ -67,12 +66,57 @@ func run() error {
 	limiter := ratelimit.New(cfg.RateLimitRPS, cfg.RateLimitBurst, 10*time.Minute)
 	go limiter.Cleanup(ctx, time.Minute)
 
+	// Auth: download the provider's public keys once, then keep them fresh.
+	jwks := auth.NewJWKS(cfg.AuthJWKSURL, log)
+	if err := jwks.Refresh(ctx); err != nil {
+		return fmt.Errorf("load auth keys: %w", err)
+	}
+	go jwks.Run(ctx, time.Hour)
+	verifier, err := auth.NewVerifier(jwks, auth.VerifierConfig{
+		Issuer:    cfg.AuthIssuer,
+		Audience:  cfg.AuthAudience,
+		PlanClaim: cfg.AuthPlanClaim,
+	})
+	if err != nil {
+		return err
+	}
+
+	// Usage counters: Redis when configured (shared by all instances),
+	// otherwise in memory (single instance only).
+	plans, err := usage.ParsePlans(cfg.Plans, cfg.DefaultPlan)
+	if err != nil {
+		return err
+	}
+	var store usage.Store
+	if cfg.RedisURL != "" {
+		opts, err := redis.ParseURL(cfg.RedisURL)
+		if err != nil {
+			return fmt.Errorf("REDIS_URL: %w", err)
+		}
+		rdb := redis.NewClient(opts)
+		defer rdb.Close()
+		pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		err = rdb.Ping(pingCtx).Err()
+		cancel()
+		if err != nil {
+			return fmt.Errorf("redis: %w", err)
+		}
+		store = usage.NewRedisStore(rdb)
+		log.Info("usage counters in redis")
+	} else {
+		mem := usage.NewMemoryStore()
+		go mem.Cleanup(ctx, 10*time.Minute)
+		store = mem
+		log.Warn("REDIS_URL not set: usage counters in memory, reset on restart")
+	}
+
 	srv := &http.Server{
 		Addr: net.JoinHostPort("", cfg.Port),
 		Handler: api.NewRouter(api.Deps{
 			Catalog:     catalog,
 			Searcher:    searcher,
-			Keys:        keys,
+			Verifier:    verifier,
+			Quota:       usage.NewQuota(store, plans),
 			Limiter:     limiter,
 			CORSOrigins: cfg.CORSOrigins,
 			Log:         log,
