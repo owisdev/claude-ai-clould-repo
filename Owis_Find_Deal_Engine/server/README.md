@@ -13,9 +13,11 @@ app ──POST /api/v1/search, Authorization: Bearer <JWT>──► server
         1. verify JWT signature locally with the provider's JWKS (cached)
         2. check iss, aud, exp, iat; take user id (sub) and plan claim
         3. per-user burst limit            → 429 rate_limited
-        4. daily allowance by plan (Redis) → 402 free plan used up
+        4. answer in cache?                → served, FREE (not counted,
+                                             even when the allowance is used up)
+        5. daily allowance by plan (Redis) → 402 free plan used up
                                              429 paid plan used up
-        5. search; failed searches are refunded
+        6. live search; failed searches are not counted
 ```
 
 ## Run
@@ -67,6 +69,8 @@ not matter), in Redis when `REDIS_URL` is set:
   served for a changed shop list.
 - Responses carry `fetched_at`, `cached`, `stale`: show "prices updated 3h
   ago" in the app. The shop's page always has the live price.
+- **Cached answers are free**: only live searches count against the daily
+  allowance, and cached answers are served even when it is used up.
 
 All settings are environment variables; see [`.env.example`](.env.example).
 

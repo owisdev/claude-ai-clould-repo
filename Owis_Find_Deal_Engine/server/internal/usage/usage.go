@@ -65,6 +65,8 @@ type Store interface {
 	Incr(ctx context.Context, key string, ttl time.Duration) (int64, error)
 	// Decr atomically decrements key.
 	Decr(ctx context.Context, key string) error
+	// Get returns the current value (0 if missing).
+	Get(ctx context.Context, key string) (int64, error)
 }
 
 // Decision is the result of a quota check.
@@ -94,18 +96,45 @@ func NewQuota(store Store, plans *Plans) *Quota {
 	return &Quota{store: store, plans: plans, now: time.Now}
 }
 
+// window returns the counter key and reset time for userID now.
+func (q *Quota) window(userID string) (key string, reset time.Time) {
+	now := q.now().UTC()
+	reset = time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, time.UTC)
+	return "usage:" + userID + ":" + now.Format("20060102"), reset
+}
+
+// Status reports the user's allowance without consuming any (used for
+// answers served from cache, which are free).
+func (q *Quota) Status(ctx context.Context, userID, planName string) (Decision, error) {
+	if userID == "" {
+		return Decision{}, errors.New("usage: empty user id")
+	}
+	key, reset := q.window(userID)
+	plan := q.plans.Resolve(planName)
+	n, err := q.store.Get(ctx, key)
+	if err != nil {
+		return Decision{}, fmt.Errorf("usage: %w", err)
+	}
+	used := min(n, plan.DailyLimit)
+	return Decision{
+		Allowed:         used < plan.DailyLimit,
+		Plan:            plan,
+		Used:            used,
+		Reset:           reset,
+		UpgradeRequired: used >= plan.DailyLimit && q.plans.IsDefault(plan),
+	}, nil
+}
+
 // Take consumes one search for userID if the plan allows it. Increment
 // first, then compare: atomic, so concurrent requests cannot overshoot.
 func (q *Quota) Take(ctx context.Context, userID, planName string) (Decision, error) {
 	if userID == "" {
 		return Decision{}, errors.New("usage: empty user id")
 	}
-	now := q.now().UTC()
-	day := now.Format("20060102")
-	reset := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, time.UTC)
+	key, reset := q.window(userID)
 	plan := q.plans.Resolve(planName)
 
-	d := Decision{Plan: plan, Reset: reset, key: "usage:" + userID + ":" + day}
+	d := Decision{Plan: plan, Reset: reset, key: key}
 	n, err := q.store.Incr(ctx, d.key, 48*time.Hour)
 	if err != nil {
 		return Decision{}, fmt.Errorf("usage: %w", err)

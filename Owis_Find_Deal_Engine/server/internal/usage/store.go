@@ -2,6 +2,7 @@ package usage
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -48,6 +49,15 @@ func (m *MemoryStore) Decr(_ context.Context, key string) error {
 	return nil
 }
 
+func (m *MemoryStore) Get(_ context.Context, key string) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if e, ok := m.entries[key]; ok && !m.now().After(e.expires) {
+		return e.n, nil
+	}
+	return 0, nil
+}
+
 // Cleanup drops expired counters every interval until ctx is done.
 func (m *MemoryStore) Cleanup(ctx context.Context, interval time.Duration) {
 	t := time.NewTicker(interval)
@@ -87,6 +97,14 @@ return n`)
 
 func (r *RedisStore) Incr(ctx context.Context, key string, ttl time.Duration) (int64, error) {
 	return incrScript.Run(ctx, r.rdb, []string{key}, ttl.Milliseconds()).Int64()
+}
+
+func (r *RedisStore) Get(ctx context.Context, key string) (int64, error) {
+	n, err := r.rdb.Get(ctx, key).Int64()
+	if errors.Is(err, redis.Nil) {
+		return 0, nil
+	}
+	return n, err
 }
 
 // decrScript never lets a counter go below zero.

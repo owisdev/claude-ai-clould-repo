@@ -117,7 +117,38 @@ func New(next Searcher, store Store, catalog *markets.Catalog, opts Options, log
 	}
 }
 
-// Search answers from the cache when possible.
+// Lookup answers from the cache only; it never runs a live search for the
+// caller. ok is false when a live search is needed (not cached, expired,
+// or a refresh was asked for and is allowed). A stale answer is returned
+// and refreshed in the background.
+func (c *Cache) Lookup(ctx context.Context, req search.Request) (res *search.Result, ok bool) {
+	key, valid := c.key(req)
+	if !valid {
+		return nil, false
+	}
+	res, _, ok = c.lookup(ctx, key, req)
+	return res, ok
+}
+
+func (c *Cache) lookup(ctx context.Context, key string, req search.Request) (*search.Result, *Entry, bool) {
+	entry := c.get(ctx, key)
+	if entry == nil {
+		return nil, nil, false
+	}
+	now := c.now()
+	if req.Refresh && now.Sub(entry.Result.FetchedAt) >= c.opts.MinRefresh {
+		return nil, entry, false
+	}
+	if now.Before(entry.FreshUntil) {
+		c.hits.Add(1)
+		return entry.response(false), entry, true
+	}
+	c.stale.Add(1)
+	c.refreshInBackground(key, req)
+	return entry.response(true), entry, true
+}
+
+// Search answers from the cache when possible, otherwise live.
 func (c *Cache) Search(ctx context.Context, req search.Request) (*search.Result, error) {
 	key, ok := c.key(req)
 	if !ok {
@@ -125,20 +156,9 @@ func (c *Cache) Search(ctx context.Context, req search.Request) (*search.Result,
 		return c.next.Search(ctx, req)
 	}
 
-	entry := c.get(ctx, key)
-	now := c.now()
-	if entry != nil {
-		age := now.Sub(entry.Result.FetchedAt)
-		forced := req.Refresh && age >= c.opts.MinRefresh
-		if !forced {
-			if now.Before(entry.FreshUntil) {
-				c.hits.Add(1)
-				return entry.response(false), nil
-			}
-			c.stale.Add(1)
-			c.refreshInBackground(key, req)
-			return entry.response(true), nil
-		}
+	res, entry, hit := c.lookup(ctx, key, req)
+	if hit {
+		return res, nil
 	}
 
 	c.misses.Add(1)

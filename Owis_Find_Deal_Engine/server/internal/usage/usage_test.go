@@ -72,6 +72,28 @@ func TestQuota(t *testing.T) {
 	}
 }
 
+func TestQuotaStatusDoesNotConsume(t *testing.T) {
+	plans, _ := ParsePlans("free:2", "free")
+	for name, store := range stores(t) {
+		t.Run(name, func(t *testing.T) {
+			q := NewQuota(store, plans)
+			ctx := context.Background()
+			for i := 0; i < 3; i++ {
+				d, err := q.Status(ctx, "frank", "")
+				if err != nil || !d.Allowed || d.Remaining() != 2 {
+					t.Fatalf("status %d = %+v, %v", i, d, err)
+				}
+			}
+			_, _ = q.Take(ctx, "frank", "")
+			_, _ = q.Take(ctx, "frank", "")
+			d, _ := q.Status(ctx, "frank", "")
+			if d.Allowed || d.Remaining() != 0 || !d.UpgradeRequired {
+				t.Errorf("exhausted status = %+v", d)
+			}
+		})
+	}
+}
+
 func TestQuotaConcurrentNeverOvershoots(t *testing.T) {
 	plans, _ := ParsePlans("free:10", "free")
 	for name, store := range stores(t) {

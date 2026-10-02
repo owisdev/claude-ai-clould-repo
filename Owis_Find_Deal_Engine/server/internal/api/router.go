@@ -24,9 +24,10 @@ type Deps struct {
 //
 //	GET  /api/v1/health     public
 //	GET  /api/v1/countries  public
-//	POST /api/v1/search     user JWT -> burst rate limit -> daily quota
+//	POST /api/v1/search     user JWT -> burst rate limit -> cache (free)
+//	                        or daily quota -> live search
 func NewRouter(d Deps) http.Handler {
-	h := &handlers{catalog: d.Catalog, searcher: d.Searcher}
+	h := &handlers{catalog: d.Catalog, searcher: d.Searcher, quota: d.Quota, log: d.Log}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", h.health)
@@ -34,7 +35,6 @@ func NewRouter(d Deps) http.Handler {
 	mux.Handle("POST /api/v1/search", chain(http.HandlerFunc(h.search),
 		requireUser(d.Verifier, d.Log),
 		rateLimit(d.Limiter),
-		enforceQuota(d.Quota, d.Log),
 	))
 
 	return chain(mux,

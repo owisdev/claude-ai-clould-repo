@@ -50,8 +50,10 @@ No API keys for apps: every protected call carries the **user's JWT**.
    - per-user burst limit (token bucket);
    - daily allowance by plan in **Redis** (atomic increment).
 5. **Execute or reject**
-   - within limits → counter incremented, search runs; failed searches are
-     refunded;
+   - answer already cached → served **free** (not counted), even when the
+     allowance is used up;
+   - within limits → counter incremented, live search runs; failed
+     searches are refunded;
    - free plan used up → **402 Payment Required** (show the upgrade screen);
    - paid plan used up → **429 Too Many Requests** with `Retry-After`;
    - Redis unreachable → **503** (fail closed, protects paid search quota).
@@ -134,6 +136,8 @@ current. Strategy, in layers:
    shop with its live price.
 6. **Automatic invalidation** when `markets.json` changes (the shop list
    is part of the cache key).
+7. **Cached answers are free** for users: only live searches count against
+   the daily allowance (they are the only ones that cost us anything).
 
 Later (phase 2+):
 - **Saved-item price tracker**: a scheduled job re-checks items in users'

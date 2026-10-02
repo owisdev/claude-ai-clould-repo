@@ -118,7 +118,7 @@ func run() error {
 		log.Warn("REDIS_URL not set: usage counters and search cache in memory, reset on restart")
 	}
 
-	var apiSearcher api.Searcher = searcher
+	apiSearcher := api.WithoutCache(searcher)
 	var searchCache *cache.Cache
 	if cfg.CacheEnabled {
 		searchCache = cache.New(searcher, cacheStore, catalog, cache.Options{

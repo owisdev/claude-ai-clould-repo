@@ -174,6 +174,31 @@ func TestStaleWhileRevalidate(t *testing.T) {
 	}
 }
 
+func TestLookupNeverFetches(t *testing.T) {
+	e := newEnv(t, Options{MinRefresh: time.Minute})
+	ctx := context.Background()
+	req := search.Request{Title: "s pen", Country: "jor"}
+
+	if _, ok := e.cache.Lookup(ctx, req); ok {
+		t.Fatal("lookup hit on empty cache")
+	}
+	if e.up.calls.Load() != 0 {
+		t.Fatal("lookup called upstream")
+	}
+	e.search(t, "s pen", false)
+	if res, ok := e.cache.Lookup(ctx, req); !ok || !res.Cached {
+		t.Fatalf("lookup after search = %+v, %v", res, ok)
+	}
+	// An allowed refresh needs a live search: lookup must say no.
+	e.clock.Add(2 * time.Minute)
+	if _, ok := e.cache.Lookup(ctx, search.Request{Title: "s pen", Country: "jor", Refresh: true}); ok {
+		t.Error("lookup answered an allowed refresh from cache")
+	}
+	if _, ok := e.cache.Lookup(ctx, search.Request{Title: "x", Country: "jor"}); ok {
+		t.Error("lookup answered invalid input")
+	}
+}
+
 func TestExpiredEntryFetchedLive(t *testing.T) {
 	e := newEnv(t, Options{FreshTTL: time.Hour, StaleTTL: 3 * time.Hour})
 	e.search(t, "s pen", false)

@@ -23,8 +23,17 @@ import (
 )
 
 type fakeSearcher struct {
-	res *search.Result
-	err error
+	res    *search.Result
+	err    error
+	cached *search.Result // answer for Lookup; nil = not cached
+}
+
+func (f fakeSearcher) Lookup(context.Context, search.Request) (*search.Result, bool) {
+	if f.cached == nil {
+		return nil, false
+	}
+	r := *f.cached
+	return &r, true
 }
 
 func (f fakeSearcher) Search(_ context.Context, req search.Request) (*search.Result, error) {
@@ -211,8 +220,9 @@ func TestSearchErrors(t *testing.T) {
 			if rec.Code != tt.status || errorCode(t, rec) != tt.code {
 				t.Errorf("status = %d body = %s, want %d %s", rec.Code, rec.Body, tt.status, tt.code)
 			}
-			// Failed searches are refunded: the next one still sees 99 left.
-			rec = e.do(http.MethodPost, "/api/v1/search", tok, tt.body)
+			// Failed searches are not counted: a following valid search
+			// sees the full allowance minus itself.
+			rec = e.do(http.MethodPost, "/api/v1/search", tok, searchBody)
 			if got := rec.Header().Get("X-RateLimit-Remaining"); got != "99" {
 				t.Errorf("remaining after refund = %s, want 99", got)
 			}
@@ -282,6 +292,9 @@ func (brokenQuota) Take(context.Context, string, string) (usage.Decision, error)
 	return usage.Decision{}, errors.New("redis down")
 }
 func (brokenQuota) Refund(context.Context, usage.Decision) error { return nil }
+func (brokenQuota) Status(context.Context, string, string) (usage.Decision, error) {
+	return usage.Decision{}, errors.New("redis down")
+}
 
 func TestQuotaStoreDownFailsClosed(t *testing.T) {
 	e := newEnv(t, envOpts{quota: brokenQuota{}})
@@ -292,6 +305,10 @@ func TestQuotaStoreDownFailsClosed(t *testing.T) {
 }
 
 type panicSearcher struct{}
+
+func (panicSearcher) Lookup(context.Context, search.Request) (*search.Result, bool) {
+	return nil, false
+}
 
 func (panicSearcher) Search(context.Context, search.Request) (*search.Result, error) { panic("boom") }
 
@@ -320,5 +337,59 @@ func TestCORSPreflight(t *testing.T) {
 	e.handler.ServeHTTP(rec, req)
 	if rec.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Error("CORS header set for unknown origin")
+	}
+}
+
+var cachedResult = &search.Result{
+	Results: []search.Product{{Market: "amazon", Title: "S Pen", Link: "https://amazon.com/x", Position: 1}},
+	Markets: map[string]string{"amazon": "ok"},
+	Cached:  true,
+}
+
+func TestCachedAnswersAreFree(t *testing.T) {
+	e := newEnv(t, envOpts{plans: "free:2", searcher: fakeSearcher{cached: cachedResult}})
+	tok := e.provider.Token(t, "u1", nil)
+	for i := 0; i < 5; i++ {
+		rec := e.do(http.MethodPost, "/api/v1/search", tok, searchBody)
+		if rec.Code != http.StatusOK || rec.Header().Get("X-Cache") != "HIT" {
+			t.Fatalf("search %d: status = %d cache = %s", i, rec.Code, rec.Header().Get("X-Cache"))
+		}
+		if got := rec.Header().Get("X-RateLimit-Remaining"); got != "2" {
+			t.Errorf("search %d: remaining = %s, want 2 (cache hits are free)", i, got)
+		}
+	}
+}
+
+func TestCachedAnswersServedWhenQuotaUsedUp(t *testing.T) {
+	plans, _ := usage.ParsePlans("free:1", "free")
+	quota := usage.NewQuota(usage.NewMemoryStore(), plans)
+	live := newEnv(t, envOpts{quota: quota})
+	tok := live.provider.Token(t, "u1", nil)
+
+	// Use up the allowance with a live search.
+	if rec := live.do(http.MethodPost, "/api/v1/search", tok, searchBody); rec.Code != http.StatusOK {
+		t.Fatalf("live search: %d", rec.Code)
+	}
+	if rec := live.do(http.MethodPost, "/api/v1/search", tok, searchBody); rec.Code != http.StatusPaymentRequired {
+		t.Fatalf("second live search: %d, want 402", rec.Code)
+	}
+
+	// Same user, same counters, but the answer is cached: still served.
+	cached := newEnv(t, envOpts{quota: quota, searcher: fakeSearcher{cached: cachedResult}})
+	rec := cached.do(http.MethodPost, "/api/v1/search", cached.provider.Token(t, "u1", nil), searchBody)
+	if rec.Code != http.StatusOK || rec.Header().Get("X-RateLimit-Remaining") != "0" {
+		t.Errorf("cached answer over quota: status = %d remaining = %s", rec.Code, rec.Header().Get("X-RateLimit-Remaining"))
+	}
+}
+
+func TestLiveSearchAnsweredFromCacheIsRefunded(t *testing.T) {
+	// Lookup missed, but by the time Search ran another request had filled
+	// the cache: the answer is cached, so it must not be counted.
+	e := newEnv(t, envOpts{plans: "free:2", searcher: fakeSearcher{res: cachedResult}})
+	tok := e.provider.Token(t, "u1", nil)
+	for i := 0; i < 3; i++ {
+		if rec := e.do(http.MethodPost, "/api/v1/search", tok, searchBody); rec.Code != http.StatusOK {
+			t.Fatalf("search %d: status = %d (cached answers must not use quota)", i, rec.Code)
+		}
 	}
 }
