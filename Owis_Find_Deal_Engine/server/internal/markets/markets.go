@@ -1,0 +1,157 @@
+// Package markets holds the catalog of supported countries and the online
+// marketplaces that deliver to each of them.
+package markets
+
+import (
+	_ "embed"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"sort"
+	"strings"
+)
+
+//go:embed markets.json
+var defaultCatalog []byte
+
+// Target is one marketplace as searched for one country.
+type Target struct {
+	Market   string `json:"id"`
+	Name     string `json:"name"`
+	Domain   string `json:"domain"`
+	Provider string `json:"-"`
+}
+
+// Matches reports whether a link host belongs to this target's marketplace.
+// Regional subdomains count as a match (e.g. sa.shein.com for ar.shein.com).
+func (t Target) Matches(host string) bool {
+	host = strings.TrimPrefix(strings.ToLower(host), "www.")
+	if host == t.Domain || strings.HasSuffix(host, "."+t.Domain) {
+		return true
+	}
+	base := baseDomain(t.Domain)
+	return host == base || strings.HasSuffix(host, "."+base)
+}
+
+// baseDomain returns the last two labels of a domain (us.shein.com -> shein.com).
+func baseDomain(domain string) string {
+	parts := strings.Split(domain, ".")
+	if len(parts) <= 2 {
+		return domain
+	}
+	return strings.Join(parts[len(parts)-2:], ".")
+}
+
+// Country is a supported country with the marketplaces that deliver to it.
+type Country struct {
+	Code     string   `json:"code"`
+	Name     string   `json:"name"`
+	Currency string   `json:"currency"`
+	Region   string   `json:"-"`
+	Language string   `json:"-"`
+	Targets  []Target `json:"markets"`
+}
+
+// Catalog is the immutable set of countries; safe for concurrent use.
+type Catalog struct {
+	countries map[string]Country
+	codes     []string
+}
+
+// Country returns the country for a code such as "jor". Codes are case-insensitive.
+func (c *Catalog) Country(code string) (Country, bool) {
+	country, ok := c.countries[strings.ToLower(strings.TrimSpace(code))]
+	return country, ok
+}
+
+// Countries returns all countries sorted by code.
+func (c *Catalog) Countries() []Country {
+	out := make([]Country, 0, len(c.codes))
+	for _, code := range c.codes {
+		out = append(out, c.countries[code])
+	}
+	return out
+}
+
+type fileFormat struct {
+	Markets map[string]struct {
+		Name     string `json:"name"`
+		Provider string `json:"provider"`
+	} `json:"markets"`
+	Countries map[string]struct {
+		Name     string `json:"name"`
+		Currency string `json:"currency"`
+		Region   string `json:"region"`
+		Language string `json:"language"`
+		Markets  []struct {
+			Market string `json:"market"`
+			Domain string `json:"domain"`
+		} `json:"markets"`
+	} `json:"countries"`
+}
+
+// Load reads the catalog from path, or the embedded default when path is empty.
+func Load(path string) (*Catalog, error) {
+	data := defaultCatalog
+	if path != "" {
+		var err error
+		if data, err = os.ReadFile(path); err != nil {
+			return nil, fmt.Errorf("read markets file: %w", err)
+		}
+	}
+	return Parse(data)
+}
+
+// Parse builds and validates a catalog from JSON.
+func Parse(data []byte) (*Catalog, error) {
+	var f fileFormat
+	if err := json.Unmarshal(data, &f); err != nil {
+		return nil, fmt.Errorf("parse markets: %w", err)
+	}
+	if len(f.Countries) == 0 {
+		return nil, errors.New("markets: no countries defined")
+	}
+
+	cat := &Catalog{countries: make(map[string]Country, len(f.Countries))}
+	for code, fc := range f.Countries {
+		code = strings.ToLower(code)
+		if fc.Region == "" {
+			return nil, fmt.Errorf("markets: country %q has no region", code)
+		}
+		country := Country{
+			Code:     code,
+			Name:     fc.Name,
+			Currency: fc.Currency,
+			Region:   fc.Region,
+			Language: fc.Language,
+		}
+		seen := make(map[string]bool)
+		for _, fm := range fc.Markets {
+			m, ok := f.Markets[fm.Market]
+			if !ok {
+				return nil, fmt.Errorf("markets: country %q uses unknown market %q", code, fm.Market)
+			}
+			if seen[fm.Market] {
+				return nil, fmt.Errorf("markets: country %q lists market %q twice", code, fm.Market)
+			}
+			if fm.Domain == "" || m.Provider == "" {
+				return nil, fmt.Errorf("markets: market %q in %q needs a domain and a provider", fm.Market, code)
+			}
+			seen[fm.Market] = true
+			country.Targets = append(country.Targets, Target{
+				Market:   fm.Market,
+				Name:     m.Name,
+				Domain:   strings.ToLower(fm.Domain),
+				Provider: m.Provider,
+			})
+		}
+		if len(country.Targets) == 0 {
+			return nil, fmt.Errorf("markets: country %q has no markets", code)
+		}
+		cat.countries[code] = country
+		cat.codes = append(cat.codes, code)
+	}
+	sort.Strings(cat.codes)
+	return cat, nil
+}

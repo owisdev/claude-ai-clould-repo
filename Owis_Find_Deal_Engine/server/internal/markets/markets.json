@@ -1,0 +1,49 @@
+{
+  "markets": {
+    "amazon":     { "name": "Amazon",     "provider": "web" },
+    "ebay":       { "name": "eBay",       "provider": "web" },
+    "aliexpress": { "name": "AliExpress", "provider": "web" },
+    "temu":       { "name": "Temu",       "provider": "web" },
+    "shein":      { "name": "SHEIN",      "provider": "web" }
+  },
+  "countries": {
+    "usa": {
+      "name": "United States of America",
+      "currency": "USD",
+      "region": "us",
+      "language": "en",
+      "markets": [
+        { "market": "amazon",     "domain": "amazon.com" },
+        { "market": "ebay",       "domain": "ebay.com" },
+        { "market": "aliexpress", "domain": "aliexpress.com" },
+        { "market": "temu",       "domain": "temu.com" },
+        { "market": "shein",      "domain": "us.shein.com" }
+      ]
+    },
+    "ksa": {
+      "name": "Kingdom of Saudi Arabia",
+      "currency": "SAR",
+      "region": "sa",
+      "language": "en",
+      "markets": [
+        { "market": "amazon",     "domain": "amazon.sa" },
+        { "market": "ebay",       "domain": "ebay.com" },
+        { "market": "aliexpress", "domain": "aliexpress.com" },
+        { "market": "temu",       "domain": "temu.com" },
+        { "market": "shein",      "domain": "ar.shein.com" }
+      ]
+    },
+    "jor": {
+      "name": "Jordan",
+      "currency": "JOD",
+      "region": "jo",
+      "language": "en",
+      "markets": [
+        { "market": "amazon",     "domain": "amazon.com" },
+        { "market": "aliexpress", "domain": "aliexpress.com" },
+        { "market": "temu",       "domain": "temu.com" },
+        { "market": "shein",      "domain": "ar.shein.com" }
+      ]
+    }
+  }
+}
