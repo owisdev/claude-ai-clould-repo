@@ -95,8 +95,8 @@ type Provider interface {
 
 | Provider | Used for | Cost | Status |
 |---|---|---|---|
-| `serpapi` | site-restricted Google search, any market | 250 free/month, then paid | ✅ implemented |
-| `searxng` (self-hosted) | same, free | free | step 4 |
+| `searxng` (self-hosted) | site-restricted metasearch, any market | free | ✅ default, tried first |
+| `serpapi` | site-restricted Google search, any market | 250 free/month, then paid | ✅ fallback only |
 | `ebay` (Browse API) | eBay with real prices | free (5,000 calls/day) | when keys arrive |
 | `aliexpress` (Affiliate API) | AliExpress with prices + affiliate links | free | when keys arrive |
 
@@ -104,6 +104,9 @@ Implemented behaviour:
 - `SEARCH_COMBINED=true` (default): **one** SerpApi call per search,
   `"<title>" (site:amazon.com OR site:temu.com OR ...)`.
   `false`: one call per marketplace, run in parallel.
+- **Fallback chain** (`SEARCH_PROVIDERS=searxng,serpapi`): the first
+  provider that succeeds answers; each attempt has its own timeout, and a
+  provider failing repeatedly is skipped for a cooldown (circuit breaker).
 - Provider calls run on a **bounded worker pool** (goroutines + buffered
   channels, `SEARCH_MAX_CONCURRENCY`), all under one `context` timeout.
 - A failing marketplace never fails the request: `markets` reports
@@ -205,8 +208,9 @@ and is pushed.
    logs); CORS by allow-list; tests for every package.
 3. ✅ Countries & marketplaces: `markets.json`, `GET /countries`, country
    validation, search limited to the country's marketplaces.
-4. SearXNG provider (free) + provider selection/fallback (SearXNG first,
-   SerpApi if it fails); `docker-compose` with SearXNG for local dev.
+4. ✅ SearXNG provider (free) + fallback chain (SearXNG first, SerpApi if
+   it fails) with per-attempt timeout and circuit breaker;
+   `docker-compose` with SearXNG + Redis for local dev.
 5. Cache: in-memory TTL cache keyed by country + normalized title, with
    request coalescing (`singleflight`) so identical concurrent searches make
    one upstream call.

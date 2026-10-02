@@ -20,13 +20,31 @@ app ──POST /api/v1/search, Authorization: Bearer <JWT>──► server
 
 ## Run
 
-Requires Go 1.24+.
+Requires Go 1.24+ and Docker (for SearXNG and Redis).
 
 ```sh
-cp .env.example .env    # fill in AUTH_* and SERPAPI_KEY
+cp .env.example .env    # fill in AUTH_*, SEARXNG_SECRET (and SERPAPI_KEY)
+docker compose up -d    # SearXNG on 127.0.0.1:8888, Redis on 127.0.0.1:6379
 set -a; . ./.env; set +a
 go run ./cmd/owis_find_deal_engine
 ```
+
+## Search providers
+
+`SEARCH_PROVIDERS` lists providers in order; the first that succeeds
+answers (default `searxng,serpapi`):
+
+- **SearXNG** (free, self-hosted): metasearch over Google, Bing,
+  DuckDuckGo, Brave, Startpage and Mojeek. Config:
+  [`deploy/searxng/settings.yml`](deploy/searxng/settings.yml) (JSON output
+  on, bot limiter off because only our service calls it).
+- **SerpApi** (paid): used only when SearXNG fails or returns nothing
+  because its engines were blocked.
+
+Each provider gets `PROVIDER_ATTEMPT_TIMEOUT`; after
+`PROVIDER_FAILURE_THRESHOLD` failures in a row it is skipped for
+`PROVIDER_COOLDOWN` (circuit breaker), so a broken SearXNG adds no delay.
+Every result carries `"provider"` so you can see who answered.
 
 All settings are environment variables; see [`.env.example`](.env.example).
 
@@ -88,12 +106,16 @@ cmd/owis_find_deal_engine   main: config, wiring, graceful shutdown
 internal/config             environment variables
 internal/markets            countries -> marketplaces catalog
 internal/search             search service: worker pool, merge, ordering
-internal/providers/serpapi  SerpApi Google provider
+internal/search/fallback.go provider chain + circuit breaker
+internal/providers/searxng  SearXNG provider (free)
+internal/providers/serpapi  SerpApi Google provider (paid fallback)
 internal/auth               JWT verification + JWKS key cache
 internal/auth/authtest      fake auth provider for tests
 internal/usage              plans, daily quotas, Redis/memory counters
 internal/ratelimit          per-user token bucket
 internal/api                router, handlers, middleware
+deploy/searxng              SearXNG settings
+docker-compose.yml          local SearXNG + Redis
 ```
 
 ## Test

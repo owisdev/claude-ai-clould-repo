@@ -120,9 +120,3 @@ func TestNewRequiresKey(t *testing.T) {
 		t.Error("expected error without API key")
 	}
 }
-
-func TestBuildQuerySingle(t *testing.T) {
-	if got := BuildQuery("hub", jorTargets[:1]); got != "hub site:amazon.com" {
-		t.Errorf("got %q", got)
-	}
-}

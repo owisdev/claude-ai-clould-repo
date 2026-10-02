@@ -155,3 +155,26 @@ func Parse(data []byte) (*Catalog, error) {
 	sort.Strings(cat.codes)
 	return cat, nil
 }
+
+// SiteQuery restricts title to the targets' domains, e.g.
+// `usb hub (site:amazon.com OR site:temu.com)`.
+func SiteQuery(title string, targets []Target) string {
+	sites := make([]string, len(targets))
+	for i, t := range targets {
+		sites[i] = "site:" + t.Domain
+	}
+	if len(sites) == 1 {
+		return title + " " + sites[0]
+	}
+	return title + " (" + strings.Join(sites, " OR ") + ")"
+}
+
+// MatchTarget returns the target whose marketplace owns host.
+func MatchTarget(host string, targets []Target) (Target, bool) {
+	for _, t := range targets {
+		if t.Matches(host) {
+			return t, true
+		}
+	}
+	return Target{}, false
+}

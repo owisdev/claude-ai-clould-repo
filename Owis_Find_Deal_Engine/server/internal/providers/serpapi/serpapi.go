@@ -83,7 +83,7 @@ func (c *Client) Search(ctx context.Context, q search.Query) ([]search.Product, 
 
 	params := url.Values{}
 	params.Set("engine", "google")
-	params.Set("q", BuildQuery(q.Title, q.Targets))
+	params.Set("q", markets.SiteQuery(q.Title, q.Targets))
 	if q.Region != "" {
 		params.Set("gl", q.Region)
 	}
@@ -124,19 +124,6 @@ func (c *Client) Search(ctx context.Context, q search.Query) ([]search.Product, 
 	return toProducts(body.OrganicResults, q.Targets), nil
 }
 
-// BuildQuery restricts title to the target domains:
-// `usb hub (site:amazon.com OR site:temu.com)`.
-func BuildQuery(title string, targets []markets.Target) string {
-	sites := make([]string, len(targets))
-	for i, t := range targets {
-		sites[i] = "site:" + t.Domain
-	}
-	if len(sites) == 1 {
-		return title + " " + sites[0]
-	}
-	return title + " (" + strings.Join(sites, " OR ") + ")"
-}
-
 // toProducts maps results to their marketplace and numbers them per market.
 func toProducts(results []organicResult, targets []markets.Target) []search.Product {
 	products := make([]search.Product, 0, len(results))
@@ -149,7 +136,7 @@ func toProducts(results []organicResult, targets []markets.Target) []search.Prod
 		if err != nil {
 			continue
 		}
-		target, ok := matchTarget(u.Hostname(), targets)
+		target, ok := markets.MatchTarget(u.Hostname(), targets)
 		if !ok {
 			continue // result outside the requested marketplaces
 		}
@@ -176,13 +163,4 @@ func toProducts(results []organicResult, targets []markets.Target) []search.Prod
 		products = append(products, p)
 	}
 	return products
-}
-
-func matchTarget(host string, targets []markets.Target) (markets.Target, bool) {
-	for _, t := range targets {
-		if t.Matches(host) {
-			return t, true
-		}
-	}
-	return markets.Target{}, false
 }

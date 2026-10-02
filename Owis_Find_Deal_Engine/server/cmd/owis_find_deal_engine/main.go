@@ -17,6 +17,7 @@ import (
 	"owis_find_deal_engine/internal/auth"
 	"owis_find_deal_engine/internal/config"
 	"owis_find_deal_engine/internal/markets"
+	"owis_find_deal_engine/internal/providers/searxng"
 	"owis_find_deal_engine/internal/providers/serpapi"
 	"owis_find_deal_engine/internal/ratelimit"
 	"owis_find_deal_engine/internal/search"
@@ -49,10 +50,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	web, err := serpapi.New(serpapi.Config{APIKey: cfg.SerpAPIKey, Combined: cfg.SearchCombined})
+	web, err := buildWebProvider(cfg, log)
 	if err != nil {
 		return err
 	}
+	log.Info("search providers", "chain", web.Name())
 
 	searcher := search.NewService(catalog,
 		map[string]search.Provider{"web": web},
@@ -151,4 +153,33 @@ func run() error {
 	}
 	log.Info("server stopped cleanly")
 	return nil
+}
+
+// buildWebProvider creates the configured providers in SEARCH_PROVIDERS
+// order and chains them: the first that succeeds answers the search.
+func buildWebProvider(cfg config.Config, log *slog.Logger) (search.Provider, error) {
+	providers := make([]search.Provider, 0, len(cfg.SearchProviders))
+	for _, name := range cfg.SearchProviders {
+		var (
+			p   search.Provider
+			err error
+		)
+		switch name {
+		case "searxng":
+			p, err = searxng.New(searxng.Config{BaseURL: cfg.SearXNGURL, Combined: cfg.SearchCombined})
+		case "serpapi":
+			p, err = serpapi.New(serpapi.Config{APIKey: cfg.SerpAPIKey, Combined: cfg.SearchCombined})
+		default:
+			err = fmt.Errorf("unknown search provider %q", name)
+		}
+		if err != nil {
+			return nil, err
+		}
+		providers = append(providers, p)
+	}
+	return search.NewFallback(providers, search.FallbackOptions{
+		AttemptTimeout:   cfg.ProviderAttemptTimeout,
+		FailureThreshold: cfg.ProviderFailThreshold,
+		Cooldown:         cfg.ProviderCooldown,
+	}, log)
 }

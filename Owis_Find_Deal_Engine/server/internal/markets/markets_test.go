@@ -86,3 +86,19 @@ func TestTargetMatches(t *testing.T) {
 		}
 	}
 }
+
+func TestSiteQueryAndMatch(t *testing.T) {
+	targets := []Target{{Market: "amazon", Domain: "amazon.com"}, {Market: "shein", Domain: "ar.shein.com"}}
+	if got := SiteQuery("hub", targets[:1]); got != "hub site:amazon.com" {
+		t.Errorf("single = %q", got)
+	}
+	if got := SiteQuery("hub", targets); got != "hub (site:amazon.com OR site:ar.shein.com)" {
+		t.Errorf("multi = %q", got)
+	}
+	if m, ok := MatchTarget("sa.shein.com", targets); !ok || m.Market != "shein" {
+		t.Errorf("MatchTarget = %v, %v", m, ok)
+	}
+	if _, ok := MatchTarget("example.com", targets); ok {
+		t.Error("unexpected match")
+	}
+}

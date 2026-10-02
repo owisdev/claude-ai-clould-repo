@@ -1,0 +1,40 @@
+# Local development dependencies for owis_find_deal_engine.
+#   cp .env.example .env    # set SEARXNG_SECRET (openssl rand -hex 32)
+#   docker compose up -d
+# The Go service then runs on the host with:
+#   SEARXNG_URL=http://127.0.0.1:8888  REDIS_URL=redis://127.0.0.1:6379/0
+# Ports are bound to 127.0.0.1 only: nothing is exposed to the network.
+# (Step 6 adds the server itself to this file on an internal network.)
+
+name: owis_find_deal_engine
+
+services:
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8888:8080"
+    volumes:
+      - ./deploy/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?set SEARXNG_SECRET in .env}
+      # IPv4 inside the container; works on hosts without IPv6.
+      GRANIAN_HOST: 0.0.0.0
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  redis:
+    image: docker.io/library/redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    # Usage counters only: no persistence needed in development.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
