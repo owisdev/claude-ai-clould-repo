@@ -3,6 +3,10 @@
 Last updated: 2026-10-02 · Branch: `claude/cloud-vs-local-7xi988`
 (not merged into `main` yet).
 
+Read first: [docs/architecture.pdf](docs/architecture.pdf) — the full
+architecture and flows, illustrated (regenerate with
+`python3 docs/build_architecture_pdf.py`).
+
 ## Where we are
 
 **Phase 1 — search service: complete** (plan steps 1–6, see
