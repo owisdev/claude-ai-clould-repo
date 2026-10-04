@@ -221,6 +221,28 @@ linked to a saved item.
 
 More features may be added here before this phase starts.
 
+### 5.6 App login: Firebase email links (reminder)
+
+Only relevant when the app offers **email** sign-in; Google, Apple and
+Facebook sign-in do not use email links, and the search service itself is
+not affected (it only verifies ID tokens with the public JWKS).
+
+- Firebase Dynamic Links are shut down. Email action links (verify
+  email, reset password, passwordless sign-in link) must use the
+  **Firebase Hosting domain** instead, e.g.
+  `owis-find-deal-engine.firebaseapp.com` (or a verified custom domain).
+- One-time project setting (Admin SDK `projectConfigManager()
+  .updateProjectConfig({ mobileLinksConfig: { domain: ... } })`, or the
+  equivalent console/REST setting).
+- Wherever action links are created (preferably the app via the Firebase
+  client SDK, so Firebase sends the emails), set `linkDomain` in
+  `ActionCodeSettings`, never the deprecated `dynamicLinkDomain`; add the
+  iOS bundle ID and Android package name.
+- Only if our backend ever generates these links itself: use a current
+  Admin SDK that supports `linkDomain`, and send the emails through our
+  own mail service.
+- Check the domain is in Firebase Auth → Settings → Authorized domains.
+
 ### 5.5 Future features (noted, not planned yet)
 
 - **Search by photo — Google Lens.** The user takes or uploads a photo of
@@ -318,7 +340,8 @@ and is pushed.
    (Replaced the earlier per-app API keys.)
 
 **Phase 2 — users**
-7. `users` table (created on first login), `/me`.
+7. `users` table (created on first login), `/me`. App email sign-in:
+   see the Firebase email-link reminder in section 5.6.
 8. Plans in the database + payment webhook.
 9. Saved cart + saved-item price tracker (section 4b).
 10. Clicks + purchase reports.

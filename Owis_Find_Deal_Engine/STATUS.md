@@ -163,6 +163,10 @@ Please report:
 ## Future features (noted)
 
 - **Search by photo (Google Lens)** — see PLAN.md section 5.5.
+- **Reminder for the app (phase 2):** Firebase email links (verify email,
+  reset password, sign-in link) must use the Firebase Hosting domain and
+  `linkDomain`, not Dynamic Links — see PLAN.md section 5.6. Not needed for
+  the local test (the test token comes from `accounts:signUp`, no email).
 
 ## Open decisions (owner)
 
