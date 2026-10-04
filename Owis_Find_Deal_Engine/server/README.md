@@ -59,13 +59,25 @@ answers (default `searxng,serpapi`):
   DuckDuckGo, Brave, Startpage and Mojeek. Config:
   [`deploy/searxng/settings.yml`](deploy/searxng/settings.yml) (JSON output
   on, bot limiter off because only our service calls it).
-- **SerpApi** (paid): used only when SearXNG fails or returns nothing
-  because its engines were blocked.
+- **SerpApi** (paid): `SERPAPI_ENGINE=google_shopping` (default) returns
+  **prices, seller and image** from Google Shopping; offers are matched to
+  our shops by seller name, and when Google Shopping has nothing from our
+  shops it retries once as a normal web search. `google` = web search only.
+  Put it first (`serpapi,searxng`) if prices matter more than cost.
+- **Apify** (optional, per marketplace): `APIFY_MARKETS=temu,shein` sends
+  those shops to a scraper from the Apify store (real prices and images);
+  if it fails or exceeds `APIFY_TIMEOUT`, that shop falls back to the
+  providers above. Setup steps are in [`.env.example`](.env.example).
 
-Each provider gets `PROVIDER_ATTEMPT_TIMEOUT`; after
-`PROVIDER_FAILURE_THRESHOLD` failures in a row it is skipped for
-`PROVIDER_COOLDOWN` (circuit breaker), so a broken SearXNG adds no delay.
-Every result carries `"provider"` so you can see who answered.
+```
+amazon, aliexpress, ebay ──► SearXNG ──► SerpApi (Google Shopping)
+temu, shein (if Apify)   ──► Apify scraper ──► SearXNG ──► SerpApi
+```
+
+Each provider gets `PROVIDER_ATTEMPT_TIMEOUT` (Apify: `APIFY_TIMEOUT`);
+after `PROVIDER_FAILURE_THRESHOLD` failures in a row it is skipped for
+`PROVIDER_COOLDOWN` (circuit breaker), so a broken source adds no delay.
+Every result carries `"provider"` (`searxng`, `serpapi`, `apify`).
 
 ## Cache and price freshness
 
@@ -160,7 +172,8 @@ internal/search/fallback.go provider chain + circuit breaker
 internal/cache              stale-while-revalidate cache (Redis / LRU)
 internal/metering           what a search costs: cached free, live counted
 internal/providers/searxng  SearXNG provider (free)
-internal/providers/serpapi  SerpApi Google provider (paid fallback)
+internal/providers/serpapi  SerpApi: Google Shopping / web (paid fallback)
+internal/providers/apify    Apify store scrapers, per marketplace (optional)
 internal/auth               JWT verification + JWKS key cache
 internal/auth/authtest      fake auth provider for tests
 internal/usage              plans, daily quotas, Redis/memory counters

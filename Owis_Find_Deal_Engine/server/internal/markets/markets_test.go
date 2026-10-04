@@ -102,3 +102,30 @@ func TestSiteQueryAndMatch(t *testing.T) {
 		t.Error("unexpected match")
 	}
 }
+
+func TestWithProviders(t *testing.T) {
+	cat, _ := Load("")
+	over, err := cat.WithProviders(map[string]string{"temu": "apify-temu"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	jor, _ := over.Country("jor")
+	for _, tg := range jor.Targets {
+		want := "web"
+		if tg.Market == "temu" {
+			want = "apify-temu"
+		}
+		if tg.Provider != want {
+			t.Errorf("%s provider = %q, want %q", tg.Market, tg.Provider, want)
+		}
+	}
+	orig, _ := cat.Country("jor")
+	for _, tg := range orig.Targets {
+		if tg.Provider != "web" {
+			t.Error("original catalog was modified")
+		}
+	}
+	if _, err := cat.WithProviders(map[string]string{"walmart": "x"}); err == nil {
+		t.Error("unknown marketplace accepted")
+	}
+}

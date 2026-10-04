@@ -18,9 +18,20 @@ type Config struct {
 	SearchProviders        []string // "searxng", "serpapi"
 	SearXNGURL             string
 	SerpAPIKey             string
+	SerpAPIEngine          string // "google_shopping" (prices) or "google" (web)
+	SerpAPIBaseURL         string // empty = SerpApi; for tests / outbound proxies
 	ProviderAttemptTimeout time.Duration
-	ProviderFailThreshold  int
-	ProviderCooldown       time.Duration
+
+	// Apify scrapers for marketplaces without an official API (Temu, SHEIN).
+	ApifyToken            string
+	ApifyMarkets          []string          // e.g. temu,shein
+	ApifyActors           map[string]string // market -> "owner~actor-name"
+	ApifyInputs           map[string]string // market -> input JSON template with {{query}}
+	ApifyMaxItems         int
+	ApifyTimeout          time.Duration
+	ApifyBaseURL          string // empty = Apify; for tests / outbound proxies
+	ProviderFailThreshold int
+	ProviderCooldown      time.Duration
 
 	// End-user JWTs from the auth provider (Firebase, Supabase, Clerk, ...).
 	AuthJWKSURL   string
@@ -69,6 +80,15 @@ func Load() (Config, error) {
 		SearchProviders:           splitList(env("SEARCH_PROVIDERS", "searxng,serpapi")),
 		SearXNGURL:                os.Getenv("SEARXNG_URL"),
 		SerpAPIKey:                os.Getenv("SERPAPI_KEY"),
+		SerpAPIEngine:             env("SERPAPI_ENGINE", "google_shopping"),
+		SerpAPIBaseURL:            os.Getenv("SERPAPI_BASE_URL"),
+		ApifyBaseURL:              os.Getenv("APIFY_BASE_URL"),
+		ApifyToken:                os.Getenv("APIFY_TOKEN"),
+		ApifyMarkets:              splitList(strings.ToLower(os.Getenv("APIFY_MARKETS"))),
+		ApifyActors:               map[string]string{},
+		ApifyInputs:               map[string]string{},
+		ApifyMaxItems:             parse(&errs, "APIFY_MAX_ITEMS", 10, strconv.Atoi),
+		ApifyTimeout:              parse(&errs, "APIFY_TIMEOUT", 25*time.Second, time.ParseDuration),
 		ProviderAttemptTimeout:    parse(&errs, "PROVIDER_ATTEMPT_TIMEOUT", 8*time.Second, time.ParseDuration),
 		ProviderFailThreshold:     parse(&errs, "PROVIDER_FAILURE_THRESHOLD", 3, strconv.Atoi),
 		ProviderCooldown:          parse(&errs, "PROVIDER_COOLDOWN", time.Minute, time.ParseDuration),
@@ -110,6 +130,28 @@ func Load() (Config, error) {
 			errs = append(errs, fmt.Errorf("SEARCH_PROVIDERS: unknown provider %q", p))
 		}
 		seen[p] = true
+	}
+	if cfg.SerpAPIEngine != "google_shopping" && cfg.SerpAPIEngine != "google" {
+		errs = append(errs, fmt.Errorf("SERPAPI_ENGINE: %q must be google_shopping or google", cfg.SerpAPIEngine))
+	}
+	if len(cfg.ApifyMarkets) > 0 {
+		if cfg.ApifyToken == "" {
+			errs = append(errs, errors.New("APIFY_TOKEN is required when APIFY_MARKETS is set"))
+		}
+		if cfg.ApifyMaxItems <= 0 || cfg.ApifyTimeout <= 0 || cfg.ApifyTimeout > 300*time.Second {
+			errs = append(errs, errors.New("APIFY_MAX_ITEMS must be positive and APIFY_TIMEOUT between 1s and 300s"))
+		}
+		for _, m := range cfg.ApifyMarkets {
+			key := "APIFY_" + strings.ToUpper(m)
+			cfg.ApifyActors[m] = os.Getenv(key + "_ACTOR")
+			cfg.ApifyInputs[m] = os.Getenv(key + "_INPUT")
+			if cfg.ApifyActors[m] == "" || !strings.Contains(cfg.ApifyInputs[m], "{{query}}") {
+				errs = append(errs, fmt.Errorf("%s_ACTOR and %s_INPUT (JSON containing {{query}}) are required for %s", key, key, m))
+			}
+		}
+		// An Actor run can take much longer than a web search: give the whole
+		// search enough time for it plus a web fallback.
+		cfg.SearchTimeout = max(cfg.SearchTimeout, cfg.ApifyTimeout+cfg.ProviderAttemptTimeout+2*time.Second)
 	}
 	if cfg.RateLimitRPS <= 0 || cfg.RateLimitBurst <= 0 || cfg.MaxConcurrency <= 0 || cfg.ProviderFailThreshold <= 0 {
 		errs = append(errs, errors.New("RATE_LIMIT_RPS, RATE_LIMIT_BURST, SEARCH_MAX_CONCURRENCY and PROVIDER_FAILURE_THRESHOLD must be positive"))

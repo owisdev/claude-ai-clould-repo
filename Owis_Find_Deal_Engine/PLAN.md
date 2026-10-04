@@ -98,7 +98,8 @@ type Provider interface {
 | Provider | Used for | Cost | Status |
 |---|---|---|---|
 | `searxng` (self-hosted) | site-restricted metasearch, any market | free | ✅ default, tried first |
-| `serpapi` | site-restricted Google search, any market | 250 free/month, then paid | ✅ fallback only |
+| `serpapi` | **Google Shopping** (prices, seller, image; default) or Google web search, any market | 250 free/month, then ~$25 / 1,000 | ✅ fallback |
+| `apify` | Temu / SHEIN scrapers from the Apify store (real prices), per marketplace | $5 free credit/month, then ~$0.7–5 / 1,000 results | ✅ optional (`APIFY_MARKETS`) |
 | `ebay` (Browse API) | eBay with real prices | free (5,000 calls/day) | when keys arrive |
 | `aliexpress` (Affiliate API) | AliExpress with prices + affiliate links | free | when keys arrive |
 
@@ -113,8 +114,28 @@ Implemented behaviour:
   channels, `SEARCH_MAX_CONCURRENCY`), all under one `context` timeout.
 - A failing marketplace never fails the request: `markets` reports
   `ok`/`error` for each one; `502` only when all fail.
-- Results are mapped to their marketplace by link domain, numbered per
-  marketplace, and interleaved (best result of each shop first).
+- Results are mapped to their marketplace by link domain (Google
+  Shopping: by seller name), numbered per marketplace, and interleaved
+  (best result of each shop first).
+- **Google Shopping** (`SERPAPI_ENGINE=google_shopping`): one query for
+  all shops (no `site:` support there); offers from other sellers are
+  dropped; if nothing from our shops is found, one web search retry.
+- **Per-marketplace providers**: shops listed in `APIFY_MARKETS` use
+  their own chain `Apify scraper → web providers`, with `APIFY_TIMEOUT`
+  per attempt (the search timeout is raised to fit it). The scraper and
+  its input are configuration, so a broken scraper can be swapped without
+  a code change.
+
+### Tools evaluated (October 2026)
+
+| Tool | Verdict |
+|---|---|
+| Apify | ✅ added (optional) for Temu / SHEIN, which have no official API |
+| Google Shopping (via SerpApi) | ✅ added as SerpApi's default engine |
+| Google Lens (via SerpApi) | ⏳ future feature — see section 5.5 |
+| ShoppingScraper | ✗ from €49/month, no Temu / SHEIN / AliExpress, built for retailers |
+| AfterShip | ✗ for search (shipment tracking); maybe phase 2 for delivery tracking |
+| ChatGPT shopping | ✗ no API for its results; we reach assistants via step 15 instead |
 
 ## 4b. Cache and price freshness ✅ implemented
 
@@ -199,6 +220,17 @@ linked to a saved item.
   webhook that updates the user's plan.
 
 More features may be added here before this phase starts.
+
+### 5.5 Future features (noted, not planned yet)
+
+- **Search by photo — Google Lens.** The user takes or uploads a photo of
+  a product; the service finds it and returns offers from the shops of
+  their country. Implementation sketch: `POST /api/v1/search/image`
+  (image upload, size-limited) → SerpApi `engine=google_lens` → product
+  name + matching offers → the same shop filtering, cache (keyed by image
+  hash), metering and response format as text search. Same SerpApi
+  account; counts as a live search. Best added together with the mobile
+  app (camera), after phase 2.
 
 ## 6. API
 

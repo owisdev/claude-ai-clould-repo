@@ -16,6 +16,9 @@ architecture and flows, illustrated (regenerate with
   ([markets.json](server/internal/markets/markets.json)).
 - Login required: JWT from the auth provider, verified locally (JWKS).
 - Free SearXNG first, SerpApi only as fallback, with circuit breaker.
+  SerpApi uses **Google Shopping** (prices, seller, image) by default.
+- Optional **Apify** scrapers for Temu / SHEIN (real prices), each with an
+  automatic fallback to the web search.
 - Cache with price-freshness strategy (fresh 2h, stale-while-revalidate
   up to 24h, pull-to-refresh). **Cached answers are free** for users.
 - Daily allowance per plan: free plan used up → 402, paid → 429.
@@ -76,6 +79,19 @@ SEARCH_PROVIDERS=searxng
 
 Random values: `openssl rand -hex 32` (macOS/Linux/Git Bash), or in
 PowerShell: `-join ((1..32) | % { '{0:x2}' -f (Get-Random -Max 256) })`.
+
+### 3b. Optional: prices from Google Shopping and Apify
+
+- **Google Shopping** (250 free searches/month): create a key at
+  <https://serpapi.com>, then set `SERPAPI_KEY=...` and
+  `SEARCH_PROVIDERS=serpapi,searxng` (prices first) or
+  `searxng,serpapi` (free first, SerpApi only as fallback).
+- **Apify for Temu / SHEIN** ($5 free credit/month): create a token at
+  <https://console.apify.com/settings/integrations>, choose one scraper per
+  shop in the Apify store and fill `APIFY_MARKETS`, `APIFY_TOKEN`,
+  `APIFY_TEMU_ACTOR`, `APIFY_TEMU_INPUT`, … — step-by-step comments are in
+  `.env.example`. Tip: try the scraper once in the Apify console first to
+  see that it returns products for your search.
 
 ### 4. Start
 
@@ -141,6 +157,12 @@ Please report:
 5. Anything you want changed in the response format before the app is
    built on it.
 6. Status of the eBay and AliExpress developer applications.
+7. If you enabled them: Google Shopping and Apify results (prices
+   correct? which scrapers you chose, how long the Apify searches took).
+
+## Future features (noted)
+
+- **Search by photo (Google Lens)** — see PLAN.md section 5.5.
 
 ## Open decisions (owner)
 

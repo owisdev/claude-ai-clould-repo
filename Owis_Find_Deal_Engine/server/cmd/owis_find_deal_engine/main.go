@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"owis_find_deal_engine/internal/config"
 	"owis_find_deal_engine/internal/markets"
 	"owis_find_deal_engine/internal/metering"
+	"owis_find_deal_engine/internal/providers/apify"
 	"owis_find_deal_engine/internal/providers/searxng"
 	"owis_find_deal_engine/internal/providers/serpapi"
 	"owis_find_deal_engine/internal/ratelimit"
@@ -86,8 +88,14 @@ func run() error {
 	}
 	log.Info("search providers", "chain", web.Name())
 
+	providers := map[string]search.Provider{"web": web}
+	catalog, err = addApifyProviders(cfg, catalog, providers, web, log)
+	if err != nil {
+		return err
+	}
+
 	searcher := search.NewService(catalog,
-		map[string]search.Provider{"web": web},
+		providers,
 		search.Options{Timeout: cfg.SearchTimeout, MaxConcurrency: cfg.MaxConcurrency},
 		log)
 
@@ -226,7 +234,8 @@ func buildWebProvider(cfg config.Config, log *slog.Logger) (search.Provider, err
 		case "searxng":
 			p, err = searxng.New(searxng.Config{BaseURL: cfg.SearXNGURL, Combined: cfg.SearchCombined})
 		case "serpapi":
-			p, err = serpapi.New(serpapi.Config{APIKey: cfg.SerpAPIKey, Combined: cfg.SearchCombined})
+			p, err = serpapi.New(serpapi.Config{APIKey: cfg.SerpAPIKey, Engine: cfg.SerpAPIEngine,
+				BaseURL: cfg.SerpAPIBaseURL, Combined: cfg.SearchCombined})
 		default:
 			err = fmt.Errorf("unknown search provider %q", name)
 		}
@@ -240,4 +249,43 @@ func buildWebProvider(cfg config.Config, log *slog.Logger) (search.Provider, err
 		FailureThreshold: cfg.ProviderFailThreshold,
 		Cooldown:         cfg.ProviderCooldown,
 	}, log)
+}
+
+// addApifyProviders routes each marketplace in APIFY_MARKETS to its Apify
+// scraper, with the web providers as fallback when the scraper fails or is
+// too slow. Other marketplaces keep using the web providers.
+func addApifyProviders(cfg config.Config, catalog *markets.Catalog, providers map[string]search.Provider,
+	web search.Provider, log *slog.Logger) (*markets.Catalog, error) {
+	if len(cfg.ApifyMarkets) == 0 {
+		return catalog, nil
+	}
+	overrides := make(map[string]string, len(cfg.ApifyMarkets))
+	for _, m := range cfg.ApifyMarkets {
+		scraper, err := apify.New(apify.Config{
+			Token:         cfg.ApifyToken,
+			Actor:         cfg.ApifyActors[m],
+			InputTemplate: cfg.ApifyInputs[m],
+			MaxItems:      cfg.ApifyMaxItems,
+			Timeout:       cfg.ApifyTimeout,
+			Combined:      cfg.SearchCombined,
+			BaseURL:       cfg.ApifyBaseURL,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("APIFY_%s: %w", strings.ToUpper(m), err)
+		}
+		chain, err := search.NewFallback([]search.Provider{scraper, web}, search.FallbackOptions{
+			AttemptTimeout:   cfg.ApifyTimeout,
+			FailureThreshold: cfg.ProviderFailThreshold,
+			Cooldown:         cfg.ProviderCooldown,
+		}, log)
+		if err != nil {
+			return nil, err
+		}
+		name := "apify-" + m
+		providers[name] = chain
+		overrides[m] = name
+		log.Info("apify scraper enabled", "market", m, "actor", cfg.ApifyActors[m],
+			"timeout", cfg.ApifyTimeout.String(), "search_timeout", cfg.SearchTimeout.String())
+	}
+	return catalog.WithProviders(overrides)
 }

@@ -26,6 +26,9 @@ func TestLoadDefaults(t *testing.T) {
 	if len(cfg.SearchProviders) != 2 || cfg.SearchProviders[0] != "searxng" || cfg.ProviderAttemptTimeout != 8*time.Second {
 		t.Errorf("unexpected provider defaults: %+v", cfg)
 	}
+	if cfg.SerpAPIEngine != "google_shopping" || len(cfg.ApifyMarkets) != 0 {
+		t.Errorf("unexpected engine/apify defaults: %+v", cfg)
+	}
 	if !cfg.CacheEnabled || cfg.CacheFreshTTL != 2*time.Hour || cfg.CacheStaleTTL != 24*time.Hour {
 		t.Errorf("unexpected cache defaults: %+v", cfg)
 	}
@@ -84,5 +87,45 @@ func TestLoadCacheValidation(t *testing.T) {
 	t.Setenv("CACHE_ENABLED", "false")
 	if _, err := Load(); err != nil {
 		t.Errorf("disabled cache still validated: %v", err)
+	}
+}
+
+func TestLoadApify(t *testing.T) {
+	t.Setenv("AUTH_JWKS_URL", "https://example.com/jwks")
+	t.Setenv("AUTH_ISSUER", "i")
+	t.Setenv("AUTH_AUDIENCE", "a")
+	t.Setenv("SEARCH_PROVIDERS", "searxng")
+	t.Setenv("SEARXNG_URL", "http://s")
+
+	t.Setenv("APIFY_MARKETS", "Temu, shein")
+	if _, err := Load(); err == nil {
+		t.Fatal("missing token/actors accepted")
+	}
+
+	t.Setenv("APIFY_TOKEN", "tok")
+	t.Setenv("APIFY_TEMU_ACTOR", "someone~temu")
+	t.Setenv("APIFY_TEMU_INPUT", `{"keyword":"{{query}}"}`)
+	t.Setenv("APIFY_SHEIN_ACTOR", "someone~shein")
+	t.Setenv("APIFY_SHEIN_INPUT", `{"searchQueries":["fixed"]}`)
+	if _, err := Load(); err == nil {
+		t.Fatal("input without {{query}} accepted")
+	}
+
+	t.Setenv("APIFY_SHEIN_INPUT", `{"searchQueries":["{{query}}"]}`)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ApifyActors["temu"] != "someone~temu" || cfg.ApifyInputs["shein"] == "" {
+		t.Errorf("apify config = %+v %+v", cfg.ApifyActors, cfg.ApifyInputs)
+	}
+	// 25s Apify + 8s web fallback + 2s margin.
+	if cfg.SearchTimeout != 35*time.Second {
+		t.Errorf("search timeout = %v, want raised to 35s", cfg.SearchTimeout)
+	}
+
+	t.Setenv("SERPAPI_ENGINE", "bing")
+	if _, err := Load(); err == nil {
+		t.Error("unknown SerpApi engine accepted")
 	}
 }

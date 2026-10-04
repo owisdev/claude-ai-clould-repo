@@ -178,3 +178,29 @@ func MatchTarget(host string, targets []Target) (Target, bool) {
 	}
 	return Target{}, false
 }
+
+// WithProviders returns a copy of the catalog in which the given
+// marketplaces use another provider, e.g. {"temu": "apify-temu"}.
+// Marketplaces not in the catalog are an error.
+func (c *Catalog) WithProviders(overrides map[string]string) (*Catalog, error) {
+	known := map[string]bool{}
+	out := &Catalog{countries: make(map[string]Country, len(c.countries)), codes: c.codes}
+	for code, country := range c.countries {
+		targets := make([]Target, len(country.Targets))
+		for i, t := range country.Targets {
+			known[t.Market] = true
+			if p, ok := overrides[t.Market]; ok {
+				t.Provider = p
+			}
+			targets[i] = t
+		}
+		country.Targets = targets
+		out.countries[code] = country
+	}
+	for m := range overrides {
+		if !known[m] {
+			return nil, fmt.Errorf("markets: unknown marketplace %q", m)
+		}
+	}
+	return out, nil
+}

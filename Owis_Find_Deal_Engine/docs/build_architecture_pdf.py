@@ -224,7 +224,7 @@ def diagram_overview():
     # right: external services
     box(d, 412, 228, 81, 58, "Search engines\nGoogle, Bing,\nDuckDuckGo,\nBrave, ...",
         fill=GREY, stroke=GREY_D, size=7.2)
-    box(d, 412, 160, 81, 46, "SerpApi\npaid fallback\n(only if needed)",
+    box(d, 412, 160, 81, 46, "Paid backups\nSerpApi (Google\nShopping) · Apify",
         fill=GREY, stroke=GREY_D, size=7.2)
     box(d, 412, 106, 81, 46, "Auth provider\npublic keys\n(JWKS)",
         fill=ORANGE, stroke=ORANGE_D, size=7.2)
@@ -330,20 +330,30 @@ def diagram_login():
 
 
 def diagram_fallback():
-    W, H = CONTENT_W, 120
+    W, H = CONTENT_W, 178
     d = Drawing(W, H)
-    box(d, 0, 45, 92, 40, "Search service\n(1 combined query)", fill=BLUE, stroke=BLUE_D, size=7.6)
-    box(d, 130, 60, 110, 44, "SearXNG (free)\nmax 8 s per attempt", fill=GREEN, stroke=GREEN_D, size=7.6)
-    box(d, 130, 4, 110, 44, "SerpApi (paid)\nonly when SearXNG fails", fill=ORANGE, stroke=ORANGE_D, size=7.6)
-    box(d, 300, 60, 92, 44, "Results\nprovider: searxng", fill=colors.white, stroke=GREEN_D, size=7.6)
-    box(d, 300, 4, 92, 44, "Results or 502\nprovider: serpapi", fill=colors.white, stroke=ORANGE_D, size=7.6)
-    arrow(d, 92, 72, 130, 82)
-    arrow(d, 240, 82, 300, 82, "ok")
-    arrow(d, 185, 60, 185, 48, "error / blocked", label_dx=5, label_dy=-2, label_anchor="start")
-    arrow(d, 240, 26, 300, 26)
-    box(d, 405, 20, 88, 84,
-        "Circuit breaker\n\n3 failures in a row\n→ skip SearXNG\nfor 1 minute,\nthen try it again",
-        fill=GREY, stroke=GREY_D, size=7.2)
+    box(d, 0, 66, 88, 50, "Search service\nshops grouped\nby source", fill=BLUE, stroke=BLUE_D, size=7.6)
+    # chain A: shops without a scraper
+    text(d, 112, 166, "amazon, aliexpress, ebay (and temu / shein when Apify is off)", 7.2, MUTED)
+    box(d, 112, 112, 104, 46, "SearXNG (free)\nmax 8 s", fill=GREEN, stroke=GREEN_D, size=7.6)
+    box(d, 252, 112, 124, 46, "SerpApi (paid)\nGoogle Shopping:\nprices · seller · image",
+        fill=ORANGE, stroke=ORANGE_D, size=7.4)
+    arrow(d, 216, 135, 252, 135, "fails", label_dy=4)
+    # chain B: shops with an Apify scraper
+    text(d, 112, 72, "temu, shein — when APIFY_MARKETS is set", 7.2, MUTED)
+    box(d, 112, 18, 104, 46, "Apify scraper\nreal prices\nmax 25 s", fill=PURPLE, stroke=PURPLE_D, size=7.6)
+    box(d, 252, 18, 124, 46, "same chain as above\nSearXNG → SerpApi\n(for this shop only)",
+        fill=colors.white, stroke=GREY_D, size=7.4, dash=[3, 2])
+    arrow(d, 216, 41, 252, 41, "fails/slow", label_dy=5, label_size=6.4)
+    arrow(d, 88, 100, 112, 128)
+    arrow(d, 88, 82, 112, 48)
+    # results
+    box(d, 410, 66, 83, 50, "Merged results\nprovider: searxng\n/ serpapi / apify",
+        fill=colors.white, stroke=NAVY, size=7.2)
+    arrow(d, 376, 135, 410, 108)
+    arrow(d, 376, 41, 410, 74)
+    text(d, 0, 4, "The first source that succeeds answers. Circuit breaker: 3 failures in a row → that "
+         "source is skipped for 1 minute.", 7, MUTED)
     return d
 
 
@@ -409,7 +419,7 @@ def build():
                ["Code", "github.com/owisdev/claude-ai-clould-repo, folder "
                         "<b>Owis_Find_Deal_Engine/</b>, branch <b>claude/cloud-vs-local-7xi988</b>"],
                ["Language / runtime", "Go 1.26 · Docker · Redis · SearXNG"],
-               ["Date", "2 October 2026"],
+               ["Date", "4 October 2026"],
            ], [38 * mm, CONTENT_W - 38 * mm], first_col_bold=True),
            Spacer(1, 10 * mm),
            P("<b>How to read this document</b>", "h2")]
@@ -434,7 +444,8 @@ def build():
         "<b>Login required:</b> every search comes from a signed-in user (Google, Apple or "
         "Facebook through an auth provider such as Firebase).",
         "<b>As cheap as possible:</b> a free self-hosted search engine (SearXNG) is used first; "
-        "the paid one (SerpApi) only when the free one fails.",
+        "paid sources only when needed: SerpApi with Google Shopping (prices) as backup, and "
+        "optional Apify scrapers for Temu and SHEIN (real prices).",
         "<b>Cache:</b> answers are remembered for up to 24 hours and refreshed automatically, "
         "so popular searches cost nothing and prices stay reasonably current.",
         "<b>Fair use:</b> each user has a daily number of searches by plan (free / pro). "
@@ -476,7 +487,10 @@ def build():
                               "merges and caches results", "The product itself"],
                ["SearXNG", "Self-hosted metasearch: asks Google, Bing, DuckDuckGo, Brave… "
                            "in one go", "Free search results"],
-               ["SerpApi", "Paid Google search API", "Backup when SearXNG is blocked"],
+               ["SerpApi", "Paid Google API; uses Google Shopping (prices, seller, image)",
+                "Backup when SearXNG is blocked"],
+               ["Apify (optional)", "Store of ready-made scrapers; one per shop for Temu and SHEIN",
+                "Real prices where shops have no official API"],
                ["Redis", "In-memory database: daily search counters + cached answers",
                 "Fast, shared by all server copies"],
                ["HTTPS proxy / Tunnel", "Adds HTTPS in front of the API in production",
@@ -579,11 +593,13 @@ def build():
              "operator, so one search covers every shop (cheapest option):"),
            code('samsung s pen (site:amazon.com OR site:aliexpress.com OR site:temu.com OR site:ar.shein.com)'),
            P("(Setting <font name='Mono'>SEARCH_COMBINED=false</font> sends one query per shop "
-             "instead, in parallel: better coverage, more cost.)", "small"),
+             "instead, in parallel: better coverage, more cost.) Google Shopping does not support "
+             "<font name='Mono'>site:</font>; there the query is just the product name and offers "
+             "are matched to our shops by seller name (“Amazon.com”, “SHEIN”…).", "small"),
            P("Step 3 — ask the providers, free first", "h2"),
            diagram_fallback(),
-           caption("Figure 5 — Provider chain. SerpApi is used only when SearXNG errors, times out "
-                   "or is blocked by the search engines (CAPTCHA)."),
+           caption("Figure 5 — Search sources. Paid sources run only when the free one errors, "
+                   "times out or is blocked; Apify (optional) gives Temu and SHEIN real prices."),
            P("Step 4 — clean and merge the results", "h2")]
     st += bullets([
         "Each result link is matched to its shop by domain (regional sites such as "
@@ -599,7 +615,8 @@ def build():
              "each shop. One failing shop does not fail the search; the app can show “SHEIN "
              "temporarily unavailable”. Only if every shop fails does the user get 502."),
            callout("<b>Concurrency, in short:</b> provider calls run on a small pool of goroutines "
-                   "(Go's lightweight threads) with one overall time limit (15 s). Channels are "
+                   "(Go's lightweight threads) with one overall time limit (15 s; raised automatically "
+                   "when Apify is on). Channels are "
                    "sized so no goroutine can get stuck, and a crash inside a provider is caught "
                    "and reported as an error instead of stopping the server."),
            PageBreak()]
@@ -731,6 +748,10 @@ def build():
                ["SEARCH_PROVIDERS", "searxng,serpapi", "Order of search sources"],
                ["SEARXNG_URL", "—", "Address of SearXNG"],
                ["SERPAPI_KEY", "—", "Needed only if serpapi is listed"],
+               ["SERPAPI_ENGINE", "google_shopping", "Prices from Google Shopping, or google (web)"],
+               ["APIFY_MARKETS / APIFY_TOKEN", "empty", "Shops that use an Apify scraper (temu,shein)"],
+               ["APIFY_&lt;SHOP&gt;_ACTOR / _INPUT", "—", "Which scraper, and its input with {{query}}"],
+               ["APIFY_TIMEOUT / APIFY_MAX_ITEMS", "25s / 10", "Scraper time limit / results per run"],
                ["SEARCH_COMBINED", "true", "One query for all shops (cheapest)"],
                ["SEARCH_TIMEOUT", "15s", "Max time for a whole search"],
                ["PROVIDER_ATTEMPT_TIMEOUT", "8s", "Time SearXNG gets before falling back"],
@@ -776,7 +797,7 @@ def build():
     ])
     st += [P("Quality checks", "h2")]
     st += bullets([
-        "84 automated test functions (110 test cases) across all packages, run with Go's race detector "
+        "97 automated test functions (128 test cases) across all packages, run with Go's race detector "
         "(finds unsafe concurrent code).",
         "GitHub Actions on every push: formatting, dependency check, vet, tests, "
         "known-vulnerability scan, Docker build and smoke test. First run: all green.",
@@ -799,6 +820,10 @@ def build():
                                                     "affiliate income) when keys are approved; "
                                                     "deployment with HTTPS; access for AI agents "
                                                     "(OpenAPI / MCP tool)."],
+               ["Future feature", "noted", "<b>Search by photo (Google Lens):</b> the user takes a "
+                                           "photo, the service finds the product and its offers in "
+                                           "the shops of their country (same cache, limits and "
+                                           "answer format). With the mobile app."],
            ], [38 * mm, 18 * mm, CONTENT_W - 56 * mm], first_col_bold=True),
            Spacer(1, 6),
            callout("<b>Right now:</b> run the stack locally (STATUS.md), then report back with "
@@ -816,7 +841,8 @@ def build():
                ["JWKS", "The auth provider's public keys, used to check a JWT's signature."],
                ["Cache hit / miss", "Answer found in / not in the stored answers."],
                ["Stale", "A cached answer older than the fresh period, still usable while being refreshed."],
-               ["Provider", "A search source: SearXNG (free) or SerpApi (paid)."],
+               ["Provider", "A search source: SearXNG (free), SerpApi or Apify (paid)."],
+               ["Scraper (Apify Actor)", "A ready-made program that reads a shop's website and returns products."],
                ["Fallback", "Using the next provider when the first one fails."],
                ["Circuit breaker", "Temporarily skipping a source that keeps failing, so it does not slow every request."],
                ["Rate limit / allowance", "Speed limit per second / number of live searches per day."],
