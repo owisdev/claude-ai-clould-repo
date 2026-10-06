@@ -158,8 +158,9 @@ func Load() (Config, error) {
 			key := "APIFY_" + strings.ToUpper(m)
 			cfg.ApifyActors[m] = os.Getenv(key + "_ACTOR")
 			cfg.ApifyInputs[m] = os.Getenv(key + "_INPUT")
-			if cfg.ApifyActors[m] == "" || !strings.Contains(cfg.ApifyInputs[m], "{{query}}") {
-				errs = append(errs, fmt.Errorf("%s_ACTOR and %s_INPUT (JSON containing {{query}}) are required for %s", key, key, m))
+			in := cfg.ApifyInputs[m]
+			if cfg.ApifyActors[m] == "" || !(strings.Contains(in, "{{query}}") || strings.Contains(in, "{{query_url}}") || strings.Contains(in, "{{query_slug}}")) {
+				errs = append(errs, fmt.Errorf("%s_ACTOR and %s_INPUT (JSON containing {{query}}, {{query_url}} or {{query_slug}}) are required for %s", key, key, m))
 			}
 		}
 	}

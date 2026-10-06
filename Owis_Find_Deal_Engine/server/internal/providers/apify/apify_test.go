@@ -184,3 +184,50 @@ func TestParsePriceLabel(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderInputURLPlaceholders(t *testing.T) {
+	tmpl := `{"startUrls":[{"url":"https://www.aliexpress.com/w/wholesale-{{query_slug}}.html"},` +
+		`{"url":"https://www.aliexpress.com/wholesale?SearchText={{query_url}}"}],"maxItems":{{max}}}`
+	out, err := renderInput(tmpl, `Samsung  S-Pen "pro"`, 10, "us")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v struct {
+		StartUrls []struct{ URL string } `json:"startUrls"`
+		MaxItems  int                    `json:"maxItems"`
+	}
+	if err := json.Unmarshal([]byte(out), &v); err != nil {
+		t.Fatalf("%s: %v", out, err)
+	}
+	if v.StartUrls[0].URL != "https://www.aliexpress.com/w/wholesale-samsung-s-pen-pro.html" ||
+		v.StartUrls[1].URL != "https://www.aliexpress.com/wholesale?SearchText=Samsung++S-Pen+%22pro%22" || v.MaxItems != 10 {
+		t.Errorf("out = %s", out)
+	}
+	if got := slug("سماعة بلوتوث"); got != "%D8%B3%D9%85%D8%A7%D8%B9%D8%A9-%D8%A8%D9%84%D9%88%D8%AA%D9%88%D8%AB" {
+		t.Errorf("arabic slug = %s", got)
+	}
+}
+
+func TestNewAcceptsURLPlaceholderOnly(t *testing.T) {
+	if _, err := New(Config{Token: "t", Actor: "piotrv1001/aliexpress-listings-scraper",
+		InputTemplate: `{"startUrls":[{"url":"https://www.aliexpress.com/w/wholesale-{{query_slug}}.html"}]}`}); err != nil {
+		t.Errorf("template with {{query_slug}} rejected: %v", err)
+	}
+}
+
+func TestAliExpressListingsOutput(t *testing.T) {
+	// Output of piotrv1001/aliexpress-listings-scraper from the local test.
+	items := []map[string]any{{
+		"imageUrl": "https://ae-pic-a1.aliexpress-media.com/kf/S40b.jpg",
+		"title":    "For Samsung Galaxy S25 Ultra Stylus Pen, S Pen Replacement",
+		"price":    1.33, "originalPrice": 11.21, "currency": "USD", "rating": 4.9,
+		"productType": "natural", "id": "3256812288634547",
+		"productUrl": "https://www.aliexpress.com/item/3256812288634547.html",
+	}}
+	got := toProducts(items, markets.Target{Market: "aliexpress", Domain: "aliexpress.com"}, 10)
+	if len(got) != 1 || got[0].Link != "https://www.aliexpress.com/item/3256812288634547.html" ||
+		got[0].Price == nil || *got[0].Price != 1.33 || got[0].Currency != "USD" ||
+		got[0].Thumbnail != "https://ae-pic-a1.aliexpress-media.com/kf/S40b.jpg" {
+		t.Errorf("got %+v", got)
+	}
+}

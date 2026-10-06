@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"owis_find_deal_engine/internal/markets"
 	"owis_find_deal_engine/internal/search"
@@ -62,8 +63,8 @@ func New(cfg Config) (*Client, error) {
 	if cfg.Token == "" || cfg.Actor == "" {
 		return nil, errors.New("apify: token and actor are required")
 	}
-	if !strings.Contains(cfg.InputTemplate, "{{query}}") {
-		return nil, errors.New("apify: input template must contain {{query}}")
+	if !hasQuery(cfg.InputTemplate) {
+		return nil, errors.New("apify: input template must contain {{query}}, {{query_url}} or {{query_slug}}")
 	}
 	if _, err := renderInput(cfg.InputTemplate, "test \"quoted\"", 10, "us"); err != nil {
 		return nil, fmt.Errorf("apify: input template for %s: %w", cfg.Actor, err)
@@ -139,13 +140,27 @@ func (c *Client) run(ctx context.Context, q search.Query, t markets.Target) ([]s
 	return toProducts(items, t, c.cfg.MaxItems), nil
 }
 
+// hasQuery reports whether a template contains one of the query placeholders.
+func hasQuery(tmpl string) bool {
+	return strings.Contains(tmpl, "{{query}}") || strings.Contains(tmpl, "{{query_url}}") ||
+		strings.Contains(tmpl, "{{query_slug}}")
+}
+
 // renderInput fills the template. The query is JSON-escaped, so quotes or
-// backslashes typed by a user cannot break or alter the Actor input.
+// backslashes typed by a user cannot break or alter the Actor input. For
+// Actors that take a search URL instead of a keyword:
+//
+//	{{query_url}}  URL query encoding: "samsung s pen" -> "samsung+s+pen"
+//	{{query_slug}} lowercase words joined by "-": "samsung-s-pen"
 func renderInput(tmpl, query string, max int, region string) (string, error) {
-	escaped, _ := json.Marshal(query)
-	q := string(escaped[1 : len(escaped)-1])
+	jsonText := func(s string) string {
+		escaped, _ := json.Marshal(s)
+		return string(escaped[1 : len(escaped)-1])
+	}
 	r := strings.NewReplacer(
-		"{{query}}", q,
+		"{{query}}", jsonText(query),
+		"{{query_url}}", jsonText(url.QueryEscape(query)),
+		"{{query_slug}}", jsonText(slug(query)),
 		"{{max}}", strconv.Itoa(max),
 		"{{country}}", strings.ToLower(region),
 		"{{COUNTRY}}", strings.ToUpper(region),
@@ -155,6 +170,18 @@ func renderInput(tmpl, query string, max int, region string) (string, error) {
 		return "", errors.New("input template is not valid JSON after filling placeholders")
 	}
 	return out, nil
+}
+
+// slug turns a query into lowercase words of letters and digits joined by
+// "-" (URL-safe for any script, e.g. Arabic letters are percent-encoded).
+func slug(s string) string {
+	words := strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+	for i, w := range words {
+		words[i] = url.PathEscape(w)
+	}
+	return strings.Join(words, "-")
 }
 
 // apiError extracts Apify's error message ({"error":{"type","message"}}).
