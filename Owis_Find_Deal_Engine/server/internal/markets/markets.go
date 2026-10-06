@@ -69,8 +69,9 @@ func (t Target) SearchLink(text string) string {
 // productRule recognizes a marketplace's product pages by their path and
 // optionally rebuilds a clean link from the product id.
 type productRule struct {
-	paths []*regexp.Regexp
-	link  string // e.g. "https://{host}/dp/{id}"; empty keeps the path
+	paths   []*regexp.Regexp
+	link    string // e.g. "https://{host}/dp/{id}"; empty keeps the path
+	idParam string // query parameter holding the id, e.g. "goods_id"
 }
 
 // ProductLink reports whether link is a product page of this marketplace
@@ -92,12 +93,22 @@ func (t Target) ProductLink(link string) (string, bool) {
 		if m == nil {
 			continue
 		}
-		id := ""
+		id, fromQuery := "", false
 		if i := re.SubexpIndex("id"); i > 0 {
 			id = m[i]
+		} else if t.products.idParam != "" {
+			id = u.Query().Get(t.products.idParam)
+			if !isDigits(id) {
+				continue // e.g. goods.html without a numeric goods_id
+			}
+			fromQuery = true
 		}
 		if t.products.link != "" && id != "" {
 			return strings.NewReplacer("{host}", host, "{id}", id).Replace(t.products.link), true
+		}
+		if fromQuery {
+			// Keep only the id parameter (drops tracking parameters).
+			return "https://" + host + u.EscapedPath() + "?" + t.products.idParam + "=" + id, true
 		}
 		return "https://" + host + u.EscapedPath(), true
 	}
@@ -169,8 +180,9 @@ type fileFormat struct {
 		Name         string `json:"name"`
 		Provider     string `json:"provider"`
 		ProductPages *struct {
-			Paths []string `json:"paths"`
-			Link  string   `json:"link"`
+			Paths   []string `json:"paths"`
+			Link    string   `json:"link"`
+			IDParam string   `json:"id_param"`
 		} `json:"product_pages"`
 		SearchLink string `json:"search_link"`
 	} `json:"markets"`
@@ -221,7 +233,7 @@ func Parse(data []byte) (*Catalog, error) {
 		if m.ProductPages == nil {
 			continue
 		}
-		rule, err := compileRule(m.ProductPages.Paths, m.ProductPages.Link)
+		rule, err := compileRule(m.ProductPages.Paths, m.ProductPages.Link, m.ProductPages.IDParam)
 		if err != nil {
 			return nil, fmt.Errorf("markets: market %q product_pages: %w", id, err)
 		}
@@ -279,17 +291,17 @@ func Parse(data []byte) (*Catalog, error) {
 	return cat, nil
 }
 
-func compileRule(paths []string, link string) (*productRule, error) {
+func compileRule(paths []string, link, idParam string) (*productRule, error) {
 	if len(paths) == 0 {
 		return nil, errors.New("needs at least one path pattern")
 	}
-	rule := &productRule{link: link}
+	rule := &productRule{link: link, idParam: idParam}
 	for _, p := range paths {
 		re, err := regexp.Compile(p)
 		if err != nil {
 			return nil, err
 		}
-		if strings.Contains(link, "{id}") && re.SubexpIndex("id") < 0 {
+		if strings.Contains(link, "{id}") && re.SubexpIndex("id") < 0 && idParam == "" {
 			return nil, fmt.Errorf("pattern %q needs an (?P<id>...) group for link %q", p, link)
 		}
 		rule.paths = append(rule.paths, re)
@@ -301,6 +313,18 @@ func compileRule(paths []string, link string) (*productRule, error) {
 		}
 	}
 	return rule, nil
+}
+
+func isDigits(s string) bool {
+	if s == "" || len(s) > 25 {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // SiteQuery restricts title to the targets' domains, e.g.

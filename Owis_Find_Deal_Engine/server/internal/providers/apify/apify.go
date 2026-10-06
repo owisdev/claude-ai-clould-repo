@@ -89,15 +89,24 @@ func New(cfg Config) (*Client, error) {
 func (c *Client) Name() string { return "apify" }
 func (c *Client) Batch() bool  { return c.cfg.Combined }
 
-// Search runs the Actor once per target (normally exactly one).
+// Search runs the Actor once per target (normally exactly one). A target
+// the scraper found nothing for is reported as uncovered, so the next
+// provider can try it (a scraper may cover only one region of the shop).
 func (c *Client) Search(ctx context.Context, q search.Query) ([]search.Product, error) {
 	var out []search.Product
+	uncovered := map[string]bool{}
 	for _, t := range q.Targets {
 		products, err := c.run(ctx, q, t)
 		if err != nil {
 			return nil, err
 		}
+		if len(products) == 0 {
+			uncovered[t.Market] = true
+		}
 		out = append(out, products...)
+	}
+	if len(uncovered) > 0 {
+		return nil, &search.PartialError{Products: out, Uncovered: uncovered}
 	}
 	return out, nil
 }
@@ -206,9 +215,13 @@ func apiError(body []byte) string {
 // Field names used by common Temu/SHEIN/marketplace scrapers, in order of
 // preference.
 var (
-	titleKeys    = []string{"title", "name", "goods_name", "goodsName", "productName", "product_title", "productTitle"}
-	linkKeys     = []string{"url", "link", "productUrl", "product_url", "goods_url", "goodsUrl", "detailUrl", "detail_url"}
-	priceKeys    = []string{"price", "salePrice", "sale_price", "currentPrice", "current_price", "finalPrice", "retailPrice", "extracted_price"}
+	titleKeys = []string{"title", "name", "goods_name", "goodsName", "productName", "product_title", "productTitle"}
+	linkKeys  = []string{"url", "link", "productUrl", "product_url", "goods_url", "goodsUrl", "detailUrl", "detail_url",
+		"link_url", "linkUrl"}
+	// Formatted labels first: some scrapers give "price" in cents
+	// (Temu: "price": 10361 with "price_str": "$103.61").
+	priceKeys = []string{"price_str", "priceStr", "price_text", "priceText", "formatted_price", "formattedPrice",
+		"price", "salePrice", "sale_price", "currentPrice", "current_price", "finalPrice", "retailPrice", "extracted_price"}
 	currencyKeys = []string{"currency", "currencyCode", "currency_code", "priceCurrency"}
 	imageKeys    = []string{"image", "imageUrl", "image_url", "thumbnail", "img", "goods_img", "goodsImg", "mainImage", "main_image", "images", "imageUrls"}
 )

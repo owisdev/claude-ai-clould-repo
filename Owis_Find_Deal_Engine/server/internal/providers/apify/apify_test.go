@@ -3,6 +3,7 @@ package apify
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -125,11 +126,14 @@ func TestSearchErrors(t *testing.T) {
 	}
 }
 
-func TestEmptyResultIsNotAnError(t *testing.T) {
+func TestEmptyResultIsUncovered(t *testing.T) {
+	// A scraper covering only one region (e.g. Temu US) may find nothing:
+	// the next provider gets the market instead of a final "no results".
 	srv := newServer(t, http.StatusCreated, `[]`, nil)
-	got, err := newClient(t, srv.URL).Search(context.Background(), search.Query{Title: "x", Targets: []markets.Target{temu}})
-	if err != nil || len(got) != 0 {
-		t.Errorf("got %v, %v", got, err)
+	_, err := newClient(t, srv.URL).Search(context.Background(), search.Query{Title: "x", Targets: []markets.Target{temu}})
+	var pe *search.PartialError
+	if !errors.As(err, &pe) || !pe.Uncovered["temu"] || len(pe.Failed) != 0 {
+		t.Errorf("err = %v, want temu uncovered", err)
 	}
 }
 
@@ -244,10 +248,45 @@ func TestActorSlashForm(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Search(context.Background(), search.Query{Title: "s pen", Targets: []markets.Target{temu}}); err != nil {
-		t.Fatal(err)
-	}
+	_, _ = c.Search(context.Background(), search.Query{Title: "s pen", Targets: []markets.Target{temu}})
 	if !strings.Contains(path, "/v2/actors/piotrv1001~aliexpress-listings-scraper/") {
 		t.Errorf("request path = %s", path)
+	}
+}
+
+func TestTemuProductsScraperOutput(t *testing.T) {
+	// Output of crw/temu-products-scraper from the local test: price in
+	// cents next to a formatted label, link in "link_url" with tracking.
+	items := []map[string]any{{
+		"goods_id":  606284493507175.0,
+		"title":     "EAGET JHL7440 40Gbps M.2 NVMe SSD Enclosure",
+		"price":     10361.0,
+		"price_str": "$103.61",
+		"currency":  "USD",
+		"thumb_url": "https://img.kwcdn.com/product/open/b365-goods.jpeg",
+		"image_url": "https://img.kwcdn.com/product/open/b365-goods.jpeg",
+		"link_url":  "https://www.temu.com/goods.html?_bg_fs=1&goods_id=606284493507175&_oak_mp_inf=EOeU%2Bd6&refer_page_sn=10009",
+	}}
+	cat, _ := markets.Load("")
+	jor, _ := cat.Country("jor")
+	var temuJor markets.Target
+	for _, tg := range jor.Targets {
+		if tg.Market == "temu" {
+			temuJor = tg
+		}
+	}
+	got := toProducts(items, temuJor, 10)
+	if len(got) != 1 {
+		t.Fatalf("got %+v", got)
+	}
+	p := got[0]
+	if p.Link != "https://www.temu.com/goods.html?goods_id=606284493507175" {
+		t.Errorf("link = %s", p.Link)
+	}
+	if p.Price == nil || *p.Price != 103.61 || p.Currency != "$" {
+		t.Errorf("price = %v %q, want 103.61 $", p.Price, p.Currency)
+	}
+	if p.Thumbnail != "https://img.kwcdn.com/product/open/b365-goods.jpeg" {
+		t.Errorf("thumbnail = %s", p.Thumbnail)
 	}
 }

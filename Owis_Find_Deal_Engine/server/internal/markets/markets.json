@@ -31,7 +31,11 @@
       "name": "Temu", "provider": "web",
       "search_link": "https://{host}/search_result.html?search_key={query}",
       "product_pages": {
-        "paths": ["^/(?:[a-z]{2}(?:-[a-z]{2})?/)?[^/]*-g-(?P<id>[0-9]{6,20})\\.html$"]
+        "paths": [
+          "^/(?:[a-z]{2}(?:-[a-z]{2})?/)?[^/]*-g-(?P<id>[0-9]{6,20})\\.html$",
+          "^/(?:[a-z]{2}(?:-[a-z]{2})?/)?goods\\.html$"
+        ],
+        "id_param": "goods_id"
       }
     },
     "shein": {

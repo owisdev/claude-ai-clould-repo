@@ -255,3 +255,26 @@ func TestSearchLink(t *testing.T) {
 		t.Error("bad search_link accepted")
 	}
 }
+
+func TestTemuGoodsLink(t *testing.T) {
+	cat, _ := Load("")
+	usa, _ := cat.Country("usa")
+	var temu Target
+	for _, t := range usa.Targets {
+		if t.Market == "temu" {
+			temu = t
+		}
+	}
+	tests := map[string]string{
+		"https://www.temu.com/goods.html?_bg_fs=1&goods_id=606284493507175&_oak_mp_inf=x": "https://www.temu.com/goods.html?goods_id=606284493507175",
+		"https://www.temu.com/ssk-enclosure-g-601099512345678.html?_x=1":                  "https://www.temu.com/ssk-enclosure-g-601099512345678.html",
+		"https://www.temu.com/goods.html?goods_id=abc":                                    "",
+		"https://www.temu.com/goods.html":                                                 "",
+	}
+	for in, want := range tests {
+		got, ok := temu.ProductLink(in)
+		if (want == "") == ok || got != want && want != "" {
+			t.Errorf("%s: got %q, %v; want %q", in, got, ok, want)
+		}
+	}
+}
