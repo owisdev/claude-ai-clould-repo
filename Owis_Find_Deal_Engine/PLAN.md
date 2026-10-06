@@ -352,6 +352,16 @@ and is pushed.
 12. eBay provider (usa, ksa) — when keys are approved.
 13. AliExpress provider — when affiliate keys are approved.
 14. Deploy with the hardening in section 3.2 (see section 10).
+    Monitoring: export metrics (searches, cache hits, provider errors,
+    circuit state) and alerts. At this point replace the hand-written
+    circuit breaker in `internal/search/fallback.go` with
+    `github.com/sony/gobreaker` (v2): its `OnStateChange` callback and
+    `Counts` feed the metrics/alerts, and `ReadyToTrip` allows a
+    failure-ratio rule (e.g. 50% of the last 20 calls) instead of only
+    "N failures in a row" once there are more sources and real traffic.
+    Small change: the breaker is private to `fallback.go` behind
+    allow/success/failure (~30 lines + its test); check gobreaker's Go
+    version requirement and API at that time.
 15. AI-agent access: OpenAPI spec + MCP tool.
 
 ## 10. Hosting (not decided yet)
