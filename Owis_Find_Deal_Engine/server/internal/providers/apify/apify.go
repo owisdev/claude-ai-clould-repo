@@ -148,7 +148,7 @@ func (c *Client) run(ctx context.Context, q search.Query, t markets.Target) ([]s
 	if err := json.Unmarshal(body, &items); err != nil {
 		return nil, fmt.Errorf("apify %s: decode items: %w", c.cfg.Actor, err)
 	}
-	return toProducts(items, t, c.cfg.MaxItems), nil
+	return toProducts(items, q.Title, t, c.cfg.MaxItems), nil
 }
 
 // hasQuery reports whether a template contains one of the query placeholders.
@@ -227,8 +227,10 @@ var (
 )
 
 // toProducts maps dataset items to products of target, skipping items
-// without a title or a link on the marketplace's domain.
-func toProducts(items []map[string]any, t markets.Target, max int) []search.Product {
+// without a title or a link on the marketplace's domain, and items that do
+// not match the query (shop searches also return merely related products,
+// e.g. other products of the same brand).
+func toProducts(items []map[string]any, query string, t markets.Target, max int) []search.Product {
 	products := make([]search.Product, 0, min(len(items), max))
 	for _, it := range items {
 		if len(products) >= max {
@@ -236,7 +238,7 @@ func toProducts(items []map[string]any, t markets.Target, max int) []search.Prod
 		}
 		title := firstString(it, titleKeys)
 		link := firstString(it, linkKeys)
-		if title == "" || link == "" {
+		if title == "" || link == "" || !search.Relevant(query, title) {
 			continue
 		}
 		u, err := url.Parse(link)

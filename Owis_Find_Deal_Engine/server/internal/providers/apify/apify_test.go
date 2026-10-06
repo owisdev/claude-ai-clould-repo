@@ -49,15 +49,15 @@ func newClient(t *testing.T, baseURL string) *Client {
 
 func TestSearchRunsActorAndMapsItems(t *testing.T) {
 	items := `[
-	  {"title": "S Pen", "url": "https://www.temu.com/goods-1.html", "price": 9.99, "currency": "USD",
+	  {"title": "S Pen Pro", "url": "https://www.temu.com/goods-1.html", "price": 9.99, "currency": "USD",
 	   "image": "https://img/1.jpg"},
-	  {"goods_name": "Stylus", "goods_url": "https://www.temu.com/goods-2.html", "salePrice": "$4.50",
+	  {"goods_name": "Stylus Pen Pro", "goods_url": "https://www.temu.com/goods-2.html", "salePrice": "$4.50",
 	   "images": ["https://img/2a.jpg", "https://img/2b.jpg"]},
-	  {"name": "Pen", "link": "https://www.temu.com/goods-3.html",
+	  {"name": "Pen Pro", "link": "https://www.temu.com/goods-3.html",
 	   "price": {"amount": 3, "currency": "SAR"}, "thumbnail": {"url": "https://img/3.jpg"}},
-	  {"title": "Elsewhere", "url": "https://example.com/x", "price": 1},
-	  {"title": "No link", "price": 2},
-	  {"title": "Fourth valid", "url": "https://temu.com/goods-4.html"}
+	  {"title": "Pen Pro elsewhere", "url": "https://example.com/x", "price": 1},
+	  {"title": "Pen Pro no link", "price": 2},
+	  {"title": "Fourth Pen Pro", "url": "https://temu.com/goods-4.html"}
 	]`
 	srv := newServer(t, http.StatusCreated, items, func(r *http.Request, input map[string]any) {
 		if r.Method != http.MethodPost || r.URL.Path != "/v2/actors/someone~temu-scraper/run-sync-get-dataset-items" {
@@ -87,9 +87,9 @@ func TestSearchRunsActorAndMapsItems(t *testing.T) {
 		title, thumb, currency string
 		price                  float64
 	}{
-		{"S Pen", "https://img/1.jpg", "USD", 9.99},
-		{"Stylus", "https://img/2a.jpg", "$", 4.5},
-		{"Pen", "https://img/3.jpg", "SAR", 3},
+		{"S Pen Pro", "https://img/1.jpg", "USD", 9.99},
+		{"Stylus Pen Pro", "https://img/2a.jpg", "$", 4.5},
+		{"Pen Pro", "https://img/3.jpg", "SAR", 3},
 	}
 	for i, w := range want {
 		g := got[i]
@@ -228,7 +228,7 @@ func TestAliExpressListingsOutput(t *testing.T) {
 		"productType": "natural", "id": "3256812288634547",
 		"productUrl": "https://www.aliexpress.com/item/3256812288634547.html",
 	}}
-	got := toProducts(items, markets.Target{Market: "aliexpress", Domain: "aliexpress.com"}, 10)
+	got := toProducts(items, "samsung s pen", markets.Target{Market: "aliexpress", Domain: "aliexpress.com"}, 10)
 	if len(got) != 1 || got[0].Link != "https://www.aliexpress.com/item/3256812288634547.html" ||
 		got[0].Price == nil || *got[0].Price != 1.33 || got[0].Currency != "USD" ||
 		got[0].Thumbnail != "https://ae-pic-a1.aliexpress-media.com/kf/S40b.jpg" {
@@ -275,7 +275,7 @@ func TestTemuProductsScraperOutput(t *testing.T) {
 			temuJor = tg
 		}
 	}
-	got := toProducts(items, temuJor, 10)
+	got := toProducts(items, "m.2 enclosure", temuJor, 10)
 	if len(got) != 1 {
 		t.Fatalf("got %+v", got)
 	}
@@ -288,5 +288,18 @@ func TestTemuProductsScraperOutput(t *testing.T) {
 	}
 	if p.Thumbnail != "https://img.kwcdn.com/product/open/b365-goods.jpeg" {
 		t.Errorf("thumbnail = %s", p.Thumbnail)
+	}
+}
+
+func TestToProductsDropsIrrelevantItems(t *testing.T) {
+	// From the local test: "EAGET JHL7440" also returned flash drives.
+	items := []map[string]any{
+		{"title": "KODAK K113 Mini USB Flash Drive USB3.2", "productUrl": "https://www.aliexpress.com/item/1.html", "price": 1.09},
+		{"title": "EAGET 8GB Mini Car USB2.0 Flash Drive", "productUrl": "https://www.aliexpress.com/item/2.html", "price": 1.09},
+		{"title": "EAGET JHL7440 40Gbps M.2 NVMe SSD Enclosure", "productUrl": "https://www.aliexpress.com/item/3.html", "price": 99.0},
+	}
+	got := toProducts(items, "EAGET JHL7440", markets.Target{Market: "aliexpress", Domain: "aliexpress.com"}, 10)
+	if len(got) != 1 || got[0].Link != "https://www.aliexpress.com/item/3.html" || got[0].Position != 1 {
+		t.Errorf("got %+v", got)
 	}
 }

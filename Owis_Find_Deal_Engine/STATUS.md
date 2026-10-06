@@ -51,9 +51,15 @@ APIFY_TEMU_INPUT={"keyword":"{{query}}","max_items":{{max}},"region":"US","sort"
 APIFY_TIMEOUT=60s
 ```
 
-**Open items:** SHEIN scraper; check that Temu `price_str` matches the
-price on the Temu page; eBay; loading bar in the app (first live search
-takes ~30–50 s).
+**Prices are US prices (known limit, accepted):** the Apify scrapers read
+the US sites, so AliExpress / Temu prices often differ from what a user in
+Jordan sees on the page (local price, currency, shipping, personal
+discounts, variant). It differs per product and cannot be fixed in the
+service. In the app: show them as "from $X · approx." — the link shows
+the real price.
+
+**Open items:** SHEIN scraper; eBay; loading bar in the app (first live
+search takes ~30–50 s).
 
 **Next:** phase 2 (users: profile, plans/payments, saved cart + price
 tracker, purchase reports, notifications) or phase 3 (eBay / AliExpress
