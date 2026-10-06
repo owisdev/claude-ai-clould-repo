@@ -70,7 +70,7 @@ eBay `/itm/<id>`, Temu `…-g-<id>.html`, SHEIN `…-p-<id>.html`) and every
 other link is dropped. Links are cleaned (tracking parameters removed,
 Amazon `/clp/<ASIN>` → `/dp/<ASIN>`) and the same product found twice is
 listed once. A marketplace without `product_pages` accepts any page of its
-domain. Web results must also match the query (at least half of its words in
+domain. Results must also match the query (at least two thirds of its words in
 the title, snippet or link), and each shop returns at most
 `RESULTS_PER_MARKET` (10) results. With `LOG_LEVEL=debug` the server logs,
 per shop, how many results were dropped and why.
@@ -80,6 +80,10 @@ per shop, how many results were dropped and why.
   shops it retries once as a normal web search. `google` = web search only.
   Put it first (`serpapi,searxng`) if prices matter more than cost: shops
   with no offers on Google Shopping are then searched by SearXNG, for free.
+  Shopping results must match the query like web results; their link is
+  Google's product page (offers and the shop link) when Google gives no
+  direct shop link. When a free provider follows SerpApi, shops without
+  Shopping offers are searched there instead of with a paid web search.
   Google Shopping does not cover every country; `shopping_region` in
   `markets.json` picks another one (Jordan uses `us`: its shops are
   international, prices in USD).

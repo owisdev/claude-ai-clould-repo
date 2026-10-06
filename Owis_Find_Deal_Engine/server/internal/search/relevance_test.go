@@ -18,10 +18,14 @@ func TestRelevant(t *testing.T) {
 		{"phone case", []string{"جراب هاتف", "/Clear-Phone-Case-p-123456.html"}, true},
 		// Plurals and case.
 		{"usb hub", []string{"USB Hubs for laptops"}, true},
-		// Half of the words is enough.
-		{"samsung s pen", []string{"Galaxy S Pen Pro"}, true},
-		{"samsung galaxy s24 ultra case", []string{"Samsung Galaxy S24 charger"}, true},
-		{"samsung galaxy s24 ultra case", []string{"Samsung TV remote"}, false},
+		// Two thirds of the words are needed: one typo in four words is
+		// tolerated, a different product sharing the brand is not.
+		{"SSK ssd m3 enclosure", []string{"SSK M.2 NVME SSD Enclosure Adapter"}, true},
+		{"SSK ssd m3 enclosure", []string{"SSK Portable SSD USB Drive 550MB/S External Solid State Drive"}, false},
+		{"samsung s pen", []string{"Samsung Galaxy S Pen Pro"}, true},
+		{"samsung s pen", []string{"Galaxy S Pen Pro"}, false},
+		{"samsung galaxy s24 ultra case", []string{"Samsung Galaxy S24 Ultra Clear Case"}, true},
+		{"samsung galaxy s24 ultra case", []string{"Samsung Galaxy S24 charger"}, false},
 		// Arabic queries.
 		{"سماعة بلوتوث", []string{"سماعة رأس بلوتوث لاسلكية"}, true},
 		// Nothing usable to compare.

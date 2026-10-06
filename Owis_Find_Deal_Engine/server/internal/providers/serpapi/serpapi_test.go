@@ -143,7 +143,7 @@ const sampleShopping = `{
      "source": "Best Buy", "price": "$35.00", "extracted_price": 35},
     {"position": 4, "title": "Pen case", "link": "https://sa.shein.com/p-4.html",
      "source": "SHEIN", "price": "12,50 €", "extracted_price": 12.5},
-    {"position": 5, "title": "Second Amazon", "product_link": "https://www.google.com/shopping/product/5",
+    {"position": 5, "title": "Second S Pen", "product_link": "https://www.google.com/shopping/product/5",
      "source": "Amazon.com - Seller", "price": "$19.00"},
     {"position": 6, "title": "", "source": "Amazon.com", "product_link": "https://x"}
   ]
@@ -271,5 +271,45 @@ func TestShoppingUsesShoppingRegionAndLeavesUncovered(t *testing.T) {
 	}
 	if len(pe.Products) != 4 || len(pe.Failed) != 0 || len(pe.Uncovered) != 1 || !pe.Uncovered["aliexpress"] {
 		t.Errorf("products %d, failed %v, uncovered %v", len(pe.Products), pe.Failed, pe.Uncovered)
+	}
+}
+
+func TestShoppingDropsSimilarProductsAndCleansLinks(t *testing.T) {
+	// From the local test: Google Shopping listed SSK portable SSDs for an
+	// enclosure search, with raw spaces in Google's product link.
+	body := `{"shopping_results":[
+		{"title":"SSK Portable SSD USB Drive 550MB/S External Solid State Drive","source":"AliExpress - AliExpress-6000993635",
+		 "product_link":"https://www.google.com/search?ibp=oshop&q=SSK ssd m3 enclosure&prds=productid:1,pvt:hg&gl=us"},
+		{"title":"SSK M.2 NVME SSD Enclosure USB 3.2","source":"AliExpress",
+		 "product_link":"https://www.google.com/search?ibp=oshop&q=SSK ssd m3 enclosure&prds=productid:2,pvt:hg&gl=us"}]}`
+	srv := newServer(t, http.StatusOK, body, nil)
+	c, _ := New(Config{APIKey: "secret", BaseURL: srv.URL, Combined: true})
+	ali := []markets.Target{{Market: "aliexpress", Name: "AliExpress", Domain: "aliexpress.com"}}
+
+	got, err := c.Search(context.Background(), search.Query{Title: "SSK ssd m3 enclosure", Targets: ali})
+	if err != nil || len(got) != 1 {
+		t.Fatalf("got %+v, %v; want only the enclosure", got, err)
+	}
+	if strings.Contains(got[0].Link, " ") || !strings.Contains(got[0].Link, "q=SSK+ssd+m3+enclosure") {
+		t.Errorf("link not cleaned: %s", got[0].Link)
+	}
+}
+
+func TestShoppingNoWebRetryLeavesAllUncovered(t *testing.T) {
+	var engines []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		engines = append(engines, r.URL.Query().Get("engine"))
+		_, _ = w.Write([]byte(`{"shopping_results":[{"title":"x","source":"Best Buy","product_link":"https://g/1"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+	c, _ := New(Config{APIKey: "secret", BaseURL: srv.URL, Combined: true, NoWebRetry: true})
+
+	_, err := c.Search(context.Background(), search.Query{Title: "s pen", Targets: jorTargets})
+	var pe *search.PartialError
+	if !errors.As(err, &pe) || len(pe.Uncovered) != 3 || len(pe.Products) != 0 {
+		t.Fatalf("err = %v, want all markets uncovered", err)
+	}
+	if len(engines) != 1 {
+		t.Errorf("SerpApi calls = %v, want only the shopping search", engines)
 	}
 }

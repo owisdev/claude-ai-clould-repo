@@ -5,10 +5,11 @@ import (
 	"unicode"
 )
 
-// Relevant reports whether a web search result is about the query: at
-// least half of the query's words (two characters or more) must start a
+// Relevant reports whether a search result is about the query: at least
+// two thirds of the query's words (two characters or more) must start a
 // word in texts (title, snippet, link path), so "enclosure" matches
-// "enclosures". Search engines asked for "x site:shop.com" sometimes ignore
+// "enclosures". "ssk ssd enclosure" then rejects "SSK portable SSD", and a
+// four-word query still tolerates one typo. Search engines asked for "x site:shop.com" sometimes ignore
 // x and return any page of the shop; this drops those. A query with no
 // usable words matches everything.
 func Relevant(query string, texts ...string) bool {
@@ -26,7 +27,7 @@ func Relevant(query string, texts ...string) bool {
 			}
 		}
 	}
-	return found*2 >= len(want)
+	return found*3 >= len(want)*2
 }
 
 // words lowercases s and splits it into words of letters and digits,

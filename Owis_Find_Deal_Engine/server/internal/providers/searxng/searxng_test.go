@@ -179,8 +179,8 @@ func TestSearchKeepsOnlyProductPages(t *testing.T) {
 			{"url":"https://www.amazon.com/clp/B07MNFH1PX","title":"Amazon.com: SSK M.2 enclosure"},
 			{"url":"https://www.amazon.com/SSK-Enclosure/dp/B07MNFH1PX/ref=sr_1_1","title":"duplicate of the clp page"},
 			{"url":"https://www.amazon.com/samsung-s-pen/s?k=samsung+s+pen","title":"search page"},
-			{"url":"https://www.amazon.com/dp/B0FD38XB93?th=1","title":"SSK 20Gbps"}]}`,
-		"aliexpress.com": `{"results":[{"url":"https://www.aliexpress.com/item/1005008495498271.html?spm=1","title":"SSK cloner"}]}`,
+			{"url":"https://www.amazon.com/dp/B0FD38XB93?th=1","title":"SSK 20Gbps enclosure"}]}`,
+		"aliexpress.com": `{"results":[{"url":"https://www.aliexpress.com/item/1005008495498271.html?spm=1","title":"SSK enclosure cloner"}]}`,
 		"temu.com":       `{"results":[{"url":"https://www.temu.com/","title":"Temu home"}]}`,
 		"ar.shein.com":   `{"results":[]}`,
 	})

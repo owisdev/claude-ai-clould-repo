@@ -229,7 +229,8 @@ func run() error {
 // order and chains them: the first that succeeds answers the search.
 func buildWebProvider(cfg config.Config, log *slog.Logger) (search.Provider, error) {
 	providers := make([]search.Provider, 0, len(cfg.SearchProviders))
-	for _, name := range cfg.SearchProviders {
+	for i, name := range cfg.SearchProviders {
+		last := i == len(cfg.SearchProviders)-1
 		var (
 			p   search.Provider
 			err error
@@ -241,7 +242,9 @@ func buildWebProvider(cfg config.Config, log *slog.Logger) (search.Provider, err
 		case "serpapi":
 			p, err = serpapi.New(serpapi.Config{APIKey: cfg.SerpAPIKey, Engine: cfg.SerpAPIEngine,
 				BaseURL: cfg.SerpAPIBaseURL, Combined: cfg.SearchCombined,
-				HTTPClient: &http.Client{Timeout: cfg.SerpAPITimeout}})
+				HTTPClient: &http.Client{Timeout: cfg.SerpAPITimeout},
+				// A free provider after SerpApi does the web search instead.
+				NoWebRetry: !last})
 		default:
 			err = fmt.Errorf("unknown search provider %q", name)
 		}

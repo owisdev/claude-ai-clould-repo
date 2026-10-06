@@ -40,6 +40,9 @@ type Config struct {
 	// Google Shopping is thin in that country) is retried once on the web
 	// engine.
 	Engine string
+	// NoWebRetry leaves shops Google Shopping has nothing for to the next
+	// provider (e.g. free SearXNG) instead of paying for a web search here.
+	NoWebRetry bool
 	// Combined searches all marketplaces with one query (cheapest).
 	// When false, one query per marketplace runs in parallel.
 	Combined   bool
@@ -89,7 +92,7 @@ func (c *Client) Search(ctx context.Context, q search.Query) ([]search.Product, 
 	if err != nil {
 		return nil, err
 	}
-	if len(products) == 0 {
+	if len(products) == 0 && !c.cfg.NoWebRetry {
 		// Nothing from our shops (thin coverage): one web search instead.
 		return c.searchWeb(ctx, q)
 	}
@@ -152,12 +155,12 @@ func (c *Client) searchShopping(ctx context.Context, q search.Query) ([]search.P
 		}
 		return nil, fmt.Errorf("serpapi: %s", body.Error)
 	}
-	return shoppingProducts(body.ShoppingResults, q.Targets), nil
+	return shoppingProducts(body.ShoppingResults, q.Title, q.Targets), nil
 }
 
 // shoppingProducts keeps results sold by the requested marketplaces and
 // numbers them per marketplace.
-func shoppingProducts(results []shoppingResult, targets []markets.Target) []search.Product {
+func shoppingProducts(results []shoppingResult, title string, targets []markets.Target) []search.Product {
 	products := make([]search.Product, 0, len(results))
 	positions := make(map[string]int, len(targets))
 	for _, r := range results {
@@ -168,7 +171,10 @@ func shoppingProducts(results []shoppingResult, targets []markets.Target) []sear
 		if !ok {
 			continue // sold by a shop we do not cover
 		}
-		link := r.ProductLink
+		if !search.Relevant(title, r.Title) {
+			continue // Google Shopping also lists merely similar products
+		}
+		link := cleanURL(r.ProductLink)
 		if shop, ok := target.ProductLink(r.Link); ok {
 			link = shop // the shop's product page is better than Google's page
 		}
@@ -225,6 +231,17 @@ func matchSeller(source, link string, targets []markets.Target) (markets.Target,
 		}
 	}
 	return markets.Target{}, false
+}
+
+// cleanURL re-encodes a link's query string. Google product links from
+// SerpApi can contain raw spaces ("q=usb hub"), which some clients reject.
+func cleanURL(raw string) string {
+	u, err := url.Parse(strings.ReplaceAll(raw, " ", "%20"))
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") {
+		return ""
+	}
+	u.RawQuery = u.Query().Encode()
+	return u.String()
 }
 
 func hostMatches(link string, t markets.Target) bool {

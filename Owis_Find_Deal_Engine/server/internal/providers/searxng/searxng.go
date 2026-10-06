@@ -172,7 +172,12 @@ func (c *Client) query(ctx context.Context, q search.Query) ([]search.Product, e
 		}
 	}
 	if c.cfg.Logger != nil {
-		c.cfg.Logger.DebugContext(ctx, "searxng results",
+		// Logged at info when nothing is kept, to explain "no_results".
+		level := slog.LevelDebug
+		if len(products) == 0 {
+			level = slog.LevelInfo
+		}
+		c.cfg.Logger.Log(ctx, level, "searxng results",
 			"markets", marketIDs(q.Targets), "pages", stats.pages, "results", stats.results,
 			"other_site", stats.otherSite, "not_product_page", stats.notProduct,
 			"duplicate", stats.duplicate, "irrelevant", stats.irrelevant, "kept", len(products))
