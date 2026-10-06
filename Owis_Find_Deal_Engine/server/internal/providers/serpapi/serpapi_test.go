@@ -23,10 +23,10 @@ const sampleResponse = `{
      "snippet": "Stylus", "rich_snippet": {"top": {"extensions": ["4.5 stars", 12],
      "detected_extensions": {"price": 29.99, "currency": "$"}}}},
     {"position": 2, "title": "S Pen - Temu", "link": "https://www.temu.com/s-pen.html"},
-    {"position": 3, "title": "Amazon again", "link": "https://amazon.com/dp/B2"},
+    {"position": 3, "title": "S Pen - Amazon again", "link": "https://amazon.com/dp/B2"},
     {"position": 4, "title": "No link"},
     {"position": 5, "title": "Elsewhere", "link": "https://example.com/x"},
-    {"position": 6, "title": "SHEIN SA", "link": "https://sa.shein.com/p-1.html"}
+    {"position": 6, "title": "S Pen case - SHEIN SA", "link": "https://sa.shein.com/p-1.html"}
   ]
 }`
 

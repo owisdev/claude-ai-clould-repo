@@ -278,11 +278,11 @@ func (c *Client) searchWeb(ctx context.Context, q search.Query) ([]search.Produc
 		}
 		return nil, fmt.Errorf("serpapi: %s", body.Error)
 	}
-	return webProducts(body.OrganicResults, q.Targets), nil
+	return webProducts(body.OrganicResults, q.Title, q.Targets), nil
 }
 
 // webProducts maps results to their marketplace and numbers them per market.
-func webProducts(results []organicResult, targets []markets.Target) []search.Product {
+func webProducts(results []organicResult, title string, targets []markets.Target) []search.Product {
 	products := make([]search.Product, 0, len(results))
 	positions := make(map[string]int, len(targets))
 	seen := make(map[string]bool, len(results))
@@ -301,6 +301,9 @@ func webProducts(results []organicResult, targets []markets.Target) []search.Pro
 		link, ok := target.ProductLink(r.Link)
 		if !ok || seen[link] {
 			continue // search, store or category page, or a duplicate
+		}
+		if !search.Relevant(title, r.Title, r.Snippet, u.Path) {
+			continue // Google ignored the query and returned any shop page
 		}
 		seen[link] = true
 		positions[target.Market]++

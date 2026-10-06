@@ -155,13 +155,14 @@ func (c *Client) query(ctx context.Context, q search.Query) ([]search.Product, e
 		return nil, fmt.Errorf("searxng: decode response: %w", err)
 	}
 
-	products := toProducts(body.Results, q.Targets)
-	if len(products) == 0 && len(body.UnresponsiveEngines) > 0 {
+	if len(body.Results) == 0 && len(body.UnresponsiveEngines) > 0 {
 		// No results because the engines failed (CAPTCHA, timeout, ...),
 		// not because nothing matched: report an error so a fallback runs.
+		// Results that are filtered out below (not product pages, not
+		// relevant) mean the engines worked: that is "no results".
 		return nil, fmt.Errorf("searxng: no results, engines unresponsive: %s", engineErrors(body.UnresponsiveEngines))
 	}
-	return products, nil
+	return toProducts(body.Results, q.Title, q.Targets), nil
 }
 
 // locale builds a SearXNG language tag such as "en-US" or "en-SA".
@@ -184,10 +185,10 @@ func engineErrors(pairs [][]string) string {
 	return strings.Join(parts, ", ")
 }
 
-// toProducts keeps product pages of the requested marketplaces, maps them
+// toProducts keeps relevant product pages of the requested marketplaces, maps them
 // to their marketplace and numbers them per market. Different links to the
 // same product (tracking parameters, /clp/ vs /dp/) count once.
-func toProducts(results []result, targets []markets.Target) []search.Product {
+func toProducts(results []result, title string, targets []markets.Target) []search.Product {
 	products := make([]search.Product, 0, len(results))
 	positions := make(map[string]int, len(targets))
 	seen := make(map[string]bool, len(results))
@@ -206,6 +207,9 @@ func toProducts(results []result, targets []markets.Target) []search.Product {
 		link, ok := target.ProductLink(r.URL)
 		if !ok || seen[link] {
 			continue // search, store or category page, or a duplicate
+		}
+		if !search.Relevant(title, r.Title, r.Content, u.Path) {
+			continue // the engine ignored the query and returned any shop page
 		}
 		seen[link] = true
 		positions[target.Market]++

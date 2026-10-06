@@ -25,11 +25,11 @@ const sampleResponse = `{
     {"url": "https://www.amazon.com/dp/B1", "title": "S Pen - Amazon", "content": "Stylus", "engine": "google",
      "thumbnail": "https://img/a.jpg"},
     {"url": "https://www.temu.com/s-pen.html", "title": "S Pen - Temu", "engine": "bing", "img_src": "https://img/t.jpg"},
-    {"url": "https://www.amazon.com/dp/B1", "title": "duplicate", "engine": "brave"},
-    {"url": "https://amazon.com/dp/B2", "title": "Amazon again", "engine": "duckduckgo"},
+    {"url": "https://www.amazon.com/dp/B1", "title": "S Pen duplicate", "engine": "brave"},
+    {"url": "https://amazon.com/dp/B2", "title": "S Pen - Amazon again", "engine": "duckduckgo"},
     {"url": "https://example.com/x", "title": "Elsewhere", "engine": "duckduckgo"},
     {"title": "No URL"},
-    {"url": "https://sa.shein.com/p-1.html", "title": "SHEIN SA", "engine": "google"}
+    {"url": "https://sa.shein.com/p-1.html", "title": "S Pen case - SHEIN SA", "engine": "google"}
   ],
   "unresponsive_engines": [["startpage", "timeout"]]
 }`
@@ -114,8 +114,8 @@ func perSiteServer(t *testing.T, bodies map[string]string) (*httptest.Server, *a
 
 func TestSearchQueriesEachMarket(t *testing.T) {
 	srv, calls := perSiteServer(t, map[string]string{
-		"amazon.com":   `{"results":[{"url":"https://www.amazon.com/dp/B1","title":"A1"},{"url":"https://www.amazon.com/dp/B2","title":"A2"}]}`,
-		"temu.com":     `{"results":[{"url":"https://www.temu.com/x.html","title":"T1"}]}`,
+		"amazon.com":   `{"results":[{"url":"https://www.amazon.com/dp/B1","title":"S Pen A1"},{"url":"https://www.amazon.com/dp/B2","title":"S Pen A2"}]}`,
+		"temu.com":     `{"results":[{"url":"https://www.temu.com/x.html","title":"S Pen T1"}]}`,
 		"ar.shein.com": `{"results":[]}`,
 	})
 	c, _ := New(Config{BaseURL: srv.URL, Combined: true})
@@ -138,7 +138,7 @@ func TestSearchQueriesEachMarket(t *testing.T) {
 
 func TestSearchSomeMarketsFail(t *testing.T) {
 	srv, _ := perSiteServer(t, map[string]string{
-		"amazon.com":   `{"results":[{"url":"https://www.amazon.com/dp/B1","title":"A1"}]}`,
+		"amazon.com":   `{"results":[{"url":"https://www.amazon.com/dp/B1","title":"S Pen A1"}]}`,
 		"ar.shein.com": `{"results":[],"unresponsive_engines":[["google","CAPTCHA"]]}`,
 		// temu.com: HTTP 500
 	})
@@ -244,5 +244,24 @@ func TestLocale(t *testing.T) {
 	}
 	if got := locale("", "sa"); got != "" {
 		t.Errorf("got %q", got)
+	}
+}
+
+func TestSearchDropsIrrelevantPages(t *testing.T) {
+	cat, _ := markets.Load("")
+	jor, _ := cat.Country("jor")
+	shein := []markets.Target{jor.Targets[3]}
+	// From the local test: SHEIN pages returned for an SSD search.
+	srv := newServer(t, http.StatusOK, `{"results":[
+		{"url":"https://ar.shein.com/SHEIN-Young-Girl-Ruffle-Trim-Tee-Sunflower-Print-Belted-Shorts-Summer-Holiday-p-12821272.html","title":"Shein قميص فتاة صغيرة بطيات"},
+		{"url":"https://ar.shein.com/Hair-Ties-Home-Beauty-Women-Accessory-Gifts-p-145507524.html","title":"ربطات الشعر"}],
+		"unresponsive_engines":[["brave","timeout"]]}`, nil)
+	c, _ := New(Config{BaseURL: srv.URL})
+
+	got, err := c.Search(context.Background(), search.Query{Title: "SSK ssd m3 enclosure", Targets: shein})
+	if err != nil || len(got) != 0 {
+		// The engines answered (one timed out): nothing relevant is "no
+		// results", not an error.
+		t.Fatalf("got %+v, %v; want no products and no error", got, err)
 	}
 }
