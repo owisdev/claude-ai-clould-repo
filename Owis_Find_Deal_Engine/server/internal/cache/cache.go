@@ -299,6 +299,11 @@ func (e *Entry) response(stale bool) *search.Result {
 	return &res
 }
 
+// resultsVersion is part of every cache key. Bump it whenever the way
+// results are found or filtered changes (relevance, duplicates, links), so
+// answers cached by an older build are not served after an upgrade.
+const resultsVersion = "v3"
+
 // key identifies a search: country, the catalog version, the search setup
 // (Variant) and marketplace domains (so editing markets.json or changing
 // the providers invalidates old entries) and the normalized title. The title is hashed so
@@ -316,5 +321,5 @@ func (c *Cache) key(req search.Request) (string, bool) {
 	}
 	h.Write([]byte{0})
 	h.Write([]byte(title))
-	return "search:v2:" + country.Code + ":" + hex.EncodeToString(h.Sum(nil)[:16]), true
+	return "search:" + resultsVersion + ":" + country.Code + ":" + hex.EncodeToString(h.Sum(nil)[:16]), true
 }
