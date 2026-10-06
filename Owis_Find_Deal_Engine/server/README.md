@@ -87,14 +87,21 @@ per shop, how many results were dropped and why.
   Google Shopping does not cover every country; `shopping_region` in
   `markets.json` picks another one (Jordan uses `us`: its shops are
   international, prices in USD).
+- **SerpApi Amazon engine** (`SERPAPI_MARKETS=amazon`, on by default when
+  `SERPAPI_KEY` is set): Amazon is searched with SerpApi's Amazon Search
+  API on the country's Amazon (amazon.com for usa/jor, amazon.sa for ksa):
+  real results with price, rating, image and direct `/dp/<ASIN>` links. No
+  Amazon account needed; one SerpApi search per live search. If it fails,
+  Amazon falls back to the providers above.
 - **Apify** (optional, per marketplace): `APIFY_MARKETS=temu,shein` sends
   those shops to a scraper from the Apify store (real prices and images);
   if it fails or exceeds `APIFY_TIMEOUT`, that shop falls back to the
   providers above. Setup steps are in [`.env.example`](.env.example).
 
 ```
-amazon, aliexpress, ebay ──► SearXNG ──► SerpApi (Google Shopping)
-temu, shein (if Apify)   ──► Apify scraper ──► SearXNG ──► SerpApi
+amazon                   ──► SerpApi Amazon engine ──► web providers
+aliexpress, ebay         ──► web providers (SEARCH_PROVIDERS order)
+temu, shein (if Apify)   ──► Apify scraper ──► web providers
 ```
 
 Each provider gets `PROVIDER_ATTEMPT_TIMEOUT` (Apify: `APIFY_TIMEOUT`);

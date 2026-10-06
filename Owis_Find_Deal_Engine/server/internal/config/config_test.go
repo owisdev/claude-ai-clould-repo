@@ -130,3 +130,38 @@ func TestLoadApify(t *testing.T) {
 		t.Error("unknown SerpApi engine accepted")
 	}
 }
+
+func TestLoadSerpAPIMarkets(t *testing.T) {
+	t.Setenv("AUTH_JWKS_URL", "https://example.com/jwks")
+	t.Setenv("AUTH_ISSUER", "i")
+	t.Setenv("AUTH_AUDIENCE", "a")
+	t.Setenv("SEARXNG_URL", "http://s")
+
+	// No key: no dedicated engine.
+	t.Setenv("SEARCH_PROVIDERS", "searxng")
+	cfg, err := Load()
+	if err != nil || len(cfg.SerpAPIMarkets) != 0 {
+		t.Fatalf("without key: %v, %v", cfg.SerpAPIMarkets, err)
+	}
+
+	// With a key, Amazon uses the Amazon engine by default.
+	t.Setenv("SERPAPI_KEY", "k")
+	t.Setenv("SEARCH_PROVIDERS", "serpapi,searxng")
+	cfg, err = Load()
+	if err != nil || len(cfg.SerpAPIMarkets) != 1 || cfg.SerpAPIMarkets[0] != "amazon" {
+		t.Fatalf("default: %v, %v", cfg.SerpAPIMarkets, err)
+	}
+	// Longest path: SerpApi 25s + SearXNG 8s + 2s.
+	if cfg.SearchTimeout != 35*time.Second {
+		t.Errorf("search timeout = %v", cfg.SearchTimeout)
+	}
+
+	t.Setenv("SERPAPI_MARKETS", "")
+	if cfg, _ = Load(); len(cfg.SerpAPIMarkets) != 0 {
+		t.Errorf("SERPAPI_MARKETS= did not disable: %v", cfg.SerpAPIMarkets)
+	}
+	t.Setenv("SERPAPI_MARKETS", "temu")
+	if _, err := Load(); err == nil {
+		t.Error("market without a SerpApi engine accepted")
+	}
+}

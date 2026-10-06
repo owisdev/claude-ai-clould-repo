@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +25,10 @@ type Config struct {
 	SerpAPIBaseURL         string // empty = SerpApi; for tests / outbound proxies
 	ProviderAttemptTimeout time.Duration
 	SerpAPITimeout         time.Duration // Google Shopping is slow
+	// SerpAPIMarkets use a dedicated SerpApi engine (e.g. "amazon": the
+	// Amazon Search API) instead of the web providers, which stay as the
+	// fallback.
+	SerpAPIMarkets []string
 
 	// Apify scrapers for marketplaces without an official API (Temu, SHEIN).
 	ApifyToken            string
@@ -158,19 +163,52 @@ func Load() (Config, error) {
 			}
 		}
 	}
-	// Give the whole search enough time for every provider in the chain to
-	// get its full attempt: an Apify run (if any), then each web provider.
-	need := 2 * time.Second
-	for _, p := range cfg.SearchProviders {
-		if p == "serpapi" {
-			need += cfg.SerpAPITimeout
-		} else {
-			need += cfg.ProviderAttemptTimeout
+	// Amazon goes to SerpApi's Amazon engine by default once a key is set.
+	defaultSerpMarkets := ""
+	if cfg.SerpAPIKey != "" {
+		defaultSerpMarkets = "amazon"
+	}
+	// Unlike other settings, an empty SERPAPI_MARKETS= means "none".
+	serpMarkets, set := os.LookupEnv("SERPAPI_MARKETS")
+	if !set {
+		serpMarkets = defaultSerpMarkets
+	}
+	cfg.SerpAPIMarkets = splitList(strings.ToLower(serpMarkets))
+	for _, m := range cfg.SerpAPIMarkets {
+		switch {
+		case m != "amazon":
+			errs = append(errs, fmt.Errorf("SERPAPI_MARKETS: %q has no dedicated SerpApi engine (supported: amazon)", m))
+		case cfg.SerpAPIKey == "":
+			errs = append(errs, errors.New("SERPAPI_KEY is required when SERPAPI_MARKETS is set"))
+		case slices.Contains(cfg.ApifyMarkets, m):
+			errs = append(errs, fmt.Errorf("%s is in both SERPAPI_MARKETS and APIFY_MARKETS", m))
 		}
 	}
-	if len(cfg.ApifyMarkets) > 0 {
-		need += cfg.ApifyTimeout
+
+	// Give the whole search enough time for every provider in the chain to
+	// get its full attempt: a dedicated source (Apify run or SerpApi
+	// engine), then each web provider.
+	// Shops are searched in parallel, so the longest path counts: the web
+	// chain, or a dedicated source plus one web attempt after it fails.
+	var chain time.Duration
+	for _, p := range cfg.SearchProviders {
+		if p == "serpapi" {
+			chain += cfg.SerpAPITimeout
+		} else {
+			chain += cfg.ProviderAttemptTimeout
+		}
 	}
+	var dedicated time.Duration
+	if len(cfg.ApifyMarkets) > 0 {
+		dedicated = cfg.ApifyTimeout
+	}
+	if len(cfg.SerpAPIMarkets) > 0 {
+		dedicated = max(dedicated, cfg.SerpAPITimeout)
+	}
+	if dedicated > 0 {
+		dedicated += cfg.ProviderAttemptTimeout
+	}
+	need := 2*time.Second + max(chain, dedicated)
 	cfg.SearchTimeout = max(cfg.SearchTimeout, need)
 	if cfg.ProviderAttemptTimeout <= 0 || cfg.SerpAPITimeout <= 0 || cfg.SearchTimeout <= 0 {
 		errs = append(errs, errors.New("PROVIDER_ATTEMPT_TIMEOUT, SERPAPI_TIMEOUT and SEARCH_TIMEOUT must be positive"))
