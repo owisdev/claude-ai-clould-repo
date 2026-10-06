@@ -20,7 +20,8 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Plans != "free:20,pro:500" || cfg.DefaultPlan != "free" || cfg.AuthPlanClaim != "plan" {
 		t.Errorf("unexpected plan defaults: %+v", cfg)
 	}
-	if cfg.Port != "3002" || !cfg.SearchCombined || cfg.SearchTimeout != 15*time.Second {
+	// 15s default raised to fit the chain: 8s SearXNG + 25s SerpApi + 2s.
+	if cfg.Port != "3002" || !cfg.SearchCombined || cfg.SearchTimeout != 35*time.Second || cfg.SerpAPITimeout != 25*time.Second {
 		t.Errorf("unexpected defaults: %+v", cfg)
 	}
 	if len(cfg.SearchProviders) != 2 || cfg.SearchProviders[0] != "searxng" || cfg.ProviderAttemptTimeout != 8*time.Second {

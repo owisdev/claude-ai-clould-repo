@@ -240,7 +240,8 @@ func buildWebProvider(cfg config.Config, log *slog.Logger) (search.Provider, err
 				OneQuery: cfg.SearXNGOneQuery, MaxPages: cfg.SearXNGMaxPages, Logger: log})
 		case "serpapi":
 			p, err = serpapi.New(serpapi.Config{APIKey: cfg.SerpAPIKey, Engine: cfg.SerpAPIEngine,
-				BaseURL: cfg.SerpAPIBaseURL, Combined: cfg.SearchCombined})
+				BaseURL: cfg.SerpAPIBaseURL, Combined: cfg.SearchCombined,
+				HTTPClient: &http.Client{Timeout: cfg.SerpAPITimeout}})
 		default:
 			err = fmt.Errorf("unknown search provider %q", name)
 		}
@@ -251,6 +252,7 @@ func buildWebProvider(cfg config.Config, log *slog.Logger) (search.Provider, err
 	}
 	return search.NewFallback(providers, search.FallbackOptions{
 		AttemptTimeout:   cfg.ProviderAttemptTimeout,
+		Timeouts:         map[string]time.Duration{"serpapi": cfg.SerpAPITimeout},
 		FailureThreshold: cfg.ProviderFailThreshold,
 		Cooldown:         cfg.ProviderCooldown,
 	}, log)
@@ -279,7 +281,10 @@ func addApifyProviders(cfg config.Config, catalog *markets.Catalog, providers ma
 			return nil, fmt.Errorf("APIFY_%s: %w", strings.ToUpper(m), err)
 		}
 		chain, err := search.NewFallback([]search.Provider{scraper, web}, search.FallbackOptions{
-			AttemptTimeout:   cfg.ApifyTimeout,
+			AttemptTimeout: cfg.ApifyTimeout,
+			// The web chain has its own per-provider timeouts; the search
+			// timeout still bounds the whole search.
+			Timeouts:         map[string]time.Duration{web.Name(): cfg.SearchTimeout},
 			FailureThreshold: cfg.ProviderFailThreshold,
 			Cooldown:         cfg.ProviderCooldown,
 		}, log)

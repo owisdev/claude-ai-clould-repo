@@ -15,6 +15,9 @@ type FallbackOptions struct {
 	// AttemptTimeout bounds each provider attempt so a slow provider leaves
 	// time for the next one. The search's overall timeout still applies.
 	AttemptTimeout time.Duration
+	// Timeouts overrides AttemptTimeout per provider name, e.g. SerpApi's
+	// Google Shopping often needs 5-15 s.
+	Timeouts map[string]time.Duration
 	// After FailureThreshold consecutive failures a provider is skipped for
 	// Cooldown (circuit breaker), so a broken instance adds no latency.
 	FailureThreshold int
@@ -89,7 +92,11 @@ func (f *Fallback) Search(ctx context.Context, q Query) ([]Product, error) {
 			continue
 		}
 
-		attemptCtx, cancel := context.WithTimeout(ctx, f.opts.AttemptTimeout)
+		timeout := f.opts.AttemptTimeout
+		if t, ok := f.opts.Timeouts[p.Name()]; ok && t > 0 {
+			timeout = t
+		}
+		attemptCtx, cancel := context.WithTimeout(ctx, timeout)
 		products, err := p.Search(attemptCtx, q)
 		cancel()
 		if err == nil {

@@ -282,3 +282,20 @@ func TestFallbackUncoveredOnLastIsNoError(t *testing.T) {
 		t.Fatalf("got %+v, %v; want amazon only and no error", got, err)
 	}
 }
+
+func TestFallbackPerProviderTimeout(t *testing.T) {
+	slow := &stubProvider{name: "serpapi", delay: 100 * time.Millisecond}
+	free := &stubProvider{name: "searxng"}
+	f, _ := NewFallback([]Provider{slow, free}, FallbackOptions{
+		AttemptTimeout: 20 * time.Millisecond,
+		Timeouts:       map[string]time.Duration{"serpapi": time.Second},
+	}, discard)
+
+	got, err := f.Search(context.Background(), oneTarget)
+	if err != nil || got[0].Provider != "serpapi" {
+		t.Fatalf("got %+v, %v; the slow provider should get its own longer timeout", got, err)
+	}
+	if free.calls.Load() != 0 {
+		t.Error("fell back although the slow provider was within its timeout")
+	}
+}

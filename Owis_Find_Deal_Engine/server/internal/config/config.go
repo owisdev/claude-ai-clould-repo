@@ -23,6 +23,7 @@ type Config struct {
 	SerpAPIEngine          string // "google_shopping" (prices) or "google" (web)
 	SerpAPIBaseURL         string // empty = SerpApi; for tests / outbound proxies
 	ProviderAttemptTimeout time.Duration
+	SerpAPITimeout         time.Duration // Google Shopping is slow
 
 	// Apify scrapers for marketplaces without an official API (Temu, SHEIN).
 	ApifyToken            string
@@ -95,6 +96,7 @@ func Load() (Config, error) {
 		ApifyMaxItems:             parse(&errs, "APIFY_MAX_ITEMS", 10, strconv.Atoi),
 		ApifyTimeout:              parse(&errs, "APIFY_TIMEOUT", 25*time.Second, time.ParseDuration),
 		ProviderAttemptTimeout:    parse(&errs, "PROVIDER_ATTEMPT_TIMEOUT", 8*time.Second, time.ParseDuration),
+		SerpAPITimeout:            parse(&errs, "SERPAPI_TIMEOUT", 25*time.Second, time.ParseDuration),
 		ProviderFailThreshold:     parse(&errs, "PROVIDER_FAILURE_THRESHOLD", 3, strconv.Atoi),
 		ProviderCooldown:          parse(&errs, "PROVIDER_COOLDOWN", time.Minute, time.ParseDuration),
 		CacheEnabled:              parse(&errs, "CACHE_ENABLED", true, strconv.ParseBool),
@@ -155,9 +157,23 @@ func Load() (Config, error) {
 				errs = append(errs, fmt.Errorf("%s_ACTOR and %s_INPUT (JSON containing {{query}}) are required for %s", key, key, m))
 			}
 		}
-		// An Actor run can take much longer than a web search: give the whole
-		// search enough time for it plus a web fallback.
-		cfg.SearchTimeout = max(cfg.SearchTimeout, cfg.ApifyTimeout+cfg.ProviderAttemptTimeout+2*time.Second)
+	}
+	// Give the whole search enough time for every provider in the chain to
+	// get its full attempt: an Apify run (if any), then each web provider.
+	need := 2 * time.Second
+	for _, p := range cfg.SearchProviders {
+		if p == "serpapi" {
+			need += cfg.SerpAPITimeout
+		} else {
+			need += cfg.ProviderAttemptTimeout
+		}
+	}
+	if len(cfg.ApifyMarkets) > 0 {
+		need += cfg.ApifyTimeout
+	}
+	cfg.SearchTimeout = max(cfg.SearchTimeout, need)
+	if cfg.ProviderAttemptTimeout <= 0 || cfg.SerpAPITimeout <= 0 || cfg.SearchTimeout <= 0 {
+		errs = append(errs, errors.New("PROVIDER_ATTEMPT_TIMEOUT, SERPAPI_TIMEOUT and SEARCH_TIMEOUT must be positive"))
 	}
 	if cfg.RateLimitRPS <= 0 || cfg.RateLimitBurst <= 0 || cfg.MaxConcurrency <= 0 || cfg.ProviderFailThreshold <= 0 || cfg.ResultsPerMarket <= 0 {
 		errs = append(errs, errors.New("RATE_LIMIT_RPS, RATE_LIMIT_BURST, SEARCH_MAX_CONCURRENCY, PROVIDER_FAILURE_THRESHOLD and RESULTS_PER_MARKET must be positive"))
