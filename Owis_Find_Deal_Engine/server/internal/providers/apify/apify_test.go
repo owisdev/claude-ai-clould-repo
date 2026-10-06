@@ -231,3 +231,23 @@ func TestAliExpressListingsOutput(t *testing.T) {
 		t.Errorf("got %+v", got)
 	}
 }
+
+func TestActorSlashForm(t *testing.T) {
+	var path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.EscapedPath()
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	t.Cleanup(srv.Close)
+	c, err := New(Config{Token: "t", Actor: "piotrv1001/aliexpress-listings-scraper", BaseURL: srv.URL,
+		InputTemplate: `{"maxResults":{{max}},"searchQueries":["{{query}}"],"proxyConfiguration":{"useApifyProxy":true}}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Search(context.Background(), search.Query{Title: "s pen", Targets: []markets.Target{temu}}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(path, "/v2/actors/piotrv1001~aliexpress-listings-scraper/") {
+		t.Errorf("request path = %s", path)
+	}
+}

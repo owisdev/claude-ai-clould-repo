@@ -34,7 +34,7 @@ const (
 // Config configures one Actor for one marketplace.
 type Config struct {
 	Token string
-	// Actor is "owner~actor-name" (or the Actor ID), as shown in its API tab.
+	// Actor is "owner~actor-name" or "owner/actor-name" (or the Actor ID).
 	Actor string
 	// InputTemplate is the Actor input JSON with placeholders, e.g.
 	// {"searchQueries":["{{query}}"],"maxItems":{{max}}}
@@ -63,6 +63,8 @@ func New(cfg Config) (*Client, error) {
 	if cfg.Token == "" || cfg.Actor == "" {
 		return nil, errors.New("apify: token and actor are required")
 	}
+	// The store shows "owner/actor-name"; the API path needs "owner~actor-name".
+	cfg.Actor = strings.Replace(strings.TrimSpace(cfg.Actor), "/", "~", 1)
 	if !hasQuery(cfg.InputTemplate) {
 		return nil, errors.New("apify: input template must contain {{query}}, {{query_url}} or {{query_slug}}")
 	}
