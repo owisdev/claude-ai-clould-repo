@@ -1,35 +1,63 @@
 # Project status and handoff
 
-Last updated: 2026-10-02 · Branch: `claude/cloud-vs-local-7xi988`
+Last updated: 2026-10-06 · Branch: `claude/cloud-vs-local-7xi988`
 (not merged into `main` yet).
 
 Read first: [docs/architecture.pdf](docs/architecture.pdf) — the full
 architecture and flows, illustrated (regenerate with
-`python3 docs/build_architecture_pdf.py`).
+`python3 docs/build_architecture_pdf.py`). Note: the PDF predates the
+local test changes below (dedicated sources per shop).
 
 ## Where we are
 
-**Phase 1 — search service: complete** (plan steps 1–6, see
-[PLAN.md](PLAN.md) section 9). CI is green on GitHub.
+**Phase 1 — search service: complete and tested locally** (plan steps
+1–6, see [PLAN.md](PLAN.md) section 9).
 
 - Countries `usa`, `ksa`, `jor` → only the shops that deliver there
   ([markets.json](server/internal/markets/markets.json)).
 - Login required: JWT from the auth provider, verified locally (JWKS).
-- Free SearXNG first, SerpApi only as fallback, with circuit breaker.
-  SerpApi uses **Google Shopping** (prices, seller, image) by default.
-- Optional **Apify** scrapers for Temu / SHEIN (real prices), each with an
-  automatic fallback to the web search.
 - Cache with price-freshness strategy (fresh 2h, stale-while-revalidate
   up to 24h, pull-to-refresh). **Cached answers are free** for users.
 - Daily allowance per plan: free plan used up → 402, paid → 429.
 - Docker image + full stack in `docker-compose.yml` on private networks.
 
-**Now waiting for:** the owner runs the stack locally and gives feedback
-(checklist at the end). No new work until then.
+### Local test (2026-10-06): sources that work
 
-**Next after feedback:** phase 2 (users: profile, plans/payments, saved
-cart + price tracker, purchase reports, notifications) or phase 3 first
-(eBay / AliExpress APIs if the keys were approved).
+Lesson: free web search (SearXNG) gets blocked quickly from one IP and
+rarely finds product pages; each shop needs its own source.
+
+| Shop | Source | Result |
+|---|---|---|
+| Amazon | SerpApi Amazon engine (on by default with `SERPAPI_KEY`) | ✅ ~10 products, price, rating, direct `/dp/` links, ~3 s |
+| AliExpress | Apify `piotrv1001/aliexpress-listings-scraper` | ✅ 10 products, price, direct `/item/` links, ~40 s |
+| Temu | Apify `crw/temu-products-scraper` (US catalogue only) | ✅ 10 products, price, `goods.html?goods_id=` links; empty for some items (falls back) |
+| SHEIN | fallback only: Google Shopping (price, shop-search link) / SearXNG (direct link, no price) | ⚠️ few results — a SHEIN Apify scraper is the next step |
+| eBay (usa, ksa) | fallback only | not tested yet |
+
+Example `m.2 enclosure` / `jor`: 31 products from 4 shops with prices,
+28.6 s live (both scrapers run in parallel), instant from cache.
+Cost per live search: 1–2 SerpApi searches + 2 Apify runs.
+
+Working `.env` (besides auth, secrets and keys):
+
+```ini
+SEARCH_PROVIDERS=serpapi,searxng
+SERPAPI_ENGINE=google_shopping
+APIFY_MARKETS=aliexpress,temu
+APIFY_ALIEXPRESS_ACTOR=piotrv1001/aliexpress-listings-scraper
+APIFY_ALIEXPRESS_INPUT={"maxResults":{{max}},"searchQueries":["{{query}}"],"proxyConfiguration":{"useApifyProxy":true}}
+APIFY_TEMU_ACTOR=crw/temu-products-scraper
+APIFY_TEMU_INPUT={"keyword":"{{query}}","max_items":{{max}},"region":"US","sort":"relevance"}
+APIFY_TIMEOUT=60s
+```
+
+**Open items:** SHEIN scraper; check that Temu `price_str` matches the
+price on the Temu page; eBay; loading bar in the app (first live search
+takes ~30–50 s).
+
+**Next:** phase 2 (users: profile, plans/payments, saved cart + price
+tracker, purchase reports, notifications) or phase 3 (eBay / AliExpress
+official APIs if the keys were approved).
 
 ## To resume in a new Claude Code session
 
