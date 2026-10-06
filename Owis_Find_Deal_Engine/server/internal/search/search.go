@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"owis_find_deal_engine/internal/markets"
 )
@@ -237,6 +238,7 @@ func (s *Service) Search(ctx context.Context, req Request) (*Result, error) {
 		}
 	}
 
+	result.Results = dedupe(result.Results)
 	sortProducts(result.Results, country.Targets)
 	result.Results = limitPerMarket(result.Results, s.opts.PerMarket)
 	result.TookMS = time.Since(start).Milliseconds()
@@ -335,6 +337,64 @@ func sortProducts(products []Product, targets []markets.Target) {
 		}
 		return order[products[i].Market] < order[products[j].Market]
 	})
+}
+
+// dedupe removes repeats of the same product within a marketplace: the
+// same title from several sellers (Temu, AliExpress) or found twice. The
+// cheapest offer is kept, at the best position of the group; positions are
+// then renumbered per marketplace. The same product in different
+// marketplaces is kept: that is the comparison.
+func dedupe(products []Product) []Product {
+	out := make([]Product, 0, len(products))
+	seen := make(map[string]int, len(products))
+	for _, p := range products {
+		key := titleKey(p.Title)
+		if key == "" {
+			out = append(out, p)
+			continue
+		}
+		key = p.Market + "\x00" + key
+		i, dup := seen[key]
+		if !dup {
+			seen[key] = len(out)
+			out = append(out, p)
+			continue
+		}
+		if cheaper(p, out[i]) {
+			p.Position = min(p.Position, out[i].Position)
+			out[i] = p
+		} else {
+			out[i].Position = min(p.Position, out[i].Position)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Position < out[j].Position })
+	next := make(map[string]int)
+	for i := range out {
+		next[out[i].Market]++
+		out[i].Position = next[out[i].Market]
+	}
+	return out
+}
+
+// titleKey normalizes a title for duplicate detection: lowercase words of
+// letters and digits ("M.2 Nvme SSD, MacBook" == "m 2 nvme ssd macbook").
+func titleKey(title string) string {
+	return strings.Join(strings.FieldsFunc(strings.ToLower(title), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}), " ")
+}
+
+// cheaper reports whether a has a lower price than b in the same currency,
+// or a price where b has none.
+func cheaper(a, b Product) bool {
+	switch {
+	case a.Price == nil:
+		return false
+	case b.Price == nil:
+		return true
+	default:
+		return a.Currency == b.Currency && *a.Price < *b.Price
+	}
 }
 
 // limitPerMarket keeps the first n products of each marketplace, in order.

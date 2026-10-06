@@ -305,3 +305,47 @@ func TestSearchPassesShoppingRegion(t *testing.T) {
 		}
 	}
 }
+
+// fixedProvider returns the given products.
+type fixedProvider struct{ products []Product }
+
+func (p *fixedProvider) Name() string { return "fixed" }
+func (p *fixedProvider) Batch() bool  { return true }
+func (p *fixedProvider) Search(_ context.Context, _ Query) ([]Product, error) {
+	return append([]Product(nil), p.products...), nil
+}
+
+func TestSearchRemovesDuplicateProducts(t *testing.T) {
+	price := func(v float64) *float64 { return &v }
+	// From the local test: the same Temu product from three sellers.
+	p := &fixedProvider{products: []Product{
+		{Market: "temu", Position: 1, Title: "EAGET JHL7440 40Gbps M.2 NVMe SSD Enclosure, Suitable for MacBook", Link: "t1", Price: price(113.61), Currency: "$"},
+		{Market: "temu", Position: 2, Title: "EAGET JHL7440 40Gbps M.2 NVMe SSD Enclosure,Suitable for MacBook", Link: "t2", Price: price(103.61), Currency: "$"},
+		{Market: "temu", Position: 3, Title: "EAGET JHL7440 40Gbps M.2 Nvme SSD Enclosure, Suitable for Macbook", Link: "t3", Price: price(126.02), Currency: "$"},
+		{Market: "temu", Position: 4, Title: "ORICO M2 Nvme SSD Enclosure", Link: "t4", Price: price(7.8), Currency: "$"},
+		// The same title in another shop is a comparison, not a duplicate.
+		{Market: "amazon", Position: 1, Title: "EAGET JHL7440 40Gbps M.2 NVMe SSD Enclosure, Suitable for MacBook", Link: "a1", Price: price(99), Currency: "$"},
+	}}
+	svc := newTestService(t, p, Options{})
+
+	res, err := svc.Search(context.Background(), Request{Title: "m.2 enclosure", Country: "jor"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var temu []Product
+	for _, r := range res.Results {
+		if r.Market == "temu" {
+			temu = append(temu, r)
+		}
+	}
+	if len(temu) != 2 || len(res.Results) != 3 {
+		t.Fatalf("results = %+v", res.Results)
+	}
+	// Cheapest offer kept, at the group's best position; positions renumbered.
+	if temu[0].Link != "t2" || temu[0].Position != 1 || *temu[0].Price != 103.61 {
+		t.Errorf("first temu = %+v", temu[0])
+	}
+	if temu[1].Link != "t4" || temu[1].Position != 2 {
+		t.Errorf("second temu = %+v", temu[1])
+	}
+}
