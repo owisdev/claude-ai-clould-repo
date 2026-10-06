@@ -46,9 +46,14 @@ type Config struct {
 	Timeout time.Duration
 	// Combined only mirrors the search mode so this provider can be chained
 	// with the web providers; each run searches one marketplace.
-	Combined   bool
-	BaseURL    string // defaults to Apify; overridden in tests
-	HTTPClient *http.Client
+	Combined bool
+	// EmptyFallback hands a market the scraper found nothing relevant for
+	// to the next provider. Off: that market simply has no results (the
+	// shop's own search found nothing; saves time and paid searches).
+	// Errors and timeouts always fall back.
+	EmptyFallback bool
+	BaseURL       string // defaults to Apify; overridden in tests
+	HTTPClient    *http.Client
 }
 
 // Client implements search.Provider for one Actor.
@@ -89,9 +94,10 @@ func New(cfg Config) (*Client, error) {
 func (c *Client) Name() string { return "apify" }
 func (c *Client) Batch() bool  { return c.cfg.Combined }
 
-// Search runs the Actor once per target (normally exactly one). A target
-// the scraper found nothing for is reported as uncovered, so the next
-// provider can try it (a scraper may cover only one region of the shop).
+// Search runs the Actor once per target (normally exactly one). With
+// EmptyFallback, a target the scraper found nothing for is reported as
+// uncovered, so the next provider can try it (useful when a scraper covers
+// only one region of the shop).
 func (c *Client) Search(ctx context.Context, q search.Query) ([]search.Product, error) {
 	var out []search.Product
 	uncovered := map[string]bool{}
@@ -100,7 +106,7 @@ func (c *Client) Search(ctx context.Context, q search.Query) ([]search.Product, 
 		if err != nil {
 			return nil, err
 		}
-		if len(products) == 0 {
+		if len(products) == 0 && c.cfg.EmptyFallback {
 			uncovered[t.Market] = true
 		}
 		out = append(out, products...)

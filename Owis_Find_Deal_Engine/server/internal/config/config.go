@@ -38,6 +38,7 @@ type Config struct {
 	ApifyMaxItems         int
 	ApifyTimeout          time.Duration
 	ApifyBaseURL          string // empty = Apify; for tests / outbound proxies
+	ApifyEmptyFallback    bool   // empty scraper result -> try the web providers
 	ProviderFailThreshold int
 	ProviderCooldown      time.Duration
 
@@ -99,6 +100,7 @@ func Load() (Config, error) {
 		ApifyActors:               map[string]string{},
 		ApifyInputs:               map[string]string{},
 		ApifyMaxItems:             parse(&errs, "APIFY_MAX_ITEMS", 10, strconv.Atoi),
+		ApifyEmptyFallback:        parse(&errs, "APIFY_EMPTY_FALLBACK", false, strconv.ParseBool),
 		ApifyTimeout:              parse(&errs, "APIFY_TIMEOUT", 60*time.Second, time.ParseDuration),
 		ProviderAttemptTimeout:    parse(&errs, "PROVIDER_ATTEMPT_TIMEOUT", 8*time.Second, time.ParseDuration),
 		SerpAPITimeout:            parse(&errs, "SERPAPI_TIMEOUT", 25*time.Second, time.ParseDuration),

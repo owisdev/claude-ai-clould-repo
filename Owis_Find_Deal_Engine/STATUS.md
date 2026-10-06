@@ -30,7 +30,7 @@ rarely finds product pages; each shop needs its own source.
 |---|---|---|
 | Amazon | SerpApi Amazon engine (on by default with `SERPAPI_KEY`) | ✅ ~10 products, price, rating, direct `/dp/` links, ~3 s |
 | AliExpress | Apify `piotrv1001/aliexpress-listings-scraper` | ✅ 10 products, price, direct `/item/` links, ~40 s |
-| Temu | Apify `crw/temu-products-scraper` (US catalogue only) | ✅ 10 products, price, `goods.html?goods_id=` links; empty for some items (falls back) |
+| Temu | Apify `crw/temu-products-scraper` (US catalogue only) | ✅ 10 products, price, `goods.html?goods_id=` links; empty for some items |
 | SHEIN | fallback only: Google Shopping (price, shop-search link) / SearXNG (direct link, no price) | ⚠️ few results — a SHEIN Apify scraper is the next step |
 | eBay (usa, ksa) | fallback only | not tested yet |
 
@@ -49,6 +49,7 @@ APIFY_ALIEXPRESS_INPUT={"maxResults":{{max}},"searchQueries":["{{query}}"],"prox
 APIFY_TEMU_ACTOR=crw/temu-products-scraper
 APIFY_TEMU_INPUT={"keyword":"{{query}}","max_items":{{max}},"region":"US","sort":"relevance"}
 APIFY_TIMEOUT=60s
+APIFY_EMPTY_FALLBACK=false   # nothing relevant from a scraper = no results (no extra time or SerpApi search)
 ```
 
 **Prices are US prices (known limit, accepted):** the Apify scrapers read

@@ -171,8 +171,8 @@ func run() error {
 			MinRefresh:           cfg.CacheMinRefresh,
 			FetchTimeout:         cfg.SearchTimeout + 5*time.Second,
 			MaxBackgroundRefresh: cfg.CacheMaxBackgroundRefresh,
-			Variant: fmt.Sprintf("providers=%s;apify=%s;serpapi_markets=%s;per_market=%d;searxng_one_query=%t;serpapi=%s",
-				web.Name(), strings.Join(cfg.ApifyMarkets, ","), strings.Join(cfg.SerpAPIMarkets, ","),
+			Variant: fmt.Sprintf("providers=%s;apify=%s;apify_empty_fallback=%t;serpapi_markets=%s;per_market=%d;searxng_one_query=%t;serpapi=%s",
+				web.Name(), strings.Join(cfg.ApifyMarkets, ","), cfg.ApifyEmptyFallback, strings.Join(cfg.SerpAPIMarkets, ","),
 				cfg.ResultsPerMarket, cfg.SearXNGOneQuery, cfg.SerpAPIEngine),
 		}, log)
 		cacheOrLive = searchCache
@@ -315,6 +315,7 @@ func addApifyProviders(cfg config.Config, catalog *markets.Catalog, providers ma
 			Timeout:       cfg.ApifyTimeout,
 			Combined:      cfg.SearchCombined,
 			BaseURL:       cfg.ApifyBaseURL,
+			EmptyFallback: cfg.ApifyEmptyFallback,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("APIFY_%s: %w", strings.ToUpper(m), err)

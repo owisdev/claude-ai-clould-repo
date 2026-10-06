@@ -126,14 +126,22 @@ func TestSearchErrors(t *testing.T) {
 	}
 }
 
-func TestEmptyResultIsUncovered(t *testing.T) {
-	// A scraper covering only one region (e.g. Temu US) may find nothing:
-	// the next provider gets the market instead of a final "no results".
+func TestEmptyResult(t *testing.T) {
 	srv := newServer(t, http.StatusCreated, `[]`, nil)
-	_, err := newClient(t, srv.URL).Search(context.Background(), search.Query{Title: "x", Targets: []markets.Target{temu}})
+
+	// Default: nothing found is a final "no results" (no paid fallback).
+	got, err := newClient(t, srv.URL).Search(context.Background(), search.Query{Title: "x", Targets: []markets.Target{temu}})
+	if err != nil || len(got) != 0 {
+		t.Errorf("default: got %v, %v; want no results, no error", got, err)
+	}
+
+	// EmptyFallback: the next provider gets the market.
+	c, _ := New(Config{Token: "tok", Actor: "someone~temu-scraper", InputTemplate: temuTemplate,
+		BaseURL: srv.URL, EmptyFallback: true})
+	_, err = c.Search(context.Background(), search.Query{Title: "x", Targets: []markets.Target{temu}})
 	var pe *search.PartialError
 	if !errors.As(err, &pe) || !pe.Uncovered["temu"] || len(pe.Failed) != 0 {
-		t.Errorf("err = %v, want temu uncovered", err)
+		t.Errorf("EmptyFallback: err = %v, want temu uncovered", err)
 	}
 }
 
