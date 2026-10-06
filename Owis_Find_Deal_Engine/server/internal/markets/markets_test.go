@@ -56,6 +56,10 @@ func TestParseRejectsInvalid(t *testing.T) {
 		"no region":      `{"markets":{"a":{"name":"A","provider":"web"}},"countries":{"usa":{"markets":[{"market":"a","domain":"a.com"}]}}}`,
 		"duplicate":      `{"markets":{"a":{"name":"A","provider":"web"}},"countries":{"usa":{"region":"us","markets":[{"market":"a","domain":"a.com"},{"market":"a","domain":"a.com"}]}}}`,
 		"bad json":       `{`,
+		"bad pattern":    `{"markets":{"a":{"name":"A","provider":"web","product_pages":{"paths":["("]}}},"countries":{"usa":{"region":"us","markets":[{"market":"a","domain":"a.com"}]}}}`,
+		"no patterns":    `{"markets":{"a":{"name":"A","provider":"web","product_pages":{"paths":[]}}},"countries":{"usa":{"region":"us","markets":[{"market":"a","domain":"a.com"}]}}}`,
+		"link no id":     `{"markets":{"a":{"name":"A","provider":"web","product_pages":{"paths":["^/p/"],"link":"https://{host}/p/{id}"}}},"countries":{"usa":{"region":"us","markets":[{"market":"a","domain":"a.com"}]}}}`,
+		"bad link":       `{"markets":{"a":{"name":"A","provider":"web","product_pages":{"paths":["^/p/(?P<id>[0-9]+)"],"link":"http://evil.com/{id}"}}},"countries":{"usa":{"region":"us","markets":[{"market":"a","domain":"a.com"}]}}}`,
 	}
 	for name, input := range tests {
 		if _, err := Parse([]byte(input)); err == nil {
@@ -127,5 +131,95 @@ func TestWithProviders(t *testing.T) {
 	}
 	if _, err := cat.WithProviders(map[string]string{"walmart": "x"}); err == nil {
 		t.Error("unknown marketplace accepted")
+	}
+}
+
+func TestProductLink(t *testing.T) {
+	cat, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	usa, _ := cat.Country("usa")
+	ksa, _ := cat.Country("ksa")
+	target := func(c Country, market string) Target {
+		for _, t := range c.Targets {
+			if t.Market == market {
+				return t
+			}
+		}
+		t.Fatalf("no %s in %s", market, c.Code)
+		return Target{}
+	}
+
+	tests := []struct {
+		target Target
+		link   string
+		want   string // "" = not a product page
+	}{
+		// Amazon: product pages, cleaned; /clp/ points at a product too.
+		{target(usa, "amazon"), "https://www.amazon.com/SSK-Enclosure-USB-C/dp/B07MNFH1PX/ref=sr_1_1?keywords=x", "https://www.amazon.com/dp/B07MNFH1PX"},
+		{target(usa, "amazon"), "https://www.amazon.com/dp/B07MNFH1PX", "https://www.amazon.com/dp/B07MNFH1PX"},
+		{target(usa, "amazon"), "https://www.amazon.com/gp/product/B07MNFH1PX?th=1", "https://www.amazon.com/dp/B07MNFH1PX"},
+		{target(usa, "amazon"), "https://www.amazon.com/clp/B07MNFH1PX", "https://www.amazon.com/dp/B07MNFH1PX"},
+		{target(ksa, "amazon"), "https://www.amazon.sa/-/en/dp/B0FD38XB93", "https://www.amazon.sa/dp/B0FD38XB93"},
+		// Amazon: store, seller, search and home pages are dropped.
+		{target(usa, "amazon"), "https://www.amazon.com/stores/SSK/page/3FFC2A12-0613-42C4-9CC7-C0A4025BCD41", ""},
+		{target(usa, "amazon"), "https://www.amazon.com/s?i=merchant-items&me=A41S1C1L96T2O", ""},
+		{target(usa, "amazon"), "https://www.amazon.com/samsung-s-pen/s?k=samsung+s+pen", ""},
+		{target(usa, "amazon"), "https://www.amazon.com/", ""},
+		// AliExpress, including language subdomains.
+		{target(usa, "aliexpress"), "https://www.aliexpress.com/item/1005008495498271.html?spm=a2g0o", "https://www.aliexpress.com/item/1005008495498271.html"},
+		{target(usa, "aliexpress"), "https://ar.aliexpress.com/item/1005011664921405.html", "https://ar.aliexpress.com/item/1005011664921405.html"},
+		{target(usa, "aliexpress"), "https://www.aliexpress.com/w/wholesale-ssk-enclosure.html", ""},
+		{target(usa, "aliexpress"), "https://www.aliexpress.com/store/1101234567", ""},
+		// eBay.
+		{target(usa, "ebay"), "https://www.ebay.com/itm/SSK-M-2-Enclosure/256123456789?hash=x", "https://www.ebay.com/itm/256123456789"},
+		{target(usa, "ebay"), "https://www.ebay.com/itm/256123456789", "https://www.ebay.com/itm/256123456789"},
+		{target(usa, "ebay"), "https://www.ebay.com/sch/i.html?_nkw=ssk", ""},
+		{target(usa, "ebay"), "https://www.ebay.com/b/SSD-Enclosures/bn_7116", ""},
+		// Temu: product pages keep their path, tracking parameters removed.
+		{target(usa, "temu"), "https://www.temu.com/ssk-m2-enclosure-g-601099512345678.html?_x_ads=1", "https://www.temu.com/ssk-m2-enclosure-g-601099512345678.html"},
+		{target(usa, "temu"), "https://www.temu.com/sa-en/ssk-enclosure-g-601099512345678.html", "https://www.temu.com/sa-en/ssk-enclosure-g-601099512345678.html"},
+		{target(usa, "temu"), "https://www.temu.com/ssd-enclosures-o3-123.html", ""},
+		{target(usa, "temu"), "https://www.temu.com/", ""},
+		// SHEIN.
+		{target(ksa, "shein"), "https://ar.shein.com/Phone-Case-p-12345678-cat-1234.html?src=x", "https://ar.shein.com/Phone-Case-p-12345678-cat-1234.html"},
+		{target(ksa, "shein"), "https://ar.shein.com/Phone-Case-p-12345678.html", "https://ar.shein.com/Phone-Case-p-12345678.html"},
+		{target(ksa, "shein"), "https://ar.shein.com/Phone-Cases-c-2345.html", ""},
+		{target(ksa, "shein"), "https://ar.shein.com/pdsearch/phone%20case/", ""},
+		// Other domains and schemes never pass.
+		{target(usa, "amazon"), "https://evil.com/dp/B07MNFH1PX", ""},
+		{target(usa, "amazon"), "javascript:alert(1)//www.amazon.com/dp/B07MNFH1PX", ""},
+	}
+	for _, tt := range tests {
+		got, ok := tt.target.ProductLink(tt.link)
+		if tt.want == "" {
+			if ok {
+				t.Errorf("%s: accepted as product page (%s)", tt.link, got)
+			}
+			continue
+		}
+		if !ok || got != tt.want {
+			t.Errorf("%s: got %q, %v; want %q", tt.link, got, ok, tt.want)
+		}
+	}
+}
+
+func TestProductLinkWithoutRuleAcceptsDomain(t *testing.T) {
+	tg := Target{Market: "x", Domain: "x.com"}
+	if got, ok := tg.ProductLink("https://www.x.com/anything?a=1"); !ok || got != "https://www.x.com/anything?a=1" {
+		t.Errorf("got %q, %v", got, ok)
+	}
+}
+
+func TestVersionChangesWithContent(t *testing.T) {
+	a, _ := Parse([]byte(`{"markets":{"a":{"name":"A","provider":"web"}},"countries":{"usa":{"region":"us","markets":[{"market":"a","domain":"a.com"}]}}}`))
+	b, _ := Parse([]byte(`{"markets":{"a":{"name":"A2","provider":"web"}},"countries":{"usa":{"region":"us","markets":[{"market":"a","domain":"a.com"}]}}}`))
+	if a.Version() == "" || a.Version() == b.Version() {
+		t.Errorf("versions %q and %q", a.Version(), b.Version())
+	}
+	c, _ := a.WithProviders(map[string]string{"a": "apify-a"})
+	if c.Version() != a.Version() {
+		t.Error("WithProviders lost the version")
 	}
 }

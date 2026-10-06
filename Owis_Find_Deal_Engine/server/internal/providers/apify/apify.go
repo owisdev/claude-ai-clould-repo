@@ -199,7 +199,12 @@ func toProducts(items []map[string]any, t markets.Target, max int) []search.Prod
 		}
 		u, err := url.Parse(link)
 		if err != nil || u.Hostname() == "" || !t.Matches(u.Hostname()) {
-			continue // not a product page of this marketplace
+			continue // not a page of this marketplace
+		}
+		// Scrapers return product pages; clean the link when the format is
+		// known, but do not drop items over an unfamiliar URL format.
+		if clean, ok := t.ProductLink(link); ok {
+			link = clean
 		}
 		p := search.Product{
 			Market:    t.Market,

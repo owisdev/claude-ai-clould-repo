@@ -150,8 +150,8 @@ func shoppingProducts(results []shoppingResult, targets []markets.Target) []sear
 			continue // sold by a shop we do not cover
 		}
 		link := r.ProductLink
-		if r.Link != "" && hostMatches(r.Link, target) {
-			link = r.Link // direct shop page is better than Google's page
+		if shop, ok := target.ProductLink(r.Link); ok {
+			link = shop // the shop's product page is better than Google's page
 		}
 		if link == "" {
 			continue
@@ -285,6 +285,7 @@ func (c *Client) searchWeb(ctx context.Context, q search.Query) ([]search.Produc
 func webProducts(results []organicResult, targets []markets.Target) []search.Product {
 	products := make([]search.Product, 0, len(results))
 	positions := make(map[string]int, len(targets))
+	seen := make(map[string]bool, len(results))
 	for _, r := range results {
 		if r.Link == "" || r.Title == "" {
 			continue
@@ -297,12 +298,17 @@ func webProducts(results []organicResult, targets []markets.Target) []search.Pro
 		if !ok {
 			continue // result outside the requested marketplaces
 		}
+		link, ok := target.ProductLink(r.Link)
+		if !ok || seen[link] {
+			continue // search, store or category page, or a duplicate
+		}
+		seen[link] = true
 		positions[target.Market]++
 
 		p := search.Product{
 			Market:    target.Market,
 			Title:     r.Title,
-			Link:      r.Link,
+			Link:      link,
 			Snippet:   r.Snippet,
 			Thumbnail: r.Thumbnail,
 			Position:  positions[target.Market],

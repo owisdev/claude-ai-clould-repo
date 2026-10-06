@@ -3,11 +3,15 @@
 package markets
 
 import (
+	"crypto/sha256"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -21,6 +25,46 @@ type Target struct {
 	Name     string `json:"name"`
 	Domain   string `json:"domain"`
 	Provider string `json:"-"`
+
+	products *productRule // nil: every page of the domain is accepted
+}
+
+// productRule recognizes a marketplace's product pages by their path and
+// optionally rebuilds a clean link from the product id.
+type productRule struct {
+	paths []*regexp.Regexp
+	link  string // e.g. "https://{host}/dp/{id}"; empty keeps the path
+}
+
+// ProductLink reports whether link is a product page of this marketplace
+// (not a search, store, category or home page) and returns a clean link:
+// rebuilt from the product id when the marketplace defines a link
+// template, otherwise the original without query string and fragment
+// (tracking parameters).
+func (t Target) ProductLink(link string) (string, bool) {
+	u, err := url.Parse(link)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || !t.Matches(u.Hostname()) {
+		return "", false
+	}
+	if t.products == nil {
+		return link, true
+	}
+	host := strings.ToLower(u.Hostname())
+	for _, re := range t.products.paths {
+		m := re.FindStringSubmatch(u.Path)
+		if m == nil {
+			continue
+		}
+		id := ""
+		if i := re.SubexpIndex("id"); i > 0 {
+			id = m[i]
+		}
+		if t.products.link != "" && id != "" {
+			return strings.NewReplacer("{host}", host, "{id}", id).Replace(t.products.link), true
+		}
+		return "https://" + host + u.EscapedPath(), true
+	}
+	return "", false
 }
 
 // Matches reports whether a link host belongs to this target's marketplace.
@@ -57,7 +101,12 @@ type Country struct {
 type Catalog struct {
 	countries map[string]Country
 	codes     []string
+	version   string
 }
+
+// Version identifies the catalog's content; it changes whenever the
+// markets file changes (used in cache keys).
+func (c *Catalog) Version() string { return c.version }
 
 // Country returns the country for a code such as "jor". Codes are case-insensitive.
 func (c *Catalog) Country(code string) (Country, bool) {
@@ -76,8 +125,12 @@ func (c *Catalog) Countries() []Country {
 
 type fileFormat struct {
 	Markets map[string]struct {
-		Name     string `json:"name"`
-		Provider string `json:"provider"`
+		Name         string `json:"name"`
+		Provider     string `json:"provider"`
+		ProductPages *struct {
+			Paths []string `json:"paths"`
+			Link  string   `json:"link"`
+		} `json:"product_pages"`
 	} `json:"markets"`
 	Countries map[string]struct {
 		Name     string `json:"name"`
@@ -113,7 +166,20 @@ func Parse(data []byte) (*Catalog, error) {
 		return nil, errors.New("markets: no countries defined")
 	}
 
-	cat := &Catalog{countries: make(map[string]Country, len(f.Countries))}
+	rules := make(map[string]*productRule, len(f.Markets))
+	for id, m := range f.Markets {
+		if m.ProductPages == nil {
+			continue
+		}
+		rule, err := compileRule(m.ProductPages.Paths, m.ProductPages.Link)
+		if err != nil {
+			return nil, fmt.Errorf("markets: market %q product_pages: %w", id, err)
+		}
+		rules[id] = rule
+	}
+
+	sum := sha256.Sum256(data)
+	cat := &Catalog{countries: make(map[string]Country, len(f.Countries)), version: hex.EncodeToString(sum[:8])}
 	for code, fc := range f.Countries {
 		code = strings.ToLower(code)
 		if fc.Region == "" {
@@ -144,6 +210,7 @@ func Parse(data []byte) (*Catalog, error) {
 				Name:     m.Name,
 				Domain:   strings.ToLower(fm.Domain),
 				Provider: m.Provider,
+				products: rules[fm.Market],
 			})
 		}
 		if len(country.Targets) == 0 {
@@ -154,6 +221,30 @@ func Parse(data []byte) (*Catalog, error) {
 	}
 	sort.Strings(cat.codes)
 	return cat, nil
+}
+
+func compileRule(paths []string, link string) (*productRule, error) {
+	if len(paths) == 0 {
+		return nil, errors.New("needs at least one path pattern")
+	}
+	rule := &productRule{link: link}
+	for _, p := range paths {
+		re, err := regexp.Compile(p)
+		if err != nil {
+			return nil, err
+		}
+		if strings.Contains(link, "{id}") && re.SubexpIndex("id") < 0 {
+			return nil, fmt.Errorf("pattern %q needs an (?P<id>...) group for link %q", p, link)
+		}
+		rule.paths = append(rule.paths, re)
+	}
+	if link != "" {
+		u, err := url.Parse(strings.NewReplacer("{host}", "example.com", "{id}", "1").Replace(link))
+		if err != nil || u.Scheme != "https" || u.Host != "example.com" {
+			return nil, fmt.Errorf("link %q must look like https://{host}/...", link)
+		}
+	}
+	return rule, nil
 }
 
 // SiteQuery restricts title to the targets' domains, e.g.
@@ -184,7 +275,7 @@ func MatchTarget(host string, targets []Target) (Target, bool) {
 // Marketplaces not in the catalog are an error.
 func (c *Catalog) WithProviders(overrides map[string]string) (*Catalog, error) {
 	known := map[string]bool{}
-	out := &Catalog{countries: make(map[string]Country, len(c.countries)), codes: c.codes}
+	out := &Catalog{countries: make(map[string]Country, len(c.countries)), codes: c.codes, version: c.version}
 	for code, country := range c.countries {
 		targets := make([]Target, len(country.Targets))
 		for i, t := range country.Targets {

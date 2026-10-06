@@ -184,14 +184,15 @@ func engineErrors(pairs [][]string) string {
 	return strings.Join(parts, ", ")
 }
 
-// toProducts maps results to their marketplace and numbers them per market.
-// SearXNG already merges and de-duplicates results across engines.
+// toProducts keeps product pages of the requested marketplaces, maps them
+// to their marketplace and numbers them per market. Different links to the
+// same product (tracking parameters, /clp/ vs /dp/) count once.
 func toProducts(results []result, targets []markets.Target) []search.Product {
 	products := make([]search.Product, 0, len(results))
 	positions := make(map[string]int, len(targets))
 	seen := make(map[string]bool, len(results))
 	for _, r := range results {
-		if r.URL == "" || r.Title == "" || seen[r.URL] {
+		if r.URL == "" || r.Title == "" {
 			continue
 		}
 		u, err := url.Parse(r.URL)
@@ -202,7 +203,11 @@ func toProducts(results []result, targets []markets.Target) []search.Product {
 		if !ok {
 			continue // engines that ignore site: return other domains
 		}
-		seen[r.URL] = true
+		link, ok := target.ProductLink(r.URL)
+		if !ok || seen[link] {
+			continue // search, store or category page, or a duplicate
+		}
+		seen[link] = true
 		positions[target.Market]++
 
 		thumb := r.Thumbnail
@@ -212,7 +217,7 @@ func toProducts(results []result, targets []markets.Target) []search.Product {
 		products = append(products, search.Product{
 			Market:    target.Market,
 			Title:     r.Title,
-			Link:      r.URL,
+			Link:      link,
 			Snippet:   r.Content,
 			Thumbnail: thumb,
 			Position:  positions[target.Market],

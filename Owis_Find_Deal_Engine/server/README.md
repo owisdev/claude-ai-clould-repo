@@ -62,6 +62,15 @@ answers (default `searxng,serpapi`):
   `site:` query per marketplace, in parallel, so Amazon cannot fill all the
   results. Web search returns **links and snippets, no prices**: prices
   come from SerpApi Google Shopping or Apify.
+
+**Only product pages are returned.** Web search also finds store, seller,
+category and search pages; each marketplace in `markets.json` has
+`product_pages` patterns (Amazon `/dp/<ASIN>`, AliExpress `/item/<id>.html`,
+eBay `/itm/<id>`, Temu `…-g-<id>.html`, SHEIN `…-p-<id>.html`) and every
+other link is dropped. Links are cleaned (tracking parameters removed,
+Amazon `/clp/<ASIN>` → `/dp/<ASIN>`) and the same product found twice is
+listed once. A marketplace without `product_pages` accepts any page of its
+domain.
 - **SerpApi** (paid): `SERPAPI_ENGINE=google_shopping` (default) returns
   **prices, seller and image** from Google Shopping; offers are matched to
   our shops by seller name, and when Google Shopping has nothing from our

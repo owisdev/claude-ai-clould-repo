@@ -295,9 +295,10 @@ func (e *Entry) response(stale bool) *search.Result {
 	return &res
 }
 
-// key identifies a search: country, its marketplace domains (so editing
-// markets.json invalidates old entries) and the normalized title. The title
-// is hashed so user input never ends up raw in Redis keys.
+// key identifies a search: country, the catalog version and marketplace
+// domains (so editing markets.json, e.g. its product page rules,
+// invalidates old entries) and the normalized title. The title is hashed so
+// user input never ends up raw in Redis keys.
 func (c *Cache) key(req search.Request) (string, bool) {
 	country, ok := c.catalog.Country(req.Country)
 	title := strings.ToLower(search.NormalizeTitle(req.Title))
@@ -305,6 +306,7 @@ func (c *Cache) key(req search.Request) (string, bool) {
 		return "", false
 	}
 	h := sha256.New()
+	h.Write([]byte(c.catalog.Version() + ";"))
 	for _, t := range country.Targets {
 		h.Write([]byte(t.Market + "=" + t.Domain + ";"))
 	}

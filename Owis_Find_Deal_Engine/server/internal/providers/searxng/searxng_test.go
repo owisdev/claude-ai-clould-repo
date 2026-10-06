@@ -168,6 +168,43 @@ func TestSearchAllMarketsFail(t *testing.T) {
 	}
 }
 
+func TestSearchKeepsOnlyProductPages(t *testing.T) {
+	cat, _ := markets.Load("")
+	jor, _ := cat.Country("jor")
+	// The amazon results of the first local test, plus duplicates.
+	srv, _ := perSiteServer(t, map[string]string{
+		"amazon.com": `{"results":[
+			{"url":"https://www.amazon.com/stores/SSK/page/3FFC2A12-0613-42C4-9CC7-C0A4025BCD41","title":"SSK store"},
+			{"url":"https://www.amazon.com/s?i=merchant-items&me=A41S1C1L96T2O","title":"SSK Direct"},
+			{"url":"https://www.amazon.com/clp/B07MNFH1PX","title":"Amazon.com: SSK M.2 enclosure"},
+			{"url":"https://www.amazon.com/SSK-Enclosure/dp/B07MNFH1PX/ref=sr_1_1","title":"duplicate of the clp page"},
+			{"url":"https://www.amazon.com/samsung-s-pen/s?k=samsung+s+pen","title":"search page"},
+			{"url":"https://www.amazon.com/dp/B0FD38XB93?th=1","title":"SSK 20Gbps"}]}`,
+		"aliexpress.com": `{"results":[{"url":"https://www.aliexpress.com/item/1005008495498271.html?spm=1","title":"SSK cloner"}]}`,
+		"temu.com":       `{"results":[{"url":"https://www.temu.com/","title":"Temu home"}]}`,
+		"ar.shein.com":   `{"results":[]}`,
+	})
+	c, _ := New(Config{BaseURL: srv.URL, Combined: true})
+
+	got, err := c.Search(context.Background(), search.Query{Title: "ssk enclosure", Targets: jor.Targets})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	want := map[string]bool{
+		"https://www.amazon.com/dp/B07MNFH1PX":                  true,
+		"https://www.amazon.com/dp/B0FD38XB93":                  true,
+		"https://www.aliexpress.com/item/1005008495498271.html": true,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d products, want %d: %+v", len(got), len(want), got)
+	}
+	for _, p := range got {
+		if !want[p.Link] {
+			t.Errorf("unexpected link %s", p.Link)
+		}
+	}
+}
+
 func TestSearchErrors(t *testing.T) {
 	tests := []struct {
 		name    string
