@@ -97,9 +97,10 @@ type Provider interface {
 
 | Provider | Used for | Cost | Status |
 |---|---|---|---|
-| `searxng` (self-hosted) | site-restricted metasearch, any market | free | ✅ default, tried first |
-| `serpapi` | **Google Shopping** (prices, seller, image; default) or Google web search, any market | 250 free/month, then ~$25 / 1,000 | ✅ fallback |
-| `apify` | Temu / SHEIN scrapers from the Apify store (real prices), per marketplace | $5 free credit/month, then ~$0.7–5 / 1,000 results | ✅ optional (`APIFY_MARKETS`) |
+| `serpapi-amazon` | **Amazon** via SerpApi's Amazon engine: price, rating, direct `/dp/` link | 1 SerpApi search per live search | ✅ default when `SERPAPI_KEY` is set (`SERPAPI_MARKETS`) |
+| `apify` | AliExpress / Temu / SHEIN scrapers from the Apify store (real prices, direct item links), per marketplace | $5 free credit/month, then ~$0.7–5 / 1,000 results | ✅ optional (`APIFY_MARKETS`; AliExpress tested) |
+| `serpapi` | **Google Shopping** (default) or Google web search, any market — see the comparison below | 250 free/month, then ~$25 / 1,000 | ✅ fallback for the shops above |
+| `searxng` (self-hosted) | site-restricted metasearch, any market | free | ✅ last fallback only: search engines block it quickly from one IP (seen in the local test) |
 | `ebay` (Browse API) | eBay with real prices | free (5,000 calls/day) | when keys arrive |
 | `aliexpress` (Affiliate API) | AliExpress with prices + affiliate links | free | when keys arrive |
 
@@ -125,6 +126,26 @@ Implemented behaviour:
   per attempt (the search timeout is raised to fit it). The scraper and
   its input are configuration, so a broken scraper can be swapped without
   a code change.
+
+### SerpApi engine: `google_shopping` (current) vs `google`
+
+`SERPAPI_ENGINE` picks what the SerpApi fallback searches. Decision (local
+test, October 2026): **keep `google_shopping`**. Amazon and AliExpress have
+dedicated sources with direct links and prices, so SerpApi only answers
+when those fail and for shops without one.
+
+| | `google_shopping` (current) | `google` (web search) |
+|---|---|---|
+| Price | ✅ almost always (structured) | ✗ rarely (only when Google shows a rich snippet) |
+| Image | ✅ | sometimes |
+| Link | ✗ no direct item link: Google's own offer pages (`google.com/search?ibp=oshop…`) only open inside a Google session, so the service links to **the shop's search for that product** (`"link_type": "search"`) | ✅ the shop's product page (`/item/…`, `/dp/…`, `-g-….html`, `-p-….html`), filtered by `product_pages` |
+| Shops covered | shops Google Shopping lists for the region; for Jordan (`shopping_region: us`) mostly AliExpress, rarely Temu / SHEIN | any shop Google indexes, via `site:` |
+| Relevance | Google may list merely similar products; the relevance filter drops most | `site:` keeps results on the shop; the relevance and product-page filters drop the rest |
+| Country | not every country (no Jordan → US listings) | every country (`gl=jo` works) |
+| Cost per live search | 1 search (+0 when a free provider follows: no web retry) | 1 search with `SEARCH_COMBINED=true` (one `site:a OR site:b` query, big shops can crowd out small ones); 1 per shop with `false` |
+| Speed | 5–15 s uncached (`SERPAPI_TIMEOUT=25s`) | 1–3 s |
+
+Switch with `SERPAPI_ENGINE=google` in `.env`; no code change needed.
 
 ### Tools evaluated (October 2026)
 
@@ -253,6 +274,16 @@ not affected (it only verifies ID tokens with the public JWKS).
   hash), metering and response format as text search. Same SerpApi
   account; counts as a live search. Best added together with the mobile
   app (camera), after phase 2.
+
+- **Direct links for Google Shopping results, resolved on tap.** Google
+  Shopping gives prices but no direct shop link (see section 4). SerpApi
+  can resolve an offer to its shop link (Google immersive product API), but
+  at **one search per product** — doing it for every result (10 products =
+  10 searches) is ruled out. Cheaper later option: resolve only when a user
+  taps a result (`GET /api/v1/link?offer=…`): one search per tap, the
+  resolved link cached for everyone; until then the result keeps the
+  shop-search link. Only worth it if Google Shopping becomes a main source
+  again.
 
 ## 6. API
 
