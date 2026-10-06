@@ -163,3 +163,80 @@ func TestNewFallbackValidation(t *testing.T) {
 		t.Error("mixed batch modes accepted")
 	}
 }
+
+// partialProvider fails for the markets in failFor and answers the others.
+type partialProvider struct {
+	name    string
+	failFor map[string]bool
+	calls   [][]string
+}
+
+func (p *partialProvider) Name() string { return p.name }
+func (p *partialProvider) Batch() bool  { return true }
+
+func (p *partialProvider) Search(_ context.Context, q Query) ([]Product, error) {
+	p.calls = append(p.calls, targetIDs(q.Targets))
+	var out []Product
+	failed := map[string]error{}
+	for _, t := range q.Targets {
+		if p.failFor[t.Market] {
+			failed[t.Market] = errors.New(t.Market + " down")
+			continue
+		}
+		out = append(out, Product{Market: t.Market, Provider: p.name, Position: 1})
+	}
+	if len(failed) == 0 {
+		return out, nil
+	}
+	return nil, &PartialError{Products: out, Failed: failed}
+}
+
+var threeTargets = Query{Title: "hub", Targets: []markets.Target{
+	{Market: "amazon", Domain: "amazon.com"},
+	{Market: "temu", Domain: "temu.com"},
+	{Market: "shein", Domain: "ar.shein.com"},
+}}
+
+func TestFallbackRetriesOnlyFailedMarkets(t *testing.T) {
+	free := &partialProvider{name: "searxng", failFor: map[string]bool{"temu": true}}
+	paid := &partialProvider{name: "serpapi"}
+	f, _ := NewFallback([]Provider{free, paid}, FallbackOptions{FailureThreshold: 1}, discard)
+
+	got, err := f.Search(context.Background(), threeTargets)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(paid.calls) != 1 || len(paid.calls[0]) != 1 || paid.calls[0][0] != "temu" {
+		t.Errorf("fallback calls = %v, want only temu", paid.calls)
+	}
+	byMarket := map[string]string{}
+	for _, p := range got {
+		byMarket[p.Market] = p.Provider
+	}
+	want := map[string]string{"amazon": "searxng", "temu": "serpapi", "shein": "searxng"}
+	if len(got) != 3 || byMarket["amazon"] != want["amazon"] || byMarket["temu"] != want["temu"] || byMarket["shein"] != want["shein"] {
+		t.Errorf("got %+v", got)
+	}
+	// A partial answer is not a provider failure: the circuit stays closed.
+	if !f.breakers[0].allow() {
+		t.Error("partial failure opened the circuit")
+	}
+}
+
+func TestFallbackPartialWhenLastAlsoFails(t *testing.T) {
+	free := &partialProvider{name: "searxng", failFor: map[string]bool{"temu": true, "shein": true}}
+	paid := &stubProvider{name: "serpapi", batch: true, err: errors.New("no credits")}
+	f, _ := NewFallback([]Provider{free, paid}, FallbackOptions{}, discard)
+
+	_, err := f.Search(context.Background(), threeTargets)
+	var pe *PartialError
+	if !errors.As(err, &pe) {
+		t.Fatalf("err = %v, want *PartialError", err)
+	}
+	if len(pe.Products) != 1 || pe.Products[0].Market != "amazon" {
+		t.Errorf("products = %+v", pe.Products)
+	}
+	if len(pe.Failed) != 2 || pe.Failed["temu"] == nil || pe.Failed["shein"] == nil {
+		t.Errorf("failed = %v", pe.Failed)
+	}
+}

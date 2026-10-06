@@ -2,8 +2,11 @@ package searxng
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"owis_find_deal_engine/internal/markets"
@@ -57,7 +60,7 @@ func TestSearchMapsResults(t *testing.T) {
 			t.Errorf("unexpected params %v", q)
 		}
 	})
-	c, err := New(Config{BaseURL: srv.URL + "/", Combined: true})
+	c, err := New(Config{BaseURL: srv.URL + "/", Combined: true, OneQuery: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,6 +86,85 @@ func TestSearchMapsResults(t *testing.T) {
 		if got[i].Market != w.market || got[i].Position != w.pos || got[i].Thumbnail != w.thumb || got[i].Provider != "searxng" {
 			t.Errorf("product %d = %+v, want %+v", i, got[i], w)
 		}
+	}
+}
+
+// perSiteServer answers each "title site:domain" query from bodies, keyed by
+// domain; a missing domain gets HTTP 500.
+func perSiteServer(t *testing.T, bodies map[string]string) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		q := r.URL.Query().Get("q")
+		_, domain, ok := strings.Cut(q, " site:")
+		if !ok || strings.Contains(q, " OR ") {
+			t.Errorf("not a single-site query: %q", q)
+		}
+		body, ok := bodies[domain]
+		if !ok {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &calls
+}
+
+func TestSearchQueriesEachMarket(t *testing.T) {
+	srv, calls := perSiteServer(t, map[string]string{
+		"amazon.com":   `{"results":[{"url":"https://www.amazon.com/dp/B1","title":"A1"},{"url":"https://www.amazon.com/dp/B2","title":"A2"}]}`,
+		"temu.com":     `{"results":[{"url":"https://www.temu.com/x.html","title":"T1"}]}`,
+		"ar.shein.com": `{"results":[]}`,
+	})
+	c, _ := New(Config{BaseURL: srv.URL, Combined: true})
+
+	got, err := c.Search(context.Background(), search.Query{Title: "s pen", Targets: jorTargets})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if calls.Load() != 3 {
+		t.Errorf("queries = %d, want one per market", calls.Load())
+	}
+	perMarket := map[string]int{}
+	for _, p := range got {
+		perMarket[p.Market]++
+	}
+	if perMarket["amazon"] != 2 || perMarket["temu"] != 1 || len(got) != 3 {
+		t.Errorf("got %+v", got)
+	}
+}
+
+func TestSearchSomeMarketsFail(t *testing.T) {
+	srv, _ := perSiteServer(t, map[string]string{
+		"amazon.com":   `{"results":[{"url":"https://www.amazon.com/dp/B1","title":"A1"}]}`,
+		"ar.shein.com": `{"results":[],"unresponsive_engines":[["google","CAPTCHA"]]}`,
+		// temu.com: HTTP 500
+	})
+	c, _ := New(Config{BaseURL: srv.URL, Combined: true})
+
+	_, err := c.Search(context.Background(), search.Query{Title: "s pen", Targets: jorTargets})
+	var pe *search.PartialError
+	if !errors.As(err, &pe) {
+		t.Fatalf("err = %v, want *search.PartialError", err)
+	}
+	if len(pe.Products) != 1 || pe.Products[0].Market != "amazon" {
+		t.Errorf("products = %+v", pe.Products)
+	}
+	if len(pe.Failed) != 2 || pe.Failed["temu"] == nil || pe.Failed["shein"] == nil {
+		t.Errorf("failed = %v", pe.Failed)
+	}
+}
+
+func TestSearchAllMarketsFail(t *testing.T) {
+	srv, _ := perSiteServer(t, nil)
+	c, _ := New(Config{BaseURL: srv.URL, Combined: true})
+
+	_, err := c.Search(context.Background(), search.Query{Title: "s pen", Targets: jorTargets})
+	var pe *search.PartialError
+	if err == nil || errors.As(err, &pe) {
+		t.Fatalf("err = %v, want a plain error", err)
 	}
 }
 

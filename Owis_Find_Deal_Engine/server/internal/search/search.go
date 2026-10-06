@@ -61,9 +61,27 @@ type Provider interface {
 
 // Market statuses reported per marketplace.
 const (
-	StatusOK    = "ok"
-	StatusError = "error"
+	StatusOK        = "ok"
+	StatusNoResults = "no_results" // searched fine, nothing matched
+	StatusError     = "error"
 )
+
+// PartialError is returned by a provider that searched several marketplaces
+// in one call and failed for some of them. Products holds the results of
+// the others; Failed maps each failed marketplace to its error.
+type PartialError struct {
+	Products []Product
+	Failed   map[string]error
+}
+
+func (e *PartialError) Error() string {
+	parts := make([]string, 0, len(e.Failed))
+	for m, err := range e.Failed {
+		parts = append(parts, m+": "+err.Error())
+	}
+	sort.Strings(parts)
+	return "some marketplaces failed: " + strings.Join(parts, "; ")
+}
 
 // Request is one search as asked by a client.
 type Request struct {
@@ -92,7 +110,7 @@ type Result struct {
 // Partial reports whether at least one marketplace failed.
 func (r *Result) Partial() bool {
 	for _, status := range r.Markets {
-		if status != StatusOK {
+		if status == StatusError {
 			return true
 		}
 	}
@@ -170,16 +188,35 @@ func (s *Service) Search(ctx context.Context, req Request) (*Result, error) {
 	jobs := s.planJobs(country.Targets, result)
 	q := Query{Title: title, Region: country.Region, Language: country.Language}
 	for o := range s.runPool(ctx, q, jobs) {
-		status := StatusOK
-		if o.err != nil {
-			status = StatusError
+		var failed map[string]error
+		var partial *PartialError
+		switch {
+		case errors.As(o.err, &partial):
+			failed = partial.Failed
+			o.products = partial.Products
+		case o.err != nil:
+			failed = make(map[string]error, len(o.job.targets))
+			for _, t := range o.job.targets {
+				failed[t.Market] = o.err
+			}
+		}
+		if len(failed) > 0 {
 			s.log.WarnContext(ctx, "provider failed",
 				"provider", o.job.provider.Name(), "markets", targetIDs(o.job.targets), "err", o.err)
 		}
 		for _, t := range o.job.targets {
-			result.Markets[t.Market] = status
+			if _, bad := failed[t.Market]; bad {
+				result.Markets[t.Market] = StatusError
+			} else {
+				result.Markets[t.Market] = StatusNoResults // until a product shows up
+			}
 		}
 		result.Results = append(result.Results, o.products...)
+	}
+	for _, p := range result.Results {
+		if result.Markets[p.Market] == StatusNoResults {
+			result.Markets[p.Market] = StatusOK
+		}
 	}
 
 	sortProducts(result.Results, country.Targets)
@@ -187,7 +224,7 @@ func (s *Service) Search(ctx context.Context, req Request) (*Result, error) {
 	result.FetchedAt = time.Now().UTC()
 
 	for _, status := range result.Markets {
-		if status == StatusOK {
+		if status != StatusError {
 			return result, nil
 		}
 	}

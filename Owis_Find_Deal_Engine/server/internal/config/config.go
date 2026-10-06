@@ -17,6 +17,7 @@ type Config struct {
 	// Search providers, tried in order until one succeeds.
 	SearchProviders        []string // "searxng", "serpapi"
 	SearXNGURL             string
+	SearXNGOneQuery        bool // one OR-ed site: query instead of one per market
 	SerpAPIKey             string
 	SerpAPIEngine          string // "google_shopping" (prices) or "google" (web)
 	SerpAPIBaseURL         string // empty = SerpApi; for tests / outbound proxies
@@ -79,6 +80,7 @@ func Load() (Config, error) {
 		RedisURL:                  os.Getenv("REDIS_URL"),
 		SearchProviders:           splitList(env("SEARCH_PROVIDERS", "searxng,serpapi")),
 		SearXNGURL:                os.Getenv("SEARXNG_URL"),
+		SearXNGOneQuery:           parse(&errs, "SEARXNG_ONE_QUERY", false, strconv.ParseBool),
 		SerpAPIKey:                os.Getenv("SERPAPI_KEY"),
 		SerpAPIEngine:             env("SERPAPI_ENGINE", "google_shopping"),
 		SerpAPIBaseURL:            os.Getenv("SERPAPI_BASE_URL"),

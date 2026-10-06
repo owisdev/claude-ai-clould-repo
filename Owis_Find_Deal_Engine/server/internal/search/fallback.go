@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"owis_find_deal_engine/internal/markets"
 )
 
 // FallbackOptions tunes a Fallback chain.
@@ -70,8 +72,14 @@ func (f *Fallback) Batch() bool  { return f.providers[0].Batch() }
 
 // Search returns the first provider's successful result. The last provider
 // is always tried, even if its breaker is open: it is the last resort.
+// When a provider fails for only some marketplaces (*PartialError), its
+// results are kept and only the failed marketplaces go to the next provider.
 func (f *Fallback) Search(ctx context.Context, q Query) ([]Product, error) {
-	var errs []error
+	var (
+		errs    []error
+		found   []Product
+		partial bool
+	)
 	for i, p := range f.providers {
 		last := i == len(f.providers)-1
 		b := f.breakers[i]
@@ -85,15 +93,29 @@ func (f *Fallback) Search(ctx context.Context, q Query) ([]Product, error) {
 		cancel()
 		if err == nil {
 			b.success()
-			return products, nil
+			return append(found, products...), nil
+		}
+		var pe *PartialError
+		if errors.As(err, &pe) {
+			// The provider works; only some marketplaces failed.
+			b.success()
+			partial = true
+			found = append(found, pe.Products...)
+			q.Targets = failedTargets(q.Targets, pe.Failed)
+			errs = append(errs, err)
+			if !last && ctx.Err() == nil {
+				f.log.InfoContext(ctx, "some markets failed, falling back",
+					"provider", p.Name(), "next", f.providers[i+1].Name(), "markets", targetIDs(q.Targets))
+			}
+		} else {
+			errs = append(errs, err)
 		}
 		if ctx.Err() != nil {
 			// The whole search ran out of time; no point trying further.
-			return nil, errors.Join(append(errs, err)...)
+			break
 		}
-		errs = append(errs, err)
-		if last {
-			break // the last resort has no breaker: it is never skipped
+		if last || pe != nil {
+			continue // the last resort has no breaker: it is never skipped
 		}
 		if b.failure() {
 			f.log.WarnContext(ctx, "provider circuit opened",
@@ -102,7 +124,27 @@ func (f *Fallback) Search(ctx context.Context, q Query) ([]Product, error) {
 		f.log.InfoContext(ctx, "provider failed, falling back",
 			"provider", p.Name(), "next", f.providers[i+1].Name(), "err", err)
 	}
-	return nil, errors.Join(errs...)
+	err := errors.Join(errs...)
+	if !partial {
+		return nil, err
+	}
+	// Some marketplaces were answered: report only the rest as failed.
+	failed := make(map[string]error, len(q.Targets))
+	for _, t := range q.Targets {
+		failed[t.Market] = err
+	}
+	return nil, &PartialError{Products: found, Failed: failed}
+}
+
+// failedTargets returns the targets listed in failed, in their order.
+func failedTargets(targets []markets.Target, failed map[string]error) []markets.Target {
+	out := make([]markets.Target, 0, len(failed))
+	for _, t := range targets {
+		if _, ok := failed[t.Market]; ok {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // breaker is a minimal consecutive-failure circuit breaker. After cooldown

@@ -137,6 +137,62 @@ func TestSearchPartialFailure(t *testing.T) {
 	}
 }
 
+// emptyProvider finds nothing for some markets and fails for others
+// through a *PartialError, like a batch provider searching each market.
+type emptyProvider struct{ empty, fail map[string]bool }
+
+func (p *emptyProvider) Name() string { return "fake" }
+func (p *emptyProvider) Batch() bool  { return true }
+
+func (p *emptyProvider) Search(_ context.Context, q Query) ([]Product, error) {
+	var out []Product
+	failed := map[string]error{}
+	for _, t := range q.Targets {
+		switch {
+		case p.fail[t.Market]:
+			failed[t.Market] = errors.New("down")
+		case !p.empty[t.Market]:
+			out = append(out, Product{Market: t.Market, Position: 1})
+		}
+	}
+	if len(failed) > 0 {
+		return nil, &PartialError{Products: out, Failed: failed}
+	}
+	return out, nil
+}
+
+func TestSearchMarketStatuses(t *testing.T) {
+	p := &emptyProvider{empty: map[string]bool{"aliexpress": true}, fail: map[string]bool{"temu": true}}
+	svc := newTestService(t, p, Options{})
+
+	res, err := svc.Search(context.Background(), Request{Title: "usb hub", Country: "jor"})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	want := map[string]string{"amazon": "ok", "aliexpress": "no_results", "temu": "error", "shein": "ok"}
+	for m, s := range want {
+		if res.Markets[m] != s {
+			t.Errorf("market %s = %q, want %q", m, res.Markets[m], s)
+		}
+	}
+	if len(res.Results) != 2 || !res.Partial() {
+		t.Errorf("results = %d, partial = %v", len(res.Results), res.Partial())
+	}
+}
+
+func TestSearchNothingFoundIsNotAFailure(t *testing.T) {
+	p := &emptyProvider{empty: map[string]bool{"amazon": true, "aliexpress": true, "temu": true, "shein": true}}
+	svc := newTestService(t, p, Options{})
+
+	res, err := svc.Search(context.Background(), Request{Title: "zzqx", Country: "jor"})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if res.Partial() || res.Markets["amazon"] != "no_results" {
+		t.Errorf("markets = %v", res.Markets)
+	}
+}
+
 func TestSearchAllFailed(t *testing.T) {
 	p := &fakeProvider{batch: true, failFor: map[string]bool{"amazon": true}}
 	svc := newTestService(t, p, Options{})

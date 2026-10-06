@@ -6,6 +6,7 @@ package searxng
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,9 +23,14 @@ const maxBodyBytes = 5 << 20
 // Config configures the client.
 type Config struct {
 	BaseURL string // e.g. http://searxng:8080
-	// Combined searches all marketplaces with one query. When false, one
-	// query per marketplace runs in parallel.
-	Combined   bool
+	// Combined takes all marketplaces in one provider call (Batch). Each
+	// marketplace still gets its own site: query, run in parallel, so a big
+	// shop cannot crowd the others out of the results.
+	Combined bool
+	// OneQuery sends a single "(site:a OR site:b ...)" query instead: fewer
+	// requests to the search engines, but the biggest shop tends to fill
+	// all the results.
+	OneQuery   bool
 	HTTPClient *http.Client
 }
 
@@ -67,8 +73,54 @@ type result struct {
 	Engine    string `json:"engine"`
 }
 
-// Search runs one query restricted to q.Targets' domains.
+// Search searches q.Targets: one site: query per marketplace, in parallel
+// (or a single combined query with OneQuery). Marketplaces that fail are
+// reported in a *search.PartialError when others succeed.
 func (c *Client) Search(ctx context.Context, q search.Query) ([]search.Product, error) {
+	if len(q.Targets) <= 1 || c.cfg.OneQuery {
+		return c.query(ctx, q)
+	}
+
+	type answer struct {
+		market   string
+		products []search.Product
+		err      error
+	}
+	answers := make(chan answer, len(q.Targets))
+	for _, t := range q.Targets {
+		go func() {
+			one := q
+			one.Targets = []markets.Target{t}
+			products, err := c.query(ctx, one)
+			answers <- answer{t.Market, products, err}
+		}()
+	}
+
+	var products []search.Product
+	failed := map[string]error{}
+	for range q.Targets {
+		a := <-answers
+		if a.err != nil {
+			failed[a.market] = a.err
+			continue
+		}
+		products = append(products, a.products...)
+	}
+	switch {
+	case len(failed) == len(q.Targets):
+		errs := make([]error, 0, len(failed))
+		for _, t := range q.Targets {
+			errs = append(errs, failed[t.Market])
+		}
+		return nil, errors.Join(errs...)
+	case len(failed) > 0:
+		return nil, &search.PartialError{Products: products, Failed: failed}
+	}
+	return products, nil
+}
+
+// query runs one SearXNG query restricted to q.Targets' domains.
+func (c *Client) query(ctx context.Context, q search.Query) ([]search.Product, error) {
 	if len(q.Targets) == 0 {
 		return nil, nil
 	}

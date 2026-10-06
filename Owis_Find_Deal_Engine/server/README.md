@@ -58,7 +58,10 @@ answers (default `searxng,serpapi`):
 - **SearXNG** (free, self-hosted): metasearch over Google, Bing,
   DuckDuckGo, Brave, Startpage and Mojeek. Config:
   [`deploy/searxng/settings.yml`](deploy/searxng/settings.yml) (JSON output
-  on, bot limiter off because only our service calls it).
+  on, bot limiter off because only our service calls it). It sends one
+  `site:` query per marketplace, in parallel, so Amazon cannot fill all the
+  results. Web search returns **links and snippets, no prices**: prices
+  come from SerpApi Google Shopping or Apify.
 - **SerpApi** (paid): `SERPAPI_ENGINE=google_shopping` (default) returns
   **prices, seller and image** from Google Shopping; offers are matched to
   our shops by seller name, and when Google Shopping has nothing from our
@@ -128,7 +131,7 @@ Search response:
     {"market": "amazon", "title": "...", "link": "...", "snippet": "...",
      "price": 29.99, "currency": "$", "position": 1, "provider": "serpapi"}
   ],
-  "markets": {"amazon": "ok", "aliexpress": "ok", "temu": "ok", "shein": "error"},
+  "markets": {"amazon": "ok", "aliexpress": "ok", "temu": "no_results", "shein": "error"},
   "took_ms": 812,
   "fetched_at": "2026-10-02T12:00:00Z",
   "cached": false,
@@ -136,8 +139,11 @@ Search response:
 }
 ```
 
-`markets` reports each marketplace searched. The request still succeeds if
-some fail; it returns `502` only when all of them fail.
+`markets` reports each marketplace searched: `ok` (has results),
+`no_results` (searched, nothing matched) or `error` (failed). The request
+still succeeds if some fail; it returns `502` only when all of them fail.
+When the free provider fails for only some shops, just those shops are
+retried with the next provider (e.g. SerpApi).
 
 Quota headers on every search response: `X-Plan`, `X-RateLimit-Limit`,
 `X-RateLimit-Remaining`, `X-RateLimit-Reset` (Unix time, UTC midnight).

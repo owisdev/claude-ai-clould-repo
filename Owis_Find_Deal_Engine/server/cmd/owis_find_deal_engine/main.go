@@ -232,7 +232,8 @@ func buildWebProvider(cfg config.Config, log *slog.Logger) (search.Provider, err
 		)
 		switch name {
 		case "searxng":
-			p, err = searxng.New(searxng.Config{BaseURL: cfg.SearXNGURL, Combined: cfg.SearchCombined})
+			p, err = searxng.New(searxng.Config{BaseURL: cfg.SearXNGURL, Combined: cfg.SearchCombined,
+				OneQuery: cfg.SearXNGOneQuery})
 		case "serpapi":
 			p, err = serpapi.New(serpapi.Config{APIKey: cfg.SerpAPIKey, Engine: cfg.SerpAPIEngine,
 				BaseURL: cfg.SerpAPIBaseURL, Combined: cfg.SearchCombined})
