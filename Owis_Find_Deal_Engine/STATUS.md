@@ -59,12 +59,36 @@ discounts, variant). It differs per product and cannot be fixed in the
 service. In the app: show them as "from $X · approx." — the link shows
 the real price.
 
-**Open items:** SHEIN scraper; eBay; loading bar in the app (first live
-search takes ~30–50 s).
+Latest checks (2026-10-06): duplicates within a shop removed (cheapest
+kept); Apify items must match the query; a scraper with nothing relevant
+ends as `no_results` (`APIFY_EMPTY_FALLBACK=false`, ~42 s instead of ~52 s
+for "EAGET JHL7440"); cache keys carry a results version (`v4`), so a
+rebuild drops answers cached by an older build.
 
-**Next:** phase 2 (users: profile, plans/payments, saved cart + price
-tracker, purchase reports, notifications) or phase 3 (eBay / AliExpress
-official APIs if the keys were approved).
+## Next session: start with SHEIN
+
+1. Owner picks a SHEIN scraper in the Apify store, runs it once in the
+   console with a keyword (e.g. `phone case`), and checks the products.
+   Candidates: `scrapelabsapi/shein-search-products-scraper`,
+   `abotapi/shein-product-scraper` (or any with good results). Prefer one
+   that supports the Saudi / Arab site (`ar.shein.com`) or a country code.
+2. Owner sends: the scraper name, its Input JSON (console → Input → JSON)
+   and one or two output items (as for Temu). Never the token.
+3. Claude: map its output fields (title, link, price label vs cents,
+   image) in `internal/providers/apify`, check SHEIN product links
+   (`…-p-<id>.html`) in `markets.json`, add a test with the real output,
+   give the `.env` lines: `APIFY_MARKETS=aliexpress,temu,shein`,
+   `APIFY_SHEIN_ACTOR=…`, `APIFY_SHEIN_INPUT=…`; bump `resultsVersion`
+   in `internal/cache/cache.go` if result handling changed.
+4. Owner retests `jor` and `ksa` (SHEIN domain `ar.shein.com`).
+
+**Other open items:** eBay (usa, ksa: only the fallback today); loading
+bar in the app (first live search takes ~30–50 s; cached answers are
+instant); label scraper prices as approximate in the app.
+
+**After that:** phase 2 (users: profile, plans/payments, saved cart +
+price tracker, purchase reports, notifications) or phase 3 (eBay /
+AliExpress official APIs if the keys were approved).
 
 ## To resume in a new Claude Code session
 
@@ -72,7 +96,8 @@ Open the repository and say:
 
 > Continue the Owis_Find_Deal_Engine project from
 > `Owis_Find_Deal_Engine/STATUS.md` on branch `claude/cloud-vs-local-7xi988`.
-> Here is my feedback from running it locally: …
+> Start with SHEIN: here is the scraper name, its input JSON and sample
+> output: …
 
 ## Run it on your PC
 
