@@ -223,3 +223,35 @@ func TestVersionChangesWithContent(t *testing.T) {
 		t.Error("WithProviders lost the version")
 	}
 }
+
+func TestSearchLink(t *testing.T) {
+	cat, _ := Load("")
+	jor, _ := cat.Country("jor")
+	ksa, _ := cat.Country("ksa")
+	get := func(c Country, m string) Target {
+		for _, t := range c.Targets {
+			if t.Market == m {
+				return t
+			}
+		}
+		return Target{}
+	}
+	title := "Stylus Pen For Samsung S Pen for Samsung Galaxy Tab S6 Lite SM-P620 P625"
+	tests := map[string]string{
+		get(jor, "aliexpress").SearchLink(title):       "https://www.aliexpress.com/w/wholesale-stylus-pen-for-samsung-s-pen-for-samsung.html",
+		get(jor, "amazon").SearchLink("S Pen & case"):  "https://www.amazon.com/s?k=S+Pen+case",
+		get(ksa, "amazon").SearchLink("s pen"):         "https://www.amazon.sa/s?k=s+pen",
+		get(ksa, "shein").SearchLink("phone case"):     "https://ar.shein.com/pdsearch/phone%20case/",
+		get(ksa, "temu").SearchLink("phone case"):      "https://www.temu.com/search_result.html?search_key=phone+case",
+		get(ksa, "ebay").SearchLink("phone case"):      "https://www.ebay.com/sch/i.html?_nkw=phone+case",
+		Target{Domain: "x.com"}.SearchLink("anything"): "",
+	}
+	for got, want := range tests {
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	}
+	if _, err := Parse([]byte(`{"markets":{"a":{"name":"A","provider":"web","search_link":"http://evil.com/{query}"}},"countries":{"usa":{"region":"us","markets":[{"market":"a","domain":"a.com"}]}}}`)); err == nil {
+		t.Error("bad search_link accepted")
+	}
+}

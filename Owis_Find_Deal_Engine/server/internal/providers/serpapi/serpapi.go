@@ -174,9 +174,16 @@ func shoppingProducts(results []shoppingResult, title string, targets []markets.
 		if !search.Relevant(title, r.Title) {
 			continue // Google Shopping also lists merely similar products
 		}
-		link := cleanURL(r.ProductLink)
+		// Google's product links (google.com/search?ibp=oshop...) only work
+		// inside a Google session. Use the shop's product page when Google
+		// gives it, otherwise the shop's search for this product's title.
+		link, linkType := "", ""
 		if shop, ok := target.ProductLink(r.Link); ok {
-			link = shop // the shop's product page is better than Google's page
+			link = shop
+		} else if s := target.SearchLink(r.Title); s != "" {
+			link, linkType = s, "search"
+		} else {
+			link = cleanURL(r.ProductLink)
 		}
 		if link == "" {
 			continue
@@ -187,6 +194,7 @@ func shoppingProducts(results []shoppingResult, title string, targets []markets.
 			Market:    target.Market,
 			Title:     r.Title,
 			Link:      link,
+			LinkType:  linkType,
 			Snippet:   r.Source,
 			Thumbnail: r.Thumbnail,
 			Position:  positions[target.Market],

@@ -80,9 +80,9 @@ per shop, how many results were dropped and why.
   shops it retries once as a normal web search. `google` = web search only.
   Put it first (`serpapi,searxng`) if prices matter more than cost: shops
   with no offers on Google Shopping are then searched by SearXNG, for free.
-  Shopping results must match the query like web results; their link is
-  Google's product page (offers and the shop link) when Google gives no
-  direct shop link. When a free provider follows SerpApi, shops without
+  Shopping results must match the query like web results; when Google gives
+  no direct shop link, the link is the shop's search for that product
+  (`link_type: "search"`). When a free provider follows SerpApi, shops without
   Shopping offers are searched there instead of with a paid web search.
   Google Shopping does not cover every country; `shopping_region` in
   `markets.json` picks another one (Jordan uses `us`: its shops are
@@ -165,6 +165,11 @@ Search response:
   "stale": false
 }
 ```
+
+`link` is the shop's product page. When a source gives no usable product
+link (Google Shopping's own links only open inside Google), `link` opens
+the shop's search for that product and `"link_type": "search"` is set, so
+the app can label it ("find on AliExpress").
 
 `markets` reports each marketplace searched: `ok` (has results),
 `no_results` (searched, nothing matched) or `error` (failed). The request

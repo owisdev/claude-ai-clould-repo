@@ -313,3 +313,21 @@ func TestShoppingNoWebRetryLeavesAllUncovered(t *testing.T) {
 		t.Errorf("SerpApi calls = %v, want only the shopping search", engines)
 	}
 }
+
+func TestShoppingUsesShopSearchInsteadOfGoogleLink(t *testing.T) {
+	// From the local test: Google's oshop links do not open outside Google.
+	body := `{"shopping_results":[{"title":"Stylus Pen For Samsung S Pen Galaxy Tab S6 Lite","source":"AliExpress - AliExpress-2673793064",
+		"product_link":"https://www.google.com/search?ibp=oshop&prds=productid:1","extracted_price":25.08,"price":"$25.08"}]}`
+	srv := newServer(t, http.StatusOK, body, nil)
+	c, _ := New(Config{APIKey: "secret", BaseURL: srv.URL, Combined: true})
+	cat, _ := markets.Load("")
+	jor, _ := cat.Country("jor")
+
+	got, err := c.Search(context.Background(), search.Query{Title: "samsung s pen", Targets: jor.Targets[1:2]})
+	if err != nil || len(got) != 1 {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+	if got[0].Link != "https://www.aliexpress.com/w/wholesale-stylus-pen-for-samsung-s-pen-galaxy-tab.html" || got[0].LinkType != "search" {
+		t.Errorf("link = %s (%s)", got[0].Link, got[0].LinkType)
+	}
+}

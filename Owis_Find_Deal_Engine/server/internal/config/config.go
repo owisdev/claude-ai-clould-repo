@@ -99,7 +99,7 @@ func Load() (Config, error) {
 		ApifyActors:               map[string]string{},
 		ApifyInputs:               map[string]string{},
 		ApifyMaxItems:             parse(&errs, "APIFY_MAX_ITEMS", 10, strconv.Atoi),
-		ApifyTimeout:              parse(&errs, "APIFY_TIMEOUT", 25*time.Second, time.ParseDuration),
+		ApifyTimeout:              parse(&errs, "APIFY_TIMEOUT", 60*time.Second, time.ParseDuration),
 		ProviderAttemptTimeout:    parse(&errs, "PROVIDER_ATTEMPT_TIMEOUT", 8*time.Second, time.ParseDuration),
 		SerpAPITimeout:            parse(&errs, "SERPAPI_TIMEOUT", 25*time.Second, time.ParseDuration),
 		ProviderFailThreshold:     parse(&errs, "PROVIDER_FAILURE_THRESHOLD", 3, strconv.Atoi),

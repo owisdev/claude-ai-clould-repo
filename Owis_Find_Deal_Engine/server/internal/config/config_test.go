@@ -120,9 +120,9 @@ func TestLoadApify(t *testing.T) {
 	if cfg.ApifyActors["temu"] != "someone~temu" || cfg.ApifyInputs["shein"] == "" {
 		t.Errorf("apify config = %+v %+v", cfg.ApifyActors, cfg.ApifyInputs)
 	}
-	// 25s Apify + 8s web fallback + 2s margin.
-	if cfg.SearchTimeout != 35*time.Second {
-		t.Errorf("search timeout = %v, want raised to 35s", cfg.SearchTimeout)
+	// 60s Apify + 8s web fallback + 2s margin.
+	if cfg.SearchTimeout != 70*time.Second {
+		t.Errorf("search timeout = %v, want raised to 70s", cfg.SearchTimeout)
 	}
 
 	t.Setenv("SERPAPI_ENGINE", "bing")

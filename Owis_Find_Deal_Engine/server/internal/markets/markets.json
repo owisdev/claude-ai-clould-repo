@@ -2,6 +2,7 @@
   "markets": {
     "amazon": {
       "name": "Amazon", "provider": "web",
+      "search_link": "https://{host}/s?k={query}",
       "product_pages": {
         "paths": [
           "^/(?:[^/]+/){0,3}(?:dp|gp/product|gp/aw/d)/(?P<id>[A-Z0-9]{10})(?:[/?]|$)",
@@ -12,6 +13,7 @@
     },
     "ebay": {
       "name": "eBay", "provider": "web",
+      "search_link": "https://{host}/sch/i.html?_nkw={query}",
       "product_pages": {
         "paths": ["^/itm/(?:[^/]+/)?(?P<id>[0-9]{9,15})(?:[/?]|$)"],
         "link": "https://{host}/itm/{id}"
@@ -19,6 +21,7 @@
     },
     "aliexpress": {
       "name": "AliExpress", "provider": "web",
+      "search_link": "https://{host}/w/wholesale-{slug}.html",
       "product_pages": {
         "paths": ["^/item/(?P<id>[0-9]{6,20})\\.html$"],
         "link": "https://{host}/item/{id}.html"
@@ -26,12 +29,14 @@
     },
     "temu": {
       "name": "Temu", "provider": "web",
+      "search_link": "https://{host}/search_result.html?search_key={query}",
       "product_pages": {
         "paths": ["^/(?:[a-z]{2}(?:-[a-z]{2})?/)?[^/]*-g-(?P<id>[0-9]{6,20})\\.html$"]
       }
     },
     "shein": {
       "name": "SHEIN", "provider": "web",
+      "search_link": "https://{host}/pdsearch/{query_path}/",
       "product_pages": {
         "paths": ["^/(?:[a-z]{2}(?:-[a-z]{2})?/)?[^/]*-p-(?P<id>[0-9]{4,20})(?:-cat-[0-9]+)?\\.html$"]
       }

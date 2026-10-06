@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 //go:embed markets.json
@@ -27,6 +28,42 @@ type Target struct {
 	Provider string `json:"-"`
 
 	products *productRule // nil: every page of the domain is accepted
+	search   string       // shop search link template, e.g. "https://{host}/s?k={query}"
+}
+
+// SearchLink returns a link to the marketplace's own search for text,
+// or "" when the marketplace has no search_link. {host} is the domain
+// (with "www." for a bare domain), {query} the URL-encoded text (for the
+// query string), {query_path} the same encoded for a path and {slug}
+// its lowercase words joined by "-". Long titles are cut to their first
+// words so the shop's search still finds the product.
+func (t Target) SearchLink(text string) string {
+	if t.search == "" {
+		return ""
+	}
+	words := strings.FieldsFunc(text, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+	if len(words) > 8 {
+		words = words[:8]
+	}
+	if len(words) == 0 {
+		return ""
+	}
+	slugWords := make([]string, len(words))
+	for i, w := range words {
+		slugWords[i] = url.PathEscape(strings.ToLower(w))
+	}
+	host := t.Domain
+	if strings.Count(host, ".") == 1 {
+		host = "www." + host
+	}
+	return strings.NewReplacer(
+		"{host}", host,
+		"{query}", url.QueryEscape(strings.Join(words, " ")),
+		"{query_path}", url.PathEscape(strings.Join(words, " ")),
+		"{slug}", strings.Join(slugWords, "-"),
+	).Replace(t.search)
 }
 
 // productRule recognizes a marketplace's product pages by their path and
@@ -135,6 +172,7 @@ type fileFormat struct {
 			Paths []string `json:"paths"`
 			Link  string   `json:"link"`
 		} `json:"product_pages"`
+		SearchLink string `json:"search_link"`
 	} `json:"markets"`
 	Countries map[string]struct {
 		Name           string `json:"name"`
@@ -173,6 +211,13 @@ func Parse(data []byte) (*Catalog, error) {
 
 	rules := make(map[string]*productRule, len(f.Markets))
 	for id, m := range f.Markets {
+		if m.SearchLink != "" {
+			u, err := url.Parse(strings.NewReplacer("{host}", "example.com", "{query}", "q", "{query_path}", "q", "{slug}", "q").Replace(m.SearchLink))
+			if err != nil || u.Scheme != "https" || u.Host != "example.com" ||
+				!(strings.Contains(m.SearchLink, "{query}") || strings.Contains(m.SearchLink, "{query_path}") || strings.Contains(m.SearchLink, "{slug}")) {
+				return nil, fmt.Errorf("markets: market %q search_link must look like https://{host}/...{query}", id)
+			}
+		}
 		if m.ProductPages == nil {
 			continue
 		}
@@ -221,6 +266,7 @@ func Parse(data []byte) (*Catalog, error) {
 				Domain:   strings.ToLower(fm.Domain),
 				Provider: m.Provider,
 				products: rules[fm.Market],
+				search:   m.SearchLink,
 			})
 		}
 		if len(country.Targets) == 0 {

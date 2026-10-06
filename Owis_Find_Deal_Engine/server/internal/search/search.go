@@ -29,9 +29,13 @@ const (
 
 // Product is one search result.
 type Product struct {
-	Market     string   `json:"market"`
-	Title      string   `json:"title"`
-	Link       string   `json:"link"`
+	Market string `json:"market"`
+	Title  string `json:"title"`
+	Link   string `json:"link"`
+	// LinkType is "search" when Link opens the shop's search for this
+	// product (no direct product link was available); empty for a product
+	// page.
+	LinkType   string   `json:"link_type,omitempty"`
 	Snippet    string   `json:"snippet,omitempty"`
 	Thumbnail  string   `json:"thumbnail,omitempty"`
 	Price      *float64 `json:"price,omitempty"`
