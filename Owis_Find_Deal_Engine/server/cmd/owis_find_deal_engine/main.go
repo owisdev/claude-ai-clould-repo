@@ -96,7 +96,8 @@ func run() error {
 
 	searcher := search.NewService(catalog,
 		providers,
-		search.Options{Timeout: cfg.SearchTimeout, MaxConcurrency: cfg.MaxConcurrency},
+		search.Options{Timeout: cfg.SearchTimeout, MaxConcurrency: cfg.MaxConcurrency,
+			PerMarket: cfg.ResultsPerMarket},
 		log)
 
 	// ctx is cancelled on SIGINT/SIGTERM and stops background goroutines.
@@ -166,6 +167,9 @@ func run() error {
 			MinRefresh:           cfg.CacheMinRefresh,
 			FetchTimeout:         cfg.SearchTimeout + 5*time.Second,
 			MaxBackgroundRefresh: cfg.CacheMaxBackgroundRefresh,
+			Variant: fmt.Sprintf("providers=%s;apify=%s;per_market=%d;searxng_one_query=%t;serpapi=%s",
+				web.Name(), strings.Join(cfg.ApifyMarkets, ","), cfg.ResultsPerMarket,
+				cfg.SearXNGOneQuery, cfg.SerpAPIEngine),
 		}, log)
 		cacheOrLive = searchCache
 		log.Info("search cache enabled", "fresh", cfg.CacheFreshTTL.String(), "stale", cfg.CacheStaleTTL.String())
@@ -233,7 +237,7 @@ func buildWebProvider(cfg config.Config, log *slog.Logger) (search.Provider, err
 		switch name {
 		case "searxng":
 			p, err = searxng.New(searxng.Config{BaseURL: cfg.SearXNGURL, Combined: cfg.SearchCombined,
-				OneQuery: cfg.SearXNGOneQuery})
+				OneQuery: cfg.SearXNGOneQuery, MaxPages: cfg.SearXNGMaxPages, Logger: log})
 		case "serpapi":
 			p, err = serpapi.New(serpapi.Config{APIKey: cfg.SerpAPIKey, Engine: cfg.SerpAPIEngine,
 				BaseURL: cfg.SerpAPIBaseURL, Combined: cfg.SearchCombined})

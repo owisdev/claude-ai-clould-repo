@@ -2,6 +2,7 @@ package serpapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -250,5 +251,25 @@ func TestCurrencyOf(t *testing.T) {
 		if got := currencyOf(in); got != want {
 			t.Errorf("currencyOf(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestShoppingUsesShoppingRegionAndLeavesUncovered(t *testing.T) {
+	srv := newServer(t, http.StatusOK, sampleShopping, func(r *http.Request) {
+		// Google Shopping does not cover Jordan: the shopping region is used.
+		if q := r.URL.Query(); q.Get("gl") != "us" {
+			t.Errorf("gl = %q, want us", q.Get("gl"))
+		}
+	})
+	c, _ := New(Config{APIKey: "secret", BaseURL: srv.URL, Combined: true})
+	targets := append([]markets.Target{{Market: "aliexpress", Name: "AliExpress", Domain: "aliexpress.com"}}, jorTargets...)
+
+	_, err := c.Search(context.Background(), search.Query{Title: "s pen", Region: "jo", ShoppingRegion: "us", Targets: targets})
+	var pe *search.PartialError
+	if !errors.As(err, &pe) {
+		t.Fatalf("err = %v, want *search.PartialError", err)
+	}
+	if len(pe.Products) != 4 || len(pe.Failed) != 0 || len(pe.Uncovered) != 1 || !pe.Uncovered["aliexpress"] {
+		t.Errorf("products %d, failed %v, uncovered %v", len(pe.Products), pe.Failed, pe.Uncovered)
 	}
 }

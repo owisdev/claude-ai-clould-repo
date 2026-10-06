@@ -8,8 +8,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"owis_find_deal_engine/internal/markets"
 )
 
 // FallbackOptions tunes a Fallback chain.
@@ -72,13 +70,16 @@ func (f *Fallback) Batch() bool  { return f.providers[0].Batch() }
 
 // Search returns the first provider's successful result. The last provider
 // is always tried, even if its breaker is open: it is the last resort.
-// When a provider fails for only some marketplaces (*PartialError), its
-// results are kept and only the failed marketplaces go to the next provider.
+// When a provider answers only some marketplaces (*PartialError), its
+// results are kept and only the other marketplaces go to the next provider.
 func (f *Fallback) Search(ctx context.Context, q Query) ([]Product, error) {
 	var (
 		errs    []error
 		found   []Product
 		partial bool
+		// failed holds the latest error of each marketplace still open;
+		// an open marketplace without an error was only not covered.
+		failed = make(map[string]error, len(q.Targets))
 	)
 	for i, p := range f.providers {
 		last := i == len(f.providers)-1
@@ -97,18 +98,35 @@ func (f *Fallback) Search(ctx context.Context, q Query) ([]Product, error) {
 		}
 		var pe *PartialError
 		if errors.As(err, &pe) {
-			// The provider works; only some marketplaces failed.
+			// The provider works; it just did not answer every marketplace.
 			b.success()
 			partial = true
 			found = append(found, pe.Products...)
-			q.Targets = failedTargets(q.Targets, pe.Failed)
+			open := q.Targets[:0:0]
+			for _, t := range q.Targets {
+				if e, bad := pe.Failed[t.Market]; bad {
+					failed[t.Market] = e
+					open = append(open, t)
+				} else if pe.Uncovered[t.Market] {
+					open = append(open, t)
+				} else {
+					delete(failed, t.Market)
+				}
+			}
+			q.Targets = open
 			errs = append(errs, err)
+			if len(open) == 0 {
+				return found, nil
+			}
 			if !last && ctx.Err() == nil {
-				f.log.InfoContext(ctx, "some markets failed, falling back",
-					"provider", p.Name(), "next", f.providers[i+1].Name(), "markets", targetIDs(q.Targets))
+				f.log.InfoContext(ctx, "some markets not answered, asking next provider",
+					"provider", p.Name(), "next", f.providers[i+1].Name(), "markets", targetIDs(open))
 			}
 		} else {
 			errs = append(errs, err)
+			for _, t := range q.Targets {
+				failed[t.Market] = err
+			}
 		}
 		if ctx.Err() != nil {
 			// The whole search ran out of time; no point trying further.
@@ -124,27 +142,21 @@ func (f *Fallback) Search(ctx context.Context, q Query) ([]Product, error) {
 		f.log.InfoContext(ctx, "provider failed, falling back",
 			"provider", p.Name(), "next", f.providers[i+1].Name(), "err", err)
 	}
-	err := errors.Join(errs...)
 	if !partial {
-		return nil, err
+		return nil, errors.Join(errs...)
 	}
-	// Some marketplaces were answered: report only the rest as failed.
-	failed := make(map[string]error, len(q.Targets))
+	// Some marketplaces were answered: report the open ones that failed;
+	// the others were only not covered and have no results.
+	still := make(map[string]error)
 	for _, t := range q.Targets {
-		failed[t.Market] = err
-	}
-	return nil, &PartialError{Products: found, Failed: failed}
-}
-
-// failedTargets returns the targets listed in failed, in their order.
-func failedTargets(targets []markets.Target, failed map[string]error) []markets.Target {
-	out := make([]markets.Target, 0, len(failed))
-	for _, t := range targets {
-		if _, ok := failed[t.Market]; ok {
-			out = append(out, t)
+		if e := failed[t.Market]; e != nil {
+			still[t.Market] = e
 		}
 	}
-	return out
+	if len(still) == 0 {
+		return found, nil
+	}
+	return nil, &PartialError{Products: found, Failed: still}
 }
 
 // breaker is a minimal consecutive-failure circuit breaker. After cooldown

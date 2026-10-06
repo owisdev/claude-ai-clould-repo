@@ -18,6 +18,7 @@ type Config struct {
 	SearchProviders        []string // "searxng", "serpapi"
 	SearXNGURL             string
 	SearXNGOneQuery        bool // one OR-ed site: query instead of one per market
+	SearXNGMaxPages        int
 	SerpAPIKey             string
 	SerpAPIEngine          string // "google_shopping" (prices) or "google" (web)
 	SerpAPIBaseURL         string // empty = SerpApi; for tests / outbound proxies
@@ -54,15 +55,16 @@ type Config struct {
 	CacheMaxEntries           int
 	CacheMaxBackgroundRefresh int
 
-	SearchCombined  bool // one provider call per search instead of one per market
-	MarketsFile     string
-	CORSOrigins     []string
-	RateLimitRPS    float64 // per user, burst smoothing
-	RateLimitBurst  int
-	SearchTimeout   time.Duration
-	MaxConcurrency  int
-	ShutdownTimeout time.Duration
-	LogLevel        string
+	SearchCombined   bool // one provider call per search instead of one per market
+	ResultsPerMarket int
+	MarketsFile      string
+	CORSOrigins      []string
+	RateLimitRPS     float64 // per user, burst smoothing
+	RateLimitBurst   int
+	SearchTimeout    time.Duration
+	MaxConcurrency   int
+	ShutdownTimeout  time.Duration
+	LogLevel         string
 }
 
 // Load reads the environment. Required: the AUTH_* settings and the
@@ -81,6 +83,7 @@ func Load() (Config, error) {
 		SearchProviders:           splitList(env("SEARCH_PROVIDERS", "searxng,serpapi")),
 		SearXNGURL:                os.Getenv("SEARXNG_URL"),
 		SearXNGOneQuery:           parse(&errs, "SEARXNG_ONE_QUERY", false, strconv.ParseBool),
+		SearXNGMaxPages:           parse(&errs, "SEARXNG_MAX_PAGES", 2, strconv.Atoi),
 		SerpAPIKey:                os.Getenv("SERPAPI_KEY"),
 		SerpAPIEngine:             env("SERPAPI_ENGINE", "google_shopping"),
 		SerpAPIBaseURL:            os.Getenv("SERPAPI_BASE_URL"),
@@ -109,6 +112,7 @@ func Load() (Config, error) {
 		RateLimitRPS:              parse(&errs, "RATE_LIMIT_RPS", 1.0, func(s string) (float64, error) { return strconv.ParseFloat(s, 64) }),
 		RateLimitBurst:            parse(&errs, "RATE_LIMIT_BURST", 5, strconv.Atoi),
 		MaxConcurrency:            parse(&errs, "SEARCH_MAX_CONCURRENCY", 4, strconv.Atoi),
+		ResultsPerMarket:          parse(&errs, "RESULTS_PER_MARKET", 10, strconv.Atoi),
 		SearchTimeout:             parse(&errs, "SEARCH_TIMEOUT", 15*time.Second, time.ParseDuration),
 		ShutdownTimeout:           parse(&errs, "SHUTDOWN_TIMEOUT", 10*time.Second, time.ParseDuration),
 	}
@@ -155,8 +159,8 @@ func Load() (Config, error) {
 		// search enough time for it plus a web fallback.
 		cfg.SearchTimeout = max(cfg.SearchTimeout, cfg.ApifyTimeout+cfg.ProviderAttemptTimeout+2*time.Second)
 	}
-	if cfg.RateLimitRPS <= 0 || cfg.RateLimitBurst <= 0 || cfg.MaxConcurrency <= 0 || cfg.ProviderFailThreshold <= 0 {
-		errs = append(errs, errors.New("RATE_LIMIT_RPS, RATE_LIMIT_BURST, SEARCH_MAX_CONCURRENCY and PROVIDER_FAILURE_THRESHOLD must be positive"))
+	if cfg.RateLimitRPS <= 0 || cfg.RateLimitBurst <= 0 || cfg.MaxConcurrency <= 0 || cfg.ProviderFailThreshold <= 0 || cfg.ResultsPerMarket <= 0 {
+		errs = append(errs, errors.New("RATE_LIMIT_RPS, RATE_LIMIT_BURST, SEARCH_MAX_CONCURRENCY, PROVIDER_FAILURE_THRESHOLD and RESULTS_PER_MARKET must be positive"))
 	}
 	if cfg.CacheEnabled {
 		if cfg.CacheFreshTTL <= 0 || cfg.CachePartialTTL <= 0 || cfg.CacheEmptyTTL <= 0 || cfg.CacheStaleTTL <= 0 {

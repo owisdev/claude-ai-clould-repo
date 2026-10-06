@@ -240,3 +240,45 @@ func TestFallbackPartialWhenLastAlsoFails(t *testing.T) {
 		t.Errorf("failed = %v", pe.Failed)
 	}
 }
+
+// shoppingLike answers amazon and leaves the other markets uncovered.
+type shoppingLike struct{}
+
+func (shoppingLike) Name() string { return "serpapi" }
+func (shoppingLike) Batch() bool  { return true }
+func (shoppingLike) Search(_ context.Context, q Query) ([]Product, error) {
+	uncovered := map[string]bool{}
+	var out []Product
+	for _, t := range q.Targets {
+		if t.Market == "amazon" {
+			out = append(out, Product{Market: "amazon", Provider: "serpapi"})
+		} else {
+			uncovered[t.Market] = true
+		}
+	}
+	return nil, &PartialError{Products: out, Uncovered: uncovered}
+}
+
+func TestFallbackUncoveredGoToNextProvider(t *testing.T) {
+	free := &partialProvider{name: "searxng"}
+	f, _ := NewFallback([]Provider{shoppingLike{}, free}, FallbackOptions{}, discard)
+
+	got, err := f.Search(context.Background(), threeTargets)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(free.calls) != 1 || len(free.calls[0]) != 2 {
+		t.Errorf("next provider calls = %v, want temu and shein", free.calls)
+	}
+	if len(got) != 3 {
+		t.Errorf("got %+v", got)
+	}
+}
+
+func TestFallbackUncoveredOnLastIsNoError(t *testing.T) {
+	f, _ := NewFallback([]Provider{shoppingLike{}}, FallbackOptions{}, discard)
+	got, err := f.Search(context.Background(), threeTargets)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("got %+v, %v; want amazon only and no error", got, err)
+	}
+}

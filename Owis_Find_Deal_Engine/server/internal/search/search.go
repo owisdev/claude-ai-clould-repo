@@ -43,10 +43,13 @@ type Product struct {
 
 // Query is what a Provider is asked to search.
 type Query struct {
-	Title    string
-	Region   string // search region, e.g. "us", "sa", "jo"
-	Language string
-	Targets  []markets.Target
+	Title  string
+	Region string // search region, e.g. "us", "sa", "jo"
+	// ShoppingRegion is the region for shopping engines (Google Shopping
+	// does not cover every country); equals Region unless configured.
+	ShoppingRegion string
+	Language       string
+	Targets        []markets.Target
 }
 
 // Provider searches one or more marketplaces.
@@ -67,20 +70,27 @@ const (
 )
 
 // PartialError is returned by a provider that searched several marketplaces
-// in one call and failed for some of them. Products holds the results of
-// the others; Failed maps each failed marketplace to its error.
+// in one call and did not cover all of them. Products holds the results it
+// has. Failed maps each failed marketplace to its error. Uncovered lists
+// marketplaces it found nothing for but another provider might (e.g. Google
+// Shopping has no offers from that shop): a Fallback asks the next
+// provider; with no next provider they simply have no results.
 type PartialError struct {
-	Products []Product
-	Failed   map[string]error
+	Products  []Product
+	Failed    map[string]error
+	Uncovered map[string]bool
 }
 
 func (e *PartialError) Error() string {
-	parts := make([]string, 0, len(e.Failed))
+	parts := make([]string, 0, len(e.Failed)+len(e.Uncovered))
 	for m, err := range e.Failed {
 		parts = append(parts, m+": "+err.Error())
 	}
+	for m := range e.Uncovered {
+		parts = append(parts, m+": not covered")
+	}
 	sort.Strings(parts)
-	return "some marketplaces failed: " + strings.Join(parts, "; ")
+	return "some marketplaces not answered: " + strings.Join(parts, "; ")
 }
 
 // Request is one search as asked by a client.
@@ -126,6 +136,7 @@ func NormalizeTitle(title string) string {
 type Options struct {
 	Timeout        time.Duration // whole search
 	MaxConcurrency int           // provider calls in flight per search
+	PerMarket      int           // results kept per marketplace (best first)
 }
 
 // Service runs searches. Safe for concurrent use.
@@ -144,6 +155,9 @@ func NewService(catalog *markets.Catalog, providers map[string]Provider, opts Op
 	}
 	if opts.MaxConcurrency <= 0 {
 		opts.MaxConcurrency = 4
+	}
+	if opts.PerMarket <= 0 {
+		opts.PerMarket = 10
 	}
 	return &Service{catalog: catalog, providers: providers, opts: opts, log: log}
 }
@@ -186,7 +200,7 @@ func (s *Service) Search(ctx context.Context, req Request) (*Result, error) {
 	}
 
 	jobs := s.planJobs(country.Targets, result)
-	q := Query{Title: title, Region: country.Region, Language: country.Language}
+	q := Query{Title: title, Region: country.Region, ShoppingRegion: country.ShoppingRegion, Language: country.Language}
 	for o := range s.runPool(ctx, q, jobs) {
 		var failed map[string]error
 		var partial *PartialError
@@ -220,6 +234,7 @@ func (s *Service) Search(ctx context.Context, req Request) (*Result, error) {
 	}
 
 	sortProducts(result.Results, country.Targets)
+	result.Results = limitPerMarket(result.Results, s.opts.PerMarket)
 	result.TookMS = time.Since(start).Milliseconds()
 	result.FetchedAt = time.Now().UTC()
 
@@ -316,6 +331,19 @@ func sortProducts(products []Product, targets []markets.Target) {
 		}
 		return order[products[i].Market] < order[products[j].Market]
 	})
+}
+
+// limitPerMarket keeps the first n products of each marketplace, in order.
+func limitPerMarket(products []Product, n int) []Product {
+	count := make(map[string]int)
+	out := products[:0]
+	for _, p := range products {
+		if count[p.Market] < n {
+			count[p.Market]++
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func targetIDs(targets []markets.Target) []string {

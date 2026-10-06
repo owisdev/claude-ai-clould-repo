@@ -367,6 +367,16 @@ func TestKeyDependsOnMarkets(t *testing.T) {
 	}
 }
 
+func TestKeyDependsOnVariant(t *testing.T) {
+	a := newEnv(t, Options{Variant: "providers=searxng>serpapi"})
+	b := newEnv(t, Options{Variant: "providers=serpapi>searxng"})
+	ka, _ := a.cache.key(search.Request{Title: "s pen", Country: "jor"})
+	kb, _ := b.cache.key(search.Request{Title: "s pen", Country: "jor"})
+	if ka == kb {
+		t.Error("changing the provider order kept the cache key")
+	}
+}
+
 func TestCloseStopsBackgroundRefresh(t *testing.T) {
 	e := newEnv(t, Options{FreshTTL: time.Minute})
 	e.search(t, "s pen", false)

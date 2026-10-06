@@ -9,8 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,7 +32,11 @@ type Config struct {
 	// OneQuery sends a single "(site:a OR site:b ...)" query instead: fewer
 	// requests to the search engines, but the biggest shop tends to fill
 	// all the results.
-	OneQuery   bool
+	OneQuery bool
+	// MaxPages is how many result pages one query may read (default 2);
+	// the next page is read only while too few product pages were found.
+	MaxPages   int
+	Logger     *slog.Logger // optional: debug log of filtered results
 	HTTPClient *http.Client
 }
 
@@ -51,6 +57,9 @@ func New(cfg Config) (*Client, error) {
 	}
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = &http.Client{Timeout: 15 * time.Second}
+	}
+	if cfg.MaxPages <= 0 {
+		cfg.MaxPages = 2
 	}
 	return &Client{cfg: cfg, endpoint: strings.TrimSuffix(u.String(), "/") + "/search"}, nil
 }
@@ -119,17 +128,67 @@ func (c *Client) Search(ctx context.Context, q search.Query) ([]search.Product, 
 	return products, nil
 }
 
-// query runs one SearXNG query restricted to q.Targets' domains.
+// minProducts is how many product pages a query should yield before no
+// further result pages are requested.
+const minProducts = 5
+
+// query runs one SearXNG query restricted to q.Targets' domains. Many
+// results are dropped (store, search and category pages, irrelevant
+// pages), so when the first page leaves fewer than minProducts, the next
+// page is requested too, up to MaxPages.
 func (c *Client) query(ctx context.Context, q search.Query) ([]search.Product, error) {
 	if len(q.Targets) == 0 {
 		return nil, nil
 	}
+	var (
+		results  []result
+		products []search.Product
+		stats    filterStats
+	)
+	for page := 1; page <= c.cfg.MaxPages; page++ {
+		body, err := c.fetch(ctx, q, page)
+		if err != nil {
+			if page == 1 {
+				return nil, err
+			}
+			break // keep what the first pages found
+		}
+		if len(body.Results) == 0 {
+			if page == 1 && len(body.UnresponsiveEngines) > 0 {
+				// No results because the engines failed (CAPTCHA, timeout,
+				// ...), not because nothing matched: report an error so a
+				// fallback runs. Results filtered out below (not product
+				// pages, not relevant) mean the engines worked: that is
+				// "no results".
+				return nil, fmt.Errorf("searxng: no results, engines unresponsive: %s", engineErrors(body.UnresponsiveEngines))
+			}
+			break
+		}
+		results = append(results, body.Results...)
+		products, stats = toProducts(results, q.Title, q.Targets)
+		stats.pages = page
+		if len(products) >= minProducts {
+			break
+		}
+	}
+	if c.cfg.Logger != nil {
+		c.cfg.Logger.DebugContext(ctx, "searxng results",
+			"markets", marketIDs(q.Targets), "pages", stats.pages, "results", stats.results,
+			"other_site", stats.otherSite, "not_product_page", stats.notProduct,
+			"duplicate", stats.duplicate, "irrelevant", stats.irrelevant, "kept", len(products))
+	}
+	return products, nil
+}
 
+func (c *Client) fetch(ctx context.Context, q search.Query, page int) (*response, error) {
 	params := url.Values{}
 	params.Set("q", markets.SiteQuery(q.Title, q.Targets))
 	params.Set("format", "json")
 	params.Set("categories", "general")
 	params.Set("safesearch", "1")
+	if page > 1 {
+		params.Set("pageno", strconv.Itoa(page))
+	}
 	if lang := locale(q.Language, q.Region); lang != "" {
 		params.Set("language", lang)
 	}
@@ -154,15 +213,15 @@ func (c *Client) query(ctx context.Context, q search.Query) ([]search.Product, e
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxBodyBytes)).Decode(&body); err != nil {
 		return nil, fmt.Errorf("searxng: decode response: %w", err)
 	}
+	return &body, nil
+}
 
-	if len(body.Results) == 0 && len(body.UnresponsiveEngines) > 0 {
-		// No results because the engines failed (CAPTCHA, timeout, ...),
-		// not because nothing matched: report an error so a fallback runs.
-		// Results that are filtered out below (not product pages, not
-		// relevant) mean the engines worked: that is "no results".
-		return nil, fmt.Errorf("searxng: no results, engines unresponsive: %s", engineErrors(body.UnresponsiveEngines))
+func marketIDs(targets []markets.Target) []string {
+	ids := make([]string, len(targets))
+	for i, t := range targets {
+		ids[i] = t.Market
 	}
-	return toProducts(body.Results, q.Title, q.Targets), nil
+	return ids
 }
 
 // locale builds a SearXNG language tag such as "en-US" or "en-SA".
@@ -188,7 +247,13 @@ func engineErrors(pairs [][]string) string {
 // toProducts keeps relevant product pages of the requested marketplaces, maps them
 // to their marketplace and numbers them per market. Different links to the
 // same product (tracking parameters, /clp/ vs /dp/) count once.
-func toProducts(results []result, title string, targets []markets.Target) []search.Product {
+// filterStats counts why results were dropped (logged at debug level).
+type filterStats struct {
+	pages, results, otherSite, notProduct, duplicate, irrelevant int
+}
+
+func toProducts(results []result, title string, targets []markets.Target) ([]search.Product, filterStats) {
+	st := filterStats{results: len(results)}
 	products := make([]search.Product, 0, len(results))
 	positions := make(map[string]int, len(targets))
 	seen := make(map[string]bool, len(results))
@@ -202,14 +267,21 @@ func toProducts(results []result, title string, targets []markets.Target) []sear
 		}
 		target, ok := markets.MatchTarget(u.Hostname(), targets)
 		if !ok {
-			continue // engines that ignore site: return other domains
+			st.otherSite++ // engines that ignore site: return other domains
+			continue
 		}
 		link, ok := target.ProductLink(r.URL)
-		if !ok || seen[link] {
-			continue // search, store or category page, or a duplicate
+		if !ok {
+			st.notProduct++ // search, store or category page
+			continue
+		}
+		if seen[link] {
+			st.duplicate++
+			continue
 		}
 		if !search.Relevant(title, r.Title, r.Content, u.Path) {
-			continue // the engine ignored the query and returned any shop page
+			st.irrelevant++ // the engine ignored the query and returned any shop page
+			continue
 		}
 		seen[link] = true
 		positions[target.Market]++
@@ -228,5 +300,5 @@ func toProducts(results []result, title string, targets []markets.Target) []sear
 			Provider:  "searxng",
 		})
 	}
-	return products
+	return products, st
 }

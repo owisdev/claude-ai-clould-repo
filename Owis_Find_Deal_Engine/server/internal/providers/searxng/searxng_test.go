@@ -118,7 +118,7 @@ func TestSearchQueriesEachMarket(t *testing.T) {
 		"temu.com":     `{"results":[{"url":"https://www.temu.com/x.html","title":"S Pen T1"}]}`,
 		"ar.shein.com": `{"results":[]}`,
 	})
-	c, _ := New(Config{BaseURL: srv.URL, Combined: true})
+	c, _ := New(Config{BaseURL: srv.URL, Combined: true, MaxPages: 1})
 
 	got, err := c.Search(context.Background(), search.Query{Title: "s pen", Targets: jorTargets})
 	if err != nil {
@@ -263,5 +263,61 @@ func TestSearchDropsIrrelevantPages(t *testing.T) {
 		// The engines answered (one timed out): nothing relevant is "no
 		// results", not an error.
 		t.Fatalf("got %+v, %v; want no products and no error", got, err)
+	}
+}
+
+func TestSearchReadsNextPageWhenFewProducts(t *testing.T) {
+	amazon := []markets.Target{jorTargets[0]}
+	var pages []string
+	srv := newServer(t, http.StatusOK, "", nil)
+	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page := r.URL.Query().Get("pageno")
+		pages = append(pages, page)
+		switch page {
+		case "": // page 1: one product page among store pages
+			_, _ = w.Write([]byte(`{"results":[
+				{"url":"https://www.amazon.com/stores/SSK/page/1","title":"SSK enclosure store"},
+				{"url":"https://www.amazon.com/dp/B000000001","title":"SSK enclosure one"}]}`))
+		case "2":
+			_, _ = w.Write([]byte(`{"results":[
+				{"url":"https://www.amazon.com/dp/B000000001?th=1","title":"SSK enclosure one again"},
+				{"url":"https://www.amazon.com/dp/B000000002","title":"SSK enclosure two"}]}`))
+		default:
+			t.Errorf("page %s requested, MaxPages is 2", page)
+		}
+	})
+	cat, _ := markets.Load("")
+	jor, _ := cat.Country("jor")
+	amazon = []markets.Target{jor.Targets[0]}
+	c, _ := New(Config{BaseURL: srv.URL})
+
+	got, err := c.Search(context.Background(), search.Query{Title: "ssk enclosure", Targets: amazon})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(pages) != 2 || len(got) != 2 {
+		t.Fatalf("pages %v, products %+v", pages, got)
+	}
+	if got[1].Link != "https://www.amazon.com/dp/B000000002" || got[1].Position != 2 {
+		t.Errorf("second product = %+v", got[1])
+	}
+}
+
+func TestSearchSecondPageErrorKeepsFirst(t *testing.T) {
+	cat, _ := markets.Load("")
+	jor, _ := cat.Country("jor")
+	srv := newServer(t, http.StatusOK, "", nil)
+	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("pageno") == "2" {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		_, _ = w.Write([]byte(`{"results":[{"url":"https://www.amazon.com/dp/B000000001","title":"SSK enclosure"}]}`))
+	})
+	c, _ := New(Config{BaseURL: srv.URL})
+
+	got, err := c.Search(context.Background(), search.Query{Title: "ssk enclosure", Targets: jor.Targets[:1]})
+	if err != nil || len(got) != 1 {
+		t.Fatalf("got %+v, %v", got, err)
 	}
 }

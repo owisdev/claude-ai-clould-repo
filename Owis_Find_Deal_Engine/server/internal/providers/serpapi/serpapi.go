@@ -86,10 +86,26 @@ func (c *Client) Search(ctx context.Context, q search.Query) ([]search.Product, 
 		return c.searchWeb(ctx, q)
 	}
 	products, err := c.searchShopping(ctx, q)
-	if err != nil || len(products) > 0 {
-		return products, err
+	if err != nil {
+		return nil, err
 	}
-	return c.searchWeb(ctx, q)
+	if len(products) == 0 {
+		// Nothing from our shops (thin coverage): one web search instead.
+		return c.searchWeb(ctx, q)
+	}
+	// Shops without offers on Google Shopping are left to the next
+	// provider (e.g. free SearXNG) instead of costing another search here.
+	uncovered := map[string]bool{}
+	for _, t := range q.Targets {
+		uncovered[t.Market] = true
+	}
+	for _, p := range products {
+		delete(uncovered, p.Market)
+	}
+	if len(uncovered) > 0 {
+		return nil, &search.PartialError{Products: products, Uncovered: uncovered}
+	}
+	return products, nil
 }
 
 // ---------------------------------------------------------------- shopping
@@ -122,6 +138,9 @@ func (c *Client) searchShopping(ctx context.Context, q search.Query) ([]search.P
 	params.Set("engine", EngineShopping)
 	params.Set("q", query)
 	c.setLocale(params, q)
+	if q.ShoppingRegion != "" {
+		params.Set("gl", q.ShoppingRegion) // Google Shopping does not cover every country
+	}
 
 	var body shoppingResponse
 	if err := c.get(ctx, params, &body, &body.Error); err != nil {

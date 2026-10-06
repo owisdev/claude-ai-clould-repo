@@ -248,3 +248,60 @@ func TestSearchMissingProvider(t *testing.T) {
 		t.Errorf("amazon status = %q", res.Markets["amazon"])
 	}
 }
+
+// manyProvider returns n products per target.
+type manyProvider struct{ n int }
+
+func (p *manyProvider) Name() string { return "many" }
+func (p *manyProvider) Batch() bool  { return true }
+
+func (p *manyProvider) Search(_ context.Context, q Query) ([]Product, error) {
+	var out []Product
+	for _, t := range q.Targets {
+		for i := 1; i <= p.n; i++ {
+			out = append(out, Product{Market: t.Market, Position: i})
+		}
+	}
+	return out, nil
+}
+
+func TestSearchLimitsResultsPerMarket(t *testing.T) {
+	svc := newTestService(t, &manyProvider{n: 15}, Options{PerMarket: 10})
+	res, err := svc.Search(context.Background(), Request{Title: "usb hub", Country: "jor"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := map[string]int{}
+	for _, p := range res.Results {
+		count[p.Market]++
+		if p.Position > 10 {
+			t.Errorf("kept position %d of %s", p.Position, p.Market)
+		}
+	}
+	if len(count) != 4 || count["amazon"] != 10 || len(res.Results) != 40 {
+		t.Errorf("per market = %v, total %d", count, len(res.Results))
+	}
+}
+
+// regionProvider records the query it got.
+type regionProvider struct{ got Query }
+
+func (p *regionProvider) Name() string { return "region" }
+func (p *regionProvider) Batch() bool  { return true }
+func (p *regionProvider) Search(_ context.Context, q Query) ([]Product, error) {
+	p.got = q
+	return nil, nil
+}
+
+func TestSearchPassesShoppingRegion(t *testing.T) {
+	p := &regionProvider{}
+	svc := newTestService(t, p, Options{})
+	for country, want := range map[string][2]string{"jor": {"jo", "us"}, "ksa": {"sa", "sa"}} {
+		if _, err := svc.Search(context.Background(), Request{Title: "usb hub", Country: country}); err != nil {
+			t.Fatal(err)
+		}
+		if p.got.Region != want[0] || p.got.ShoppingRegion != want[1] {
+			t.Errorf("%s: region %q shopping %q, want %v", country, p.got.Region, p.got.ShoppingRegion, want)
+		}
+	}
+}

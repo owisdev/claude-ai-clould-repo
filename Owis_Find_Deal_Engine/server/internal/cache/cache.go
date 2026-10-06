@@ -62,6 +62,10 @@ type Options struct {
 	FetchTimeout time.Duration
 	// MaxBackgroundRefresh caps concurrent background refreshes.
 	MaxBackgroundRefresh int
+	// Variant describes the search setup (provider order, results per
+	// market, ...). It is part of every key, so answers cached under one
+	// setup are not served after the setup changes.
+	Variant string
 }
 
 func (o *Options) defaults() {
@@ -295,9 +299,9 @@ func (e *Entry) response(stale bool) *search.Result {
 	return &res
 }
 
-// key identifies a search: country, the catalog version and marketplace
-// domains (so editing markets.json, e.g. its product page rules,
-// invalidates old entries) and the normalized title. The title is hashed so
+// key identifies a search: country, the catalog version, the search setup
+// (Variant) and marketplace domains (so editing markets.json or changing
+// the providers invalidates old entries) and the normalized title. The title is hashed so
 // user input never ends up raw in Redis keys.
 func (c *Cache) key(req search.Request) (string, bool) {
 	country, ok := c.catalog.Country(req.Country)
@@ -306,11 +310,11 @@ func (c *Cache) key(req search.Request) (string, bool) {
 		return "", false
 	}
 	h := sha256.New()
-	h.Write([]byte(c.catalog.Version() + ";"))
+	h.Write([]byte(c.catalog.Version() + ";" + c.opts.Variant + ";"))
 	for _, t := range country.Targets {
 		h.Write([]byte(t.Market + "=" + t.Domain + ";"))
 	}
 	h.Write([]byte{0})
 	h.Write([]byte(title))
-	return "search:v1:" + country.Code + ":" + hex.EncodeToString(h.Sum(nil)[:16]), true
+	return "search:v2:" + country.Code + ":" + hex.EncodeToString(h.Sum(nil)[:16]), true
 }

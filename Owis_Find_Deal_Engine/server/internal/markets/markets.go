@@ -89,12 +89,16 @@ func baseDomain(domain string) string {
 
 // Country is a supported country with the marketplaces that deliver to it.
 type Country struct {
-	Code     string   `json:"code"`
-	Name     string   `json:"name"`
-	Currency string   `json:"currency"`
-	Region   string   `json:"-"`
-	Language string   `json:"-"`
-	Targets  []Target `json:"markets"`
+	Code     string `json:"code"`
+	Name     string `json:"name"`
+	Currency string `json:"currency"`
+	Region   string `json:"-"`
+	Language string `json:"-"`
+	// ShoppingRegion is the Google Shopping country to use when Google
+	// Shopping does not cover Region (e.g. Jordan): shops there sell
+	// internationally, so another country's listings apply.
+	ShoppingRegion string   `json:"-"`
+	Targets        []Target `json:"markets"`
 }
 
 // Catalog is the immutable set of countries; safe for concurrent use.
@@ -133,11 +137,12 @@ type fileFormat struct {
 		} `json:"product_pages"`
 	} `json:"markets"`
 	Countries map[string]struct {
-		Name     string `json:"name"`
-		Currency string `json:"currency"`
-		Region   string `json:"region"`
-		Language string `json:"language"`
-		Markets  []struct {
+		Name           string `json:"name"`
+		Currency       string `json:"currency"`
+		Region         string `json:"region"`
+		ShoppingRegion string `json:"shopping_region"`
+		Language       string `json:"language"`
+		Markets        []struct {
 			Market string `json:"market"`
 			Domain string `json:"domain"`
 		} `json:"markets"`
@@ -191,6 +196,11 @@ func Parse(data []byte) (*Catalog, error) {
 			Currency: fc.Currency,
 			Region:   fc.Region,
 			Language: fc.Language,
+
+			ShoppingRegion: fc.ShoppingRegion,
+		}
+		if country.ShoppingRegion == "" {
+			country.ShoppingRegion = fc.Region
 		}
 		seen := make(map[string]bool)
 		for _, fm := range fc.Markets {

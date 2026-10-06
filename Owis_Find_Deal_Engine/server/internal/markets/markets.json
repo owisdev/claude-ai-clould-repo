@@ -68,6 +68,7 @@
       "name": "Jordan",
       "currency": "JOD",
       "region": "jo",
+      "shopping_region": "us",
       "language": "en",
       "markets": [
         { "market": "amazon",     "domain": "amazon.com" },
