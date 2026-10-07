@@ -194,6 +194,15 @@ caps kept / charged items via the run's `maxItems`); Temu links are
 rebuilt as `goods.html?goods_id=<id>` (no country prefix); web results
 whose title is only the shop name are dropped. Cache version `v6`.
 
+Retest (`fast charger type c` / `jor`): ✅ all 4 shops, no fallback, 26 s,
+1 SerpApi credit (Amazon). Temu 4 + SHEIN 5 results (limit 5). Apify
+cost of the search ≈ $0.16 ($2.25 → $2.41) — more than the ≈ $0.10
+expected, so Temu probably still charges for 10 (check that Temu run's
+cost: $0.05 = cap works, $0.10 = set `APIFY_TEMU_MAX_ITEMS=10`).
+Open: many AliExpress prices are $0.33 / $1.09 — likely new-user
+"welcome deal" prices, not what most users pay; check one link before
+deciding (filter, label, or other price field).
+
 **Other open items:** loading
 bar in the app (first live search takes ~30–50 s; cached answers are
 instant); label scraper prices as approximate in the app.
