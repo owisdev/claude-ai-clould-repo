@@ -3,10 +3,18 @@
 Last updated: 2026-10-07 · Branch: `claude/cloud-vs-local-7xi988`
 (not merged into `main` yet).
 
-Read first: [docs/architecture.pdf](docs/architecture.pdf) — the full
-architecture and flows, illustrated (regenerate with
-`python3 docs/build_architecture_pdf.py`). Note: the PDF predates the
-local test changes below (dedicated sources per shop).
+Read first:
+- [docs/current_flow.pdf](docs/current_flow.pdf) — **how the service works
+  today** (7 Oct 2026): sources per shop, request flow, 48 h cache, costs,
+  configuration, known limits, test results.
+- [docs/next_plan.pdf](docs/next_plan.pdf) — **the new plan** (admin panel →
+  API integration → deployment → users) and the owner's decisions D1–D8
+  with an answer sheet.
+- [docs/architecture.pdf](docs/architecture.pdf) — the original full
+  architecture (predates the dedicated sources per shop).
+
+Regenerate the PDFs: `python3 docs/build_flow_and_plan_pdfs.py` and
+`python3 docs/build_architecture_pdf.py` (needs `reportlab`).
 
 ## Where we are
 
@@ -226,8 +234,17 @@ instant); label scraper prices as approximate in the app.
    CI/CD, monitoring).
 4. **Phase 5 — users** (old phase 2).
 
-Owner decisions needed before step 7: admin web app stack, who may be
-admin (and MFA), secrets editable in the panel or `.env` only.
+**Next session starts phase 2, step 7 (database + settings store).**
+Owner decisions needed before step 7 (details and recommendations in
+`docs/next_plan.pdf`):
+
+- D1 admin web app: ★ React app built into the server image / server-rendered pages
+- D2 admin login: ★ Firebase + admin list in the DB + two-factor / without two-factor
+- D3 secrets: ★ changeable in the panel (encrypted, write-only) / `.env` only
+- D4 API users: ★ own apps and agents, keys made in the panel / also outside partners
+
+Later: D5 monthly budget alert (step 9), D6 hosting and D7 domain
+(step 14), D8 paid Apify / SerpApi plans (before real users).
 
 ## To resume in a new Claude Code session
 
@@ -235,7 +252,7 @@ Open the repository and say:
 
 > Continue the Owis_Find_Deal_Engine project from
 > `Owis_Find_Deal_Engine/STATUS.md` on branch `claude/cloud-vs-local-7xi988`.
-> SHEIN live test results: …
+> Start phase 2, step 7. My answers: D1 …, D2 … (admin email …), D3 …, D4 …
 
 ## Run it on your PC
 
