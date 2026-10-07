@@ -89,7 +89,15 @@ location.
 2. Search `usa`, `ksa`, `jor` (e.g. `ssd usb 3.0 enclosure`,
    `phone case`): do SHEIN products appear with price and working links?
    How long does the search take now (3 scrapers run in parallel)?
-3. Check in the Apify console whether the scraper's `site` field offers
+3. Alternative scraper `shahidirfan/shein-product-scraper` (more users):
+   it takes a URL, not a keyword. The service can already fill it with a
+   SHEIN search URL (`{{query_path}}`, e.g. `ssd%20usb%20enclosure`):
+   `APIFY_SHEIN_INPUT={"startUrl":"https://us.shein.com/pdsearch/{{query_path}}/","results_wanted":{{max}},"proxyConfiguration":{"useApifyProxy":true}}`.
+   Its output is not mapped yet: run it once in the console with
+   `startUrl` = `https://us.shein.com/pdsearch/ssd%20usb%20enclosure/`
+   (and once with `ar.shein.com`) and send one or two output items. If it
+   reads `ar.shein.com`, it could give local links / prices for ksa, jor.
+4. Check in the Apify console whether the scraper's `site` field offers
    `ar` / `sa` (Arab / Saudi site). If yes, report it: the input can use
    `{{country}}` and links would point to the local site.
 

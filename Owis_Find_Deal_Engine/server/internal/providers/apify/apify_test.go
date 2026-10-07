@@ -215,6 +215,11 @@ func TestRenderInputURLPlaceholders(t *testing.T) {
 		v.StartUrls[1].URL != "https://www.aliexpress.com/wholesale?SearchText=Samsung++S-Pen+%22pro%22" || v.MaxItems != 10 {
 		t.Errorf("out = %s", out)
 	}
+	shein, err := renderInput(`{"startUrl":"https://us.shein.com/pdsearch/{{query_path}}/","results_wanted":{{max}}}`,
+		`ssd  usb "3.0" enclosure/x`, 10, "us")
+	if err != nil || !strings.Contains(shein, `"https://us.shein.com/pdsearch/ssd%20usb%20%223.0%22%20enclosure%2Fx/"`) {
+		t.Errorf("query_path: %s, %v", shein, err)
+	}
 	if got := slug("سماعة بلوتوث"); got != "%D8%B3%D9%85%D8%A7%D8%B9%D8%A9-%D8%A8%D9%84%D9%88%D8%AA%D9%88%D8%AB" {
 		t.Errorf("arabic slug = %s", got)
 	}

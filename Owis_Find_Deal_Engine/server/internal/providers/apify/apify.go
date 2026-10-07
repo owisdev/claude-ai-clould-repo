@@ -71,7 +71,7 @@ func New(cfg Config) (*Client, error) {
 	// The store shows "owner/actor-name"; the API path needs "owner~actor-name".
 	cfg.Actor = strings.Replace(strings.TrimSpace(cfg.Actor), "/", "~", 1)
 	if !hasQuery(cfg.InputTemplate) {
-		return nil, errors.New("apify: input template must contain {{query}}, {{query_url}} or {{query_slug}}")
+		return nil, errors.New("apify: input template must contain {{query}}, {{query_url}}, {{query_path}} or {{query_slug}}")
 	}
 	if _, err := renderInput(cfg.InputTemplate, "test \"quoted\"", 10, "us"); err != nil {
 		return nil, fmt.Errorf("apify: input template for %s: %w", cfg.Actor, err)
@@ -160,7 +160,7 @@ func (c *Client) run(ctx context.Context, q search.Query, t markets.Target) ([]s
 // hasQuery reports whether a template contains one of the query placeholders.
 func hasQuery(tmpl string) bool {
 	return strings.Contains(tmpl, "{{query}}") || strings.Contains(tmpl, "{{query_url}}") ||
-		strings.Contains(tmpl, "{{query_slug}}")
+		strings.Contains(tmpl, "{{query_path}}") || strings.Contains(tmpl, "{{query_slug}}")
 }
 
 // renderInput fills the template. The query is JSON-escaped, so quotes or
@@ -168,6 +168,8 @@ func hasQuery(tmpl string) bool {
 // Actors that take a search URL instead of a keyword:
 //
 //	{{query_url}}  URL query encoding: "samsung s pen" -> "samsung+s+pen"
+//	{{query_path}} URL path encoding:  "samsung s pen" -> "samsung%20s%20pen"
+//	               (SHEIN: https://us.shein.com/pdsearch/{{query_path}}/)
 //	{{query_slug}} lowercase words joined by "-": "samsung-s-pen"
 func renderInput(tmpl, query string, max int, region string) (string, error) {
 	jsonText := func(s string) string {
@@ -177,6 +179,7 @@ func renderInput(tmpl, query string, max int, region string) (string, error) {
 	r := strings.NewReplacer(
 		"{{query}}", jsonText(query),
 		"{{query_url}}", jsonText(url.QueryEscape(query)),
+		"{{query_path}}", jsonText(url.PathEscape(strings.Join(strings.Fields(query), " "))),
 		"{{query_slug}}", jsonText(slug(query)),
 		"{{max}}", strconv.Itoa(max),
 		"{{country}}", strings.ToLower(region),

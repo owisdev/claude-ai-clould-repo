@@ -161,8 +161,8 @@ func Load() (Config, error) {
 			cfg.ApifyActors[m] = os.Getenv(key + "_ACTOR")
 			cfg.ApifyInputs[m] = os.Getenv(key + "_INPUT")
 			in := cfg.ApifyInputs[m]
-			if cfg.ApifyActors[m] == "" || !(strings.Contains(in, "{{query}}") || strings.Contains(in, "{{query_url}}") || strings.Contains(in, "{{query_slug}}")) {
-				errs = append(errs, fmt.Errorf("%s_ACTOR and %s_INPUT (JSON containing {{query}}, {{query_url}} or {{query_slug}}) are required for %s", key, key, m))
+			if cfg.ApifyActors[m] == "" || !(strings.Contains(in, "{{query}}") || strings.Contains(in, "{{query_url}}") || strings.Contains(in, "{{query_path}}") || strings.Contains(in, "{{query_slug}}")) {
+				errs = append(errs, fmt.Errorf("%s_ACTOR and %s_INPUT (JSON containing {{query}}, {{query_url}}, {{query_path}} or {{query_slug}}) are required for %s", key, key, m))
 			}
 		}
 	}
