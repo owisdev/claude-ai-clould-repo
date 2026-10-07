@@ -213,9 +213,21 @@ Amazon; 2 in `usa` / `ksa`: Amazon + eBay), then free for 48 h (cache).
 bar in the app (first live search takes ~30–50 s; cached answers are
 instant); label scraper prices as approximate in the app.
 
-**After that:** phase 2 (users: profile, plans/payments, saved cart +
-price tracker, purchase reports, notifications) or phase 3 (eBay /
-AliExpress official APIs if the keys were approved).
+**New plan (owner, 2026-10-07)** — see [PLAN.md](PLAN.md) section 9:
+
+1. **Phase 2 — admin panel:** Postgres + settings store (settings move
+   from `.env` to the database, applied without restart), admin API with
+   admin role and audit log, write-only encrypted secrets, test search,
+   usage / cost dashboard, admin web app under `/admin`.
+2. **Phase 3 — API integration:** API keys for other applications and AI
+   agents (hashed, scoped, quotas, revoke / rotate), async search +
+   webhooks, MCP server for agents, OpenAPI spec.
+3. **Phase 4 — deployment** of everything (hosting, HTTPS, backups,
+   CI/CD, monitoring).
+4. **Phase 5 — users** (old phase 2).
+
+Owner decisions needed before step 7: admin web app stack, who may be
+admin (and MFA), secrets editable in the panel or `.env` only.
 
 ## To resume in a new Claude Code session
 

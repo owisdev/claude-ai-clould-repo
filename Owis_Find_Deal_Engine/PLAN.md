@@ -33,7 +33,9 @@ Adding a country or a shop means editing that file.
 
 ## 3. Security model
 
-No API keys for apps: every protected call carries the **user's JWT**.
+App users: every protected call carries the **user's JWT**. Other
+applications and AI agents (phase 3): **API keys** issued in the admin
+panel (step 11). Admins: JWT + admin role (step 8).
 
 ### 3.1 End-to-end flow ✅ implemented
 
@@ -294,6 +296,9 @@ All paths under `/api/v1`. Errors: `{"error": {"code", "message"}}`.
 |---|---|---|---|
 | GET  | `/health` | – | ✅ |
 | GET  | `/countries` | – | ✅ |
+| POST | `/searches`, GET `/searches/{id}` (async) | API key or JWT | step 12 |
+| POST | `/mcp` (MCP tools for AI agents) | API key | step 13 |
+| * | `/admin/v1/...` (settings, clients, usage, audit) | JWT + admin role | steps 8–11 |
 | POST | `/search` `{"title","country"}` | JWT + quota | ✅ |
 | GET/PATCH | `/me` | JWT | step 7 |
 | GET/POST | `/cart`, PATCH/DELETE `/cart/{id}` | JWT | step 9 |
@@ -371,30 +376,77 @@ and is pushed.
    limit, daily quota by plan in Redis with 402/429, refunds on failure.
    (Replaced the earlier per-app API keys.)
 
-**Phase 2 — users**
-7. `users` table (created on first login), `/me`. App email sign-in:
-   see the Firebase email-link reminder in section 5.6.
-8. Plans in the database + payment webhook.
-9. Saved cart + saved-item price tracker (section 4b).
-10. Clicks + purchase reports.
-11. Notifications: inbox, devices, FCM push, purchase-prompt background job
-    (Redis job queue, section 4c).
+**New order (owner, 2026-10-07):** admin panel → API integration for
+other applications and AI agents → deployment. The user features (old
+phase 2) come after that.
 
-**Phase 3 — more sources and reach**
-12. eBay provider (usa, ksa) — when keys are approved.
-13. AliExpress provider — when affiliate keys are approved.
-14. Deploy with the hardening in section 3.2 (see section 10).
-    Monitoring: export metrics (searches, cache hits, provider errors,
-    circuit state) and alerts. At this point replace the hand-written
-    circuit breaker in `internal/search/fallback.go` with
-    `github.com/sony/gobreaker` (v2): its `OnStateChange` callback and
-    `Counts` feed the metrics/alerts, and `ReadyToTrip` allows a
-    failure-ratio rule (e.g. 50% of the last 20 calls) instead of only
-    "N failures in a row" once there are more sources and real traffic.
-    Small change: the breaker is private to `fallback.go` behind
-    allow/success/failure (~30 lines + its test); check gobreaker's Go
-    version requirement and API at that time.
-15. AI-agent access: OpenAPI spec + MCP tool.
+**Phase 2 — admin panel** (control every setting of the service)
+
+7. **Database + settings store.** Postgres joins the stack (migrations,
+   private network, backups later). Tables: `settings` (current values),
+   `settings_history` (every change: who, when, old → new), `admins`.
+   Runtime settings move from `.env` to the database; `.env` keeps only
+   bootstrap values (database URL, auth issuer, encryption key, first
+   admin). On change the server rebuilds its provider chain and swaps it
+   atomically — no restart, searches in flight finish on the old one.
+8. **Admin API** `/admin/v1/...` — separate from the public API:
+   - login with the same auth provider (Firebase) **plus** an admin role
+     (admin allow-list in the database / custom claim); every call checked
+     server-side; admin actions rate-limited and written to the audit log;
+   - settings: countries and shops (today `markets.json`), source per shop
+     (Apify Actor / input / currency / result limit / timeout / max cost,
+     SerpApi engines), cache times, plans, quotas and rate limits, CORS;
+   - secrets (SerpApi key, Apify token): **write-only** — they can be
+     replaced but never read back; stored encrypted (AES-256-GCM, key from
+     the environment);
+   - tools: "test search" (shows each source's raw answer, time, cost),
+     clear cache for a query / bump results version, provider health and
+     circuit state.
+9. **Usage and cost dashboard:** live searches, cache hit rate, fallbacks
+   and errors per source, estimated cost per day (Apify runs × price per
+   Actor, SerpApi searches), top queries; alert when the monthly budget
+   reaches a limit set in the panel.
+10. **Admin web app** (desktop browser): settings forms with validation,
+    dashboard, audit log, API clients (step 11). Built as a static web app
+    and served by the same server under `/admin` (same origin, one deploy).
+
+**Phase 3 — API integration** (other applications and AI agents)
+
+11. **API clients and keys.** Created in the admin panel: name, owner,
+    scopes (`search`, `countries`), daily quota, rate limit, allowed
+    countries, optional IP allow-list, expiry. The key is shown **once**
+    (`ofd_live_<random>`); only its SHA-256 hash and a short prefix are
+    stored; revoke and rotate (old key valid for a grace period). Calls:
+    `Authorization: Bearer ofd_live_...`. App users keep their JWT; the
+    middleware accepts either and meters each separately.
+12. **Integration endpoints:** the same `/api/v1/search` and `/countries`,
+    plus an **asynchronous search** for slow live searches (25–50 s):
+    `POST /api/v1/searches` → `202` + id, `GET /api/v1/searches/{id}`,
+    optional signed webhook (HMAC) when done. Per-client usage counters
+    (base for billing partners later).
+13. **AI agents:** an **MCP server** endpoint (`/mcp`, Streamable HTTP)
+    with tools `search_products` and `list_countries`, authenticated with
+    the same API keys; **OpenAPI 3.1** spec + docs page for developers.
+
+**Phase 4 — deployment** (all parts: server, admin web app, SearXNG,
+Redis, Postgres)
+
+14. Hosting choice (section 10), domain, HTTPS (Caddy / Cloudflare),
+    hardening of section 3.2, secrets in the host's secret store,
+    Postgres backups, staging + production, CI/CD deploy from `main`,
+    monitoring and alerts (metrics; replace the hand-written circuit
+    breaker with `github.com/sony/gobreaker` v2 as noted before).
+
+**Phase 5 — users** (old phase 2, after deployment)
+
+15. `users` table, `/me` (Firebase email-link reminder in section 5.6).
+16. Plans in the database + payment webhook.
+17. Saved cart + saved-item price tracker (section 4b).
+18. Clicks + purchase reports.
+19. Notifications: inbox, devices, FCM push, background jobs (section 4c).
+
+**Later:** eBay Browse API and AliExpress affiliate API if the keys are
+approved; another SHEIN scraper (cheaper or Saudi site).
 
 ## 10. Hosting (not decided yet)
 
