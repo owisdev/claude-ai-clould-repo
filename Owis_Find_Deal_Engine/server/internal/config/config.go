@@ -25,7 +25,7 @@ type Config struct {
 	SerpAPIBaseURL         string // empty = SerpApi; for tests / outbound proxies
 	ProviderAttemptTimeout time.Duration
 	SerpAPITimeout         time.Duration // Google Shopping is slow
-	// SerpAPIMarkets use a dedicated SerpApi engine (e.g. "amazon": the
+	// SerpAPIMarkets use a dedicated SerpApi engine ("amazon", "ebay": the
 	// Amazon Search API) instead of the web providers, which stay as the
 	// fallback.
 	SerpAPIMarkets []string
@@ -181,10 +181,11 @@ func Load() (Config, error) {
 			}
 		}
 	}
-	// Amazon goes to SerpApi's Amazon engine by default once a key is set.
+	// Amazon and eBay go to SerpApi's own engines by default once a key is
+	// set (direct product links and prices instead of Google Shopping).
 	defaultSerpMarkets := ""
 	if cfg.SerpAPIKey != "" {
-		defaultSerpMarkets = "amazon"
+		defaultSerpMarkets = "amazon,ebay"
 	}
 	// Unlike other settings, an empty SERPAPI_MARKETS= means "none".
 	serpMarkets, set := os.LookupEnv("SERPAPI_MARKETS")
@@ -194,8 +195,8 @@ func Load() (Config, error) {
 	cfg.SerpAPIMarkets = splitList(strings.ToLower(serpMarkets))
 	for _, m := range cfg.SerpAPIMarkets {
 		switch {
-		case m != "amazon":
-			errs = append(errs, fmt.Errorf("SERPAPI_MARKETS: %q has no dedicated SerpApi engine (supported: amazon)", m))
+		case m != "amazon" && m != "ebay":
+			errs = append(errs, fmt.Errorf("SERPAPI_MARKETS: %q has no dedicated SerpApi engine (supported: amazon, ebay)", m))
 		case cfg.SerpAPIKey == "":
 			errs = append(errs, errors.New("SERPAPI_KEY is required when SERPAPI_MARKETS is set"))
 		case slices.Contains(cfg.ApifyMarkets, m):

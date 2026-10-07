@@ -156,7 +156,7 @@ func TestLoadSerpAPIMarkets(t *testing.T) {
 	t.Setenv("SERPAPI_KEY", "k")
 	t.Setenv("SEARCH_PROVIDERS", "serpapi,searxng")
 	cfg, err = Load()
-	if err != nil || len(cfg.SerpAPIMarkets) != 1 || cfg.SerpAPIMarkets[0] != "amazon" {
+	if err != nil || len(cfg.SerpAPIMarkets) != 2 || cfg.SerpAPIMarkets[0] != "amazon" || cfg.SerpAPIMarkets[1] != "ebay" {
 		t.Fatalf("default: %v, %v", cfg.SerpAPIMarkets, err)
 	}
 	// Longest path: SerpApi 25s + SearXNG 8s + 2s.

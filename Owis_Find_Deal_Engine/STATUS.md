@@ -32,7 +32,7 @@ rarely finds product pages; each shop needs its own source.
 | AliExpress | Apify `piotrv1001/aliexpress-listings-scraper` | ✅ 10 products, price, direct `/item/` links, ~40 s |
 | Temu | Apify `crw/temu-products-scraper` (US catalogue only) | ✅ 10 products, price, `goods.html?goods_id=` links; empty for some items |
 | SHEIN | Apify `clearpath/shein-product-scraper` (site `us`, needs `APIFY_MAX_CHARGE_USD`) | ✅ live 2026-10-07 (`usa`): 8 products, sale price, direct `-p-<id>.html` links |
-| eBay (usa, ksa) | fallback only | not tested yet |
+| eBay (usa, ksa) | SerpApi eBay engine (`serpapi-ebay`, on by default with `SERPAPI_KEY`; built 2026-10-07) | 🔧 tested with a sample response; live test pending |
 
 Example `m.2 enclosure` / `jor`: 31 products from 4 shops with prices,
 28.6 s live (both scrapers run in parallel), instant from cache.
@@ -152,7 +152,14 @@ location.
    `ar` / `sa` (Arab / Saudi site). If yes, report it: the input can use
    `{{country}}` and links would point to the local site.
 
-**Other open items:** eBay (usa, ksa: only the fallback today); loading
+**eBay (2026-10-07):** SerpApi's eBay engine (`engine=ebay`,
+`ebay_domain=ebay.com`) replaces Google Shopping for eBay: direct
+`/itm/<id>` links, eBay's price (lowest of a range), condition, shipping.
+Same cost as before (1 SerpApi search). Owner: live test `usa` and `ksa`
+and check that the response fields match (sample written from SerpApi's
+documented format). eBay Browse API (free) can replace it if the keys come.
+
+**Other open items:** loading
 bar in the app (first live search takes ~30–50 s; cached answers are
 instant); label scraper prices as approximate in the app.
 

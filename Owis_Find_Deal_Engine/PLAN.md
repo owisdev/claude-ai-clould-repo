@@ -98,6 +98,7 @@ type Provider interface {
 | Provider | Used for | Cost | Status |
 |---|---|---|---|
 | `serpapi-amazon` | **Amazon** via SerpApi's Amazon engine: price, rating, direct `/dp/` link | 1 SerpApi search per live search | ✅ default when `SERPAPI_KEY` is set (`SERPAPI_MARKETS`) |
+| `serpapi-ebay` | **eBay** via SerpApi's eBay engine: price, condition, shipping, direct `/itm/` link | 1 SerpApi search per live search | ✅ default when `SERPAPI_KEY` is set (`SERPAPI_MARKETS`); Browse API later if keys arrive |
 | `apify` | AliExpress / Temu / SHEIN scrapers from the Apify store (real prices, direct item links), per marketplace | $5 free credit/month, then ~$0.7–5 / 1,000 results | ✅ optional (`APIFY_MARKETS`; AliExpress tested) |
 | `serpapi` | **Google Shopping** (default) or Google web search, any market — see the comparison below | 250 free/month, then ~$25 / 1,000 | ✅ fallback for the shops above |
 | `searxng` (self-hosted) | site-restricted metasearch, any market | free | ✅ last fallback only: search engines block it quickly from one IP (seen in the local test) |

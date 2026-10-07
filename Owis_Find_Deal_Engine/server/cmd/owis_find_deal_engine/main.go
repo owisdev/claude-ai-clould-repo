@@ -266,8 +266,8 @@ func buildWebProvider(cfg config.Config, log *slog.Logger) (search.Provider, err
 }
 
 // addSerpAPIMarkets routes each marketplace in SERPAPI_MARKETS to its
-// dedicated SerpApi engine (Amazon Search API), with the web providers as
-// fallback when it fails.
+// dedicated SerpApi engine (Amazon / eBay Search API), with the web
+// providers as fallback when it fails.
 func addSerpAPIMarkets(cfg config.Config, catalog *markets.Catalog, providers map[string]search.Provider,
 	web search.Provider, log *slog.Logger) (*markets.Catalog, error) {
 	if len(cfg.SerpAPIMarkets) == 0 {
@@ -275,12 +275,24 @@ func addSerpAPIMarkets(cfg config.Config, catalog *markets.Catalog, providers ma
 	}
 	overrides := make(map[string]string, len(cfg.SerpAPIMarkets))
 	for _, m := range cfg.SerpAPIMarkets {
-		amazon, err := serpapi.NewAmazon(serpapi.Config{APIKey: cfg.SerpAPIKey, BaseURL: cfg.SerpAPIBaseURL,
-			Combined: cfg.SearchCombined, HTTPClient: &http.Client{Timeout: cfg.SerpAPITimeout}})
+		sc := serpapi.Config{APIKey: cfg.SerpAPIKey, BaseURL: cfg.SerpAPIBaseURL,
+			Combined: cfg.SearchCombined, HTTPClient: &http.Client{Timeout: cfg.SerpAPITimeout}}
+		var (
+			engine search.Provider
+			err    error
+		)
+		switch m {
+		case "amazon":
+			engine, err = serpapi.NewAmazon(sc)
+		case "ebay":
+			engine, err = serpapi.NewEbay(sc)
+		default:
+			err = fmt.Errorf("SERPAPI_MARKETS: no dedicated engine for %q", m)
+		}
 		if err != nil {
 			return nil, err
 		}
-		chain, err := search.NewFallback([]search.Provider{amazon, web}, search.FallbackOptions{
+		chain, err := search.NewFallback([]search.Provider{engine, web}, search.FallbackOptions{
 			AttemptTimeout:   cfg.SerpAPITimeout,
 			Timeouts:         map[string]time.Duration{web.Name(): cfg.SearchTimeout},
 			FailureThreshold: cfg.ProviderFailThreshold,
@@ -289,10 +301,10 @@ func addSerpAPIMarkets(cfg config.Config, catalog *markets.Catalog, providers ma
 		if err != nil {
 			return nil, err
 		}
-		name := amazon.Name()
+		name := engine.Name()
 		providers[name] = chain
 		overrides[m] = name
-		log.Info("dedicated SerpApi engine enabled", "market", m, "engine", serpapi.EngineAmazon)
+		log.Info("dedicated SerpApi engine enabled", "market", m, "provider", name)
 	}
 	return catalog.WithProviders(overrides)
 }
