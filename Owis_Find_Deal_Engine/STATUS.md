@@ -51,7 +51,7 @@ APIFY_TEMU_INPUT={"keyword":"{{query}}","max_items":{{max}},"region":"US","sort"
 # SHEIN (added 2026-10-07, not yet tested live): add ",shein" to APIFY_MARKETS
 APIFY_SHEIN_ACTOR=clearpath/shein-product-scraper
 APIFY_SHEIN_INPUT={"enrichDetails":false,"maxItemsPerSearch":{{max}},"quickShip":false,"searchTerms":["{{query}}"],"site":"us","sortBy":"recommend","category":""}
-APIFY_TIMEOUT=60s
+APIFY_TIMEOUT=90s          # 60s was too short for AliExpress sometimes
 APIFY_MAX_CHARGE_USD=0.20   # cost cap per run, needed by per-event scrapers (SHEIN)
 APIFY_EMPTY_FALLBACK=false   # nothing relevant from a scraper = no results (no extra time or SerpApi search)
 ```
@@ -84,6 +84,12 @@ took 67 s (limit 70 s) — probably the AliExpress scraper hit
 3 SerpApi credits (Amazon, eBay, AliExpress fallback) + ~$0.16 Apify
 (per-run breakdown pending). $5/month free Apify credit ≈ 30 live
 searches — cached answers are free.
+
+With `APIFY_TIMEOUT=90s` (`iphone 18 max case` / `jor`): all 4 shops OK,
+no fallback, 36 s, 1 SerpApi credit (Amazon only). SHEIN links stay on
+`us.shein.com`. Open: AliExpress items came without `currency` in this
+run (had `USD` before) — need one raw dataset item; per-run Apify costs
+still to check (balance $1.66 left).
 
 Scraper: `clearpath/shein-product-scraper`. Its items carry the sale price
 as `price.current` (flat, as the console exports it) or
