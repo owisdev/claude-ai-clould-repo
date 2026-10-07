@@ -96,7 +96,13 @@ $0.17, SHEIN shahidirfan $0.04. Temu and SHEIN are the cost drivers;
 cost per run still to work out (runs per Actor). SHEIN run from the
 service: 10 results, 8 s, **$0.066** (≈ $0.0066 per result, billed per
 event). SHEIN links in `jor` open on `us.shein.com` with the same price
-as returned ($3.00) — accepted.
+as returned ($3.00) — accepted. Temu run: 10 results, 12 s, **$0.100**
+($0.01 per result). AliExpress ≈ $0.02 per run (estimate from the total).
+
+**Cost of one live search (10 results per shop): ≈ $0.19 Apify + 1 SerpApi
+search (Amazon).** $3.34 left this month ≈ 17 live test searches; cached
+answers are free. Levers if needed: fewer results per shop for Temu /
+SHEIN (per-shop limit, not built yet), longer cache for scraper shops.
 
 Scraper: `clearpath/shein-product-scraper`. Its items carry the sale price
 as `price.current` (flat, as the console exports it) or
