@@ -311,3 +311,54 @@ func TestToProductsDropsIrrelevantItems(t *testing.T) {
 		t.Errorf("got %+v", got)
 	}
 }
+
+func TestSheinProductScraperOutput(t *testing.T) {
+	// Output of clearpath/shein-product-scraper (search "ssd usb 3.0
+	// enclosure", site "us"): sale price in "price.current" next to the
+	// price before discount. The API may return the same fields nested.
+	link := "https://us.shein.com/2-5-SATA-To-USB-3-1-10Gbps-Hard-Drive-Enclosure-For-SSD-HDD-USB-C-3-1-Gen-2-Interface-External-Hard-Drive-Enclosure-Hard-Drive-Not-Included-Christmas-New-Year-Holiday-Gift-Christmas-Special-p-30396385.html"
+	image := "https://img.ltwebstatic.com/images3_spmp/2024/02/22/9e/17085748121263b2f8947b0035b101543655b1fa4f_square_thumbnail_405x552.jpg"
+	flat := map[string]any{
+		"productId":                "30396385",
+		"name":                     "2.5\" SATA To USB 3.1 10Gbps Hard Drive Enclosure, For SSD/HDD, USB-C 3.1 Gen 2 Interface, External Hard Drive Enclosure (Hard Drive Not Included)",
+		"url":                      link,
+		"price.current":            6.7,
+		"price.original":           8.3,
+		"price.currency":           "USD",
+		"price.discountPercent":    19.0,
+		"image":                    image,
+		"images":                   []any{"https://img.ltwebstatic.com/images3_spmp/other.jpg"},
+		"inStock":                  true,
+		"store.businessModelLabel": "SHEIN-fulfilled",
+	}
+	nested := map[string]any{
+		"productId": "30396385",
+		"name":      flat["name"],
+		"url":       link,
+		"price":     map[string]any{"current": 6.7, "original": 8.3, "currency": "USD", "discountPercent": 19.0},
+		"image":     image,
+	}
+	cat, _ := markets.Load("")
+	for _, code := range []string{"usa", "ksa", "jor"} {
+		country, _ := cat.Country(code)
+		var shein markets.Target
+		for _, tg := range country.Targets {
+			if tg.Market == "shein" {
+				shein = tg
+			}
+		}
+		for name, item := range map[string]map[string]any{"flat": flat, "nested": nested} {
+			got := toProducts([]map[string]any{item}, "ssd usb 3.0 enclosure", shein, 10)
+			if len(got) != 1 {
+				t.Fatalf("%s/%s: got %+v", code, name, got)
+			}
+			p := got[0]
+			if p.Link != link || p.Thumbnail != image || p.Market != "shein" {
+				t.Errorf("%s/%s: product = %+v", code, name, p)
+			}
+			if p.Price == nil || *p.Price != 6.7 || p.Currency != "USD" {
+				t.Errorf("%s/%s: price = %v %q, want 6.7 USD (sale price)", code, name, p.Price, p.Currency)
+			}
+		}
+	}
+}

@@ -302,7 +302,7 @@ func (e *Entry) response(stale bool) *search.Result {
 // resultsVersion is part of every cache key. Bump it whenever the way
 // results are found or filtered changes (relevance, duplicates, links), so
 // answers cached by an older build are not served after an upgrade.
-const resultsVersion = "v4"
+const resultsVersion = "v5"
 
 // key identifies a search: country, the catalog version, the search setup
 // (Variant) and marketplace domains (so editing markets.json or changing

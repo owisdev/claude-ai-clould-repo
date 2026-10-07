@@ -1,6 +1,6 @@
 # Project status and handoff
 
-Last updated: 2026-10-06 · Branch: `claude/cloud-vs-local-7xi988`
+Last updated: 2026-10-07 · Branch: `claude/cloud-vs-local-7xi988`
 (not merged into `main` yet).
 
 Read first: [docs/architecture.pdf](docs/architecture.pdf) — the full
@@ -31,7 +31,7 @@ rarely finds product pages; each shop needs its own source.
 | Amazon | SerpApi Amazon engine (on by default with `SERPAPI_KEY`) | ✅ ~10 products, price, rating, direct `/dp/` links, ~3 s |
 | AliExpress | Apify `piotrv1001/aliexpress-listings-scraper` | ✅ 10 products, price, direct `/item/` links, ~40 s |
 | Temu | Apify `crw/temu-products-scraper` (US catalogue only) | ✅ 10 products, price, `goods.html?goods_id=` links; empty for some items |
-| SHEIN | fallback only: Google Shopping (price, shop-search link) / SearXNG (direct link, no price) | ⚠️ few results — a SHEIN Apify scraper is the next step |
+| SHEIN | Apify `clearpath/shein-product-scraper` (site `us`) | 🔧 output mapped and tested with the owner's sample (2026-10-07); live retest pending |
 | eBay (usa, ksa) | fallback only | not tested yet |
 
 Example `m.2 enclosure` / `jor`: 31 products from 4 shops with prices,
@@ -48,6 +48,9 @@ APIFY_ALIEXPRESS_ACTOR=piotrv1001/aliexpress-listings-scraper
 APIFY_ALIEXPRESS_INPUT={"maxResults":{{max}},"searchQueries":["{{query}}"],"proxyConfiguration":{"useApifyProxy":true}}
 APIFY_TEMU_ACTOR=crw/temu-products-scraper
 APIFY_TEMU_INPUT={"keyword":"{{query}}","max_items":{{max}},"region":"US","sort":"relevance"}
+# SHEIN (added 2026-10-07, not yet tested live): add ",shein" to APIFY_MARKETS
+APIFY_SHEIN_ACTOR=clearpath/shein-product-scraper
+APIFY_SHEIN_INPUT={"enrichDetails":false,"maxItemsPerSearch":{{max}},"quickShip":false,"searchTerms":["{{query}}"],"site":"us","sortBy":"recommend","category":""}
 APIFY_TIMEOUT=60s
 APIFY_EMPTY_FALLBACK=false   # nothing relevant from a scraper = no results (no extra time or SerpApi search)
 ```
@@ -65,22 +68,30 @@ ends as `no_results` (`APIFY_EMPTY_FALLBACK=false`, ~42 s instead of ~52 s
 for "EAGET JHL7440"); cache keys carry a results version (`v4`), so a
 rebuild drops answers cached by an older build.
 
-## Next session: start with SHEIN
+## SHEIN (2026-10-07): mapped, waiting for the owner's live test
 
-1. Owner picks a SHEIN scraper in the Apify store, runs it once in the
-   console with a keyword (e.g. `phone case`), and checks the products.
-   Candidates: `scrapelabsapi/shein-search-products-scraper`,
-   `abotapi/shein-product-scraper` (or any with good results). Prefer one
-   that supports the Saudi / Arab site (`ar.shein.com`) or a country code.
-2. Owner sends: the scraper name, its Input JSON (console → Input → JSON)
-   and one or two output items (as for Temu). Never the token.
-3. Claude: map its output fields (title, link, price label vs cents,
-   image) in `internal/providers/apify`, check SHEIN product links
-   (`…-p-<id>.html`) in `markets.json`, add a test with the real output,
-   give the `.env` lines: `APIFY_MARKETS=aliexpress,temu,shein`,
-   `APIFY_SHEIN_ACTOR=…`, `APIFY_SHEIN_INPUT=…`; bump `resultsVersion`
-   in `internal/cache/cache.go` if result handling changed.
-4. Owner retests `jor` and `ksa` (SHEIN domain `ar.shein.com`).
+Scraper: `clearpath/shein-product-scraper`. Its items carry the sale price
+as `price.current` (flat, as the console exports it) or
+`{"price": {"current": …, "original": …, "currency": "USD"}}` (nested);
+both are read, and the price before discount (`original`) is never used.
+Title = `name`, link = `url` (`…-p-<id>.html`, already accepted by
+`markets.json`), image = `image`. Test: `TestSheinProductScraperOutput`
+(usa, ksa, jor). Cache results version bumped to `v5`.
+
+Links point to `us.shein.com` also for `ksa` / `jor` (prices are US prices,
+same accepted limit as AliExpress / Temu); SHEIN usually redirects by
+location.
+
+**Owner, next:**
+
+1. In `.env`: `APIFY_MARKETS=aliexpress,temu,shein` and the two
+   `APIFY_SHEIN_*` lines above, then `docker compose up -d --build`.
+2. Search `usa`, `ksa`, `jor` (e.g. `ssd usb 3.0 enclosure`,
+   `phone case`): do SHEIN products appear with price and working links?
+   How long does the search take now (3 scrapers run in parallel)?
+3. Check in the Apify console whether the scraper's `site` field offers
+   `ar` / `sa` (Arab / Saudi site). If yes, report it: the input can use
+   `{{country}}` and links would point to the local site.
 
 **Other open items:** eBay (usa, ksa: only the fallback today); loading
 bar in the app (first live search takes ~30–50 s; cached answers are
@@ -96,8 +107,7 @@ Open the repository and say:
 
 > Continue the Owis_Find_Deal_Engine project from
 > `Owis_Find_Deal_Engine/STATUS.md` on branch `claude/cloud-vs-local-7xi988`.
-> Start with SHEIN: here is the scraper name, its input JSON and sample
-> output: …
+> SHEIN live test results: …
 
 ## Run it on your PC
 

@@ -225,10 +225,12 @@ var (
 	linkKeys  = []string{"url", "link", "productUrl", "product_url", "goods_url", "goodsUrl", "detailUrl", "detail_url",
 		"link_url", "linkUrl"}
 	// Formatted labels first: some scrapers give "price" in cents
-	// (Temu: "price": 10361 with "price_str": "$103.61").
+	// (Temu: "price": 10361 with "price_str": "$103.61"). "price.current"
+	// is the flattened form of {"price": {"current": 6.7, "original": 8.3}}
+	// (SHEIN, as the Apify console exports it).
 	priceKeys = []string{"price_str", "priceStr", "price_text", "priceText", "formatted_price", "formattedPrice",
-		"price", "salePrice", "sale_price", "currentPrice", "current_price", "finalPrice", "retailPrice", "extracted_price"}
-	currencyKeys = []string{"currency", "currencyCode", "currency_code", "priceCurrency"}
+		"price.current", "price", "salePrice", "sale_price", "currentPrice", "current_price", "finalPrice", "retailPrice", "extracted_price"}
+	currencyKeys = []string{"currency", "currencyCode", "currency_code", "priceCurrency", "price.currency"}
 	imageKeys    = []string{"image", "imageUrl", "image_url", "thumbnail", "img", "goods_img", "goodsImg", "mainImage", "main_image", "images", "imageUrls"}
 )
 
@@ -327,7 +329,8 @@ func parsePrice(v any) (float64, string, bool) {
 		if cur == "" {
 			cur = asString(x["currencyCode"])
 		}
-		for _, k := range []string{"amount", "value", "price", "amountWithSymbol"} {
+		// "current" is the sale price; "original" (before discount) is never used.
+		for _, k := range []string{"amount", "value", "price", "current", "amountWithSymbol"} {
 			if p, c, ok := parsePrice(x[k]); ok {
 				if cur == "" {
 					cur = c
