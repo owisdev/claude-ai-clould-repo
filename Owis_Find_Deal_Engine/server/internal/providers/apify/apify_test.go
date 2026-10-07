@@ -367,3 +367,26 @@ func TestSheinProductScraperOutput(t *testing.T) {
 		}
 	}
 }
+
+func TestDefaultCurrency(t *testing.T) {
+	// piotrv1001/aliexpress-listings-scraper (jor test): "currency": null.
+	items := `[
+	  {"title": "Magnetic Case For iPhone 18 Pro Max", "productUrl": "https://www.aliexpress.com/item/1005013288928197.html",
+	   "price": 10.42, "currency": null, "imageUrl": "https://ae-pic-a1.aliexpress-media.com/kf/S1.jpg"},
+	  {"title": "Clear Case For iPhone 18 Pro Max", "productUrl": "https://www.aliexpress.com/item/2.html",
+	   "price": "SAR 9.50"},
+	  {"title": "Case For iPhone 18 Pro Max", "productUrl": "https://www.aliexpress.com/item/3.html"}
+	]`
+	srv := newServer(t, http.StatusCreated, items, nil)
+	c, _ := New(Config{Token: "tok", Actor: "piotrv1001/aliexpress-listings-scraper", InputTemplate: temuTemplate,
+		BaseURL: srv.URL, Currency: "USD"})
+	got, err := c.Search(context.Background(), search.Query{Title: "iphone 18 max case",
+		Targets: []markets.Target{{Market: "aliexpress", Domain: "aliexpress.com"}}})
+	if err != nil || len(got) != 3 {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+	if got[0].Currency != "USD" || got[1].Currency != "SAR" || got[2].Currency != "" {
+		t.Errorf("currencies = %q %q %q, want USD (default), SAR (own), empty (no price)",
+			got[0].Currency, got[1].Currency, got[2].Currency)
+	}
+}

@@ -46,6 +46,7 @@ SERPAPI_ENGINE=google_shopping
 APIFY_MARKETS=aliexpress,temu
 APIFY_ALIEXPRESS_ACTOR=piotrv1001/aliexpress-listings-scraper
 APIFY_ALIEXPRESS_INPUT={"maxResults":{{max}},"searchQueries":["{{query}}"],"proxyConfiguration":{"useApifyProxy":true}}
+APIFY_ALIEXPRESS_CURRENCY=USD   # the scraper returns "currency": null
 APIFY_TEMU_ACTOR=crw/temu-products-scraper
 APIFY_TEMU_INPUT={"keyword":"{{query}}","max_items":{{max}},"region":"US","sort":"relevance"}
 # SHEIN (added 2026-10-07, not yet tested live): add ",shein" to APIFY_MARKETS
@@ -87,9 +88,11 @@ searches — cached answers are free.
 
 With `APIFY_TIMEOUT=90s` (`iphone 18 max case` / `jor`): all 4 shops OK,
 no fallback, 36 s, 1 SerpApi credit (Amazon only). SHEIN links stay on
-`us.shein.com`. Open: AliExpress items came without `currency` in this
-run (had `USD` before) — need one raw dataset item; per-run Apify costs
-still to check (balance $1.66 left).
+`us.shein.com`. AliExpress: the scraper returns `"currency": null`
+(prices are US prices; the page in Jordan showed JD 1.52 vs $10.42 from
+the scraper — new-shopper / deal prices are not returned, accepted) →
+new optional `APIFY_<MARKET>_CURRENCY` (`APIFY_ALIEXPRESS_CURRENCY=USD`).
+Per-run Apify costs still to check (balance $1.66 left).
 
 Scraper: `clearpath/shein-product-scraper`. Its items carry the sale price
 as `price.current` (flat, as the console exports it) or

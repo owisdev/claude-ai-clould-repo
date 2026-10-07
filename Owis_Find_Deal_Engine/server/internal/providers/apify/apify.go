@@ -49,6 +49,10 @@ type Config struct {
 	// Without it such runs were aborted at once: "reached its maximum
 	// cost of $0.00". 0 = not sent.
 	MaxChargeUSD float64
+	// Currency is used for prices the scraper gives without a currency
+	// (piotrv1001/aliexpress-listings-scraper: "currency": null; its
+	// prices are US prices). Empty = leave the currency empty.
+	Currency string
 	// Combined only mirrors the search mode so this provider can be chained
 	// with the web providers; each run searches one marketplace.
 	Combined bool
@@ -162,7 +166,13 @@ func (c *Client) run(ctx context.Context, q search.Query, t markets.Target) ([]s
 	if err := json.Unmarshal(body, &items); err != nil {
 		return nil, fmt.Errorf("apify %s: decode items: %w", c.cfg.Actor, err)
 	}
-	return toProducts(items, q.Title, t, c.cfg.MaxItems), nil
+	products := toProducts(items, q.Title, t, c.cfg.MaxItems)
+	for i := range products {
+		if products[i].Price != nil && products[i].Currency == "" {
+			products[i].Currency = c.cfg.Currency
+		}
+	}
+	return products, nil
 }
 
 // hasQuery reports whether a template contains one of the query placeholders.

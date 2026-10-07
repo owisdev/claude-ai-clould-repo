@@ -35,6 +35,7 @@ type Config struct {
 	ApifyMarkets          []string          // e.g. temu,shein
 	ApifyActors           map[string]string // market -> "owner~actor-name"
 	ApifyInputs           map[string]string // market -> input JSON template with {{query}}
+	ApifyCurrencies       map[string]string // market -> currency for prices given without one
 	ApifyMaxItems         int
 	ApifyTimeout          time.Duration
 	ApifyMaxChargeUSD     float64 // max cost of one pay-per-event run; 0 = not sent
@@ -100,6 +101,7 @@ func Load() (Config, error) {
 		ApifyMarkets:              splitList(strings.ToLower(os.Getenv("APIFY_MARKETS"))),
 		ApifyActors:               map[string]string{},
 		ApifyInputs:               map[string]string{},
+		ApifyCurrencies:           map[string]string{},
 		ApifyMaxItems:             parse(&errs, "APIFY_MAX_ITEMS", 10, strconv.Atoi),
 		ApifyEmptyFallback:        parse(&errs, "APIFY_EMPTY_FALLBACK", false, strconv.ParseBool),
 		ApifyTimeout:              parse(&errs, "APIFY_TIMEOUT", 60*time.Second, time.ParseDuration),
@@ -165,6 +167,7 @@ func Load() (Config, error) {
 			key := "APIFY_" + strings.ToUpper(m)
 			cfg.ApifyActors[m] = os.Getenv(key + "_ACTOR")
 			cfg.ApifyInputs[m] = os.Getenv(key + "_INPUT")
+			cfg.ApifyCurrencies[m] = strings.TrimSpace(os.Getenv(key + "_CURRENCY"))
 			in := cfg.ApifyInputs[m]
 			if cfg.ApifyActors[m] == "" || !(strings.Contains(in, "{{query}}") || strings.Contains(in, "{{query_url}}") || strings.Contains(in, "{{query_path}}") || strings.Contains(in, "{{query_slug}}")) {
 				errs = append(errs, fmt.Errorf("%s_ACTOR and %s_INPUT (JSON containing {{query}}, {{query_url}}, {{query_path}} or {{query_slug}}) are required for %s", key, key, m))
