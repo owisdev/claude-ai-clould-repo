@@ -52,7 +52,7 @@ APIFY_TEMU_INPUT={"keyword":"{{query}}","max_items":10,"region":"US","sort":"rel
 # SHEIN (added 2026-10-07, not yet tested live): add ",shein" to APIFY_MARKETS
 APIFY_SHEIN_ACTOR=clearpath/shein-product-scraper
 APIFY_SHEIN_INPUT={"enrichDetails":false,"maxItemsPerSearch":{{max}},"quickShip":false,"searchTerms":["{{query}}"],"site":"us","sortBy":"recommend","category":""}
-APIFY_TEMU_MAX_ITEMS=5     # $0.01 per result
+APIFY_TEMU_MAX_ITEMS=10    # charged for 10 anyway ($0.10 per run)
 APIFY_SHEIN_MAX_ITEMS=5    # $0.0066 per result
 APIFY_TIMEOUT=90s          # 60s was too short for AliExpress sometimes
 APIFY_MAX_CHARGE_USD=0.20   # cost cap per run, needed by per-event scrapers (SHEIN)
@@ -105,11 +105,11 @@ as returned ($3.00) — accepted. Temu run: 10 results, 12 s, **$0.100**
 search (Amazon).** $3.34 left this month ≈ 17 live test searches; cached
 answers are free.
 
-**Owner decisions (2026-10-07), built:** Temu and SHEIN 5 results per
-search (`APIFY_TEMU_MAX_ITEMS=5`, `APIFY_SHEIN_MAX_ITEMS=5`; ≈ $0.08
-instead of $0.17 for both) and cache fresh for 48 h (`CACHE_FRESH_TTL=48h`,
+**Owner decisions (2026-10-07), built:** SHEIN 5 results per search
+(`APIFY_SHEIN_MAX_ITEMS=5`; Temu stays at 10, see below — its scraper
+charges for at least 10 anyway) and cache fresh for 48 h (`CACHE_FRESH_TTL=48h`,
 `CACHE_STALE_TTL=72h`; now the defaults). Expected live search ≈ $0.10
-Apify + 1 SerpApi search, then free for 48 h.
+Apify + 1–2 SerpApi searches, then free for 48 h.
 
 **Apify platform prices (owner's account, 2026-10-07) — what they mean
 for us.** Two ways an Actor is billed:
@@ -196,14 +196,20 @@ whose title is only the shop name are dropped. Cache version `v6`.
 
 Retest (`fast charger type c` / `jor`): ✅ all 4 shops, no fallback, 26 s,
 1 SerpApi credit (Amazon). Temu 4 + SHEIN 5 results (limit 5). Apify
-cost of the search ≈ $0.16 ($2.25 → $2.41) — more than the ≈ $0.10
-expected, so Temu probably still charges for 10 (check that Temu run's
-cost: $0.05 = cap works, $0.10 = set `APIFY_TEMU_MAX_ITEMS=10`).
-Open: many AliExpress prices are $0.33 / $1.09 — likely new-user
-"welcome deal" prices, not what most users pay; check one link before
-deciding (filter, label, or other price field).
+cost of the search ≈ $0.16 ($2.25 → $2.41). Confirmed: the Temu run cost
+$0.100 for 10 results although only 5 were kept — `crw/temu-products-scraper`
+charges for every result it scrapes (min 10), the run's `maxItems` does not
+cap it. → `APIFY_TEMU_MAX_ITEMS=10` (same price, all 10 shown).
+AliExpress: many prices ($0.33, $1.09; page in Jordan "JD0.77, save
+JD3.77", timed) are new-shopper **welcome deals** — not what most users
+pay. Decision: nothing in the service; **the app shows a note** (e.g.
+"AliExpress prices may be new-shopper offers").
 
-**Other open items:** loading
+**Cost of one live search now: ≈ $0.155 Apify** (Temu $0.10 for 10, SHEIN
+≈ $0.033 for 5, AliExpress ≈ $0.02) **+ SerpApi** (1 search in `jor`:
+Amazon; 2 in `usa` / `ksa`: Amazon + eBay), then free for 48 h (cache).
+
+**Other open items:** app note on AliExpress welcome-deal prices; loading
 bar in the app (first live search takes ~30–50 s; cached answers are
 instant); label scraper prices as approximate in the app.
 
