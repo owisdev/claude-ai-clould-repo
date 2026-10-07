@@ -311,7 +311,7 @@ func addApifyProviders(cfg config.Config, catalog *markets.Catalog, providers ma
 			Token:         cfg.ApifyToken,
 			Actor:         cfg.ApifyActors[m],
 			InputTemplate: cfg.ApifyInputs[m],
-			MaxItems:      cfg.ApifyMaxItems,
+			MaxItems:      cfg.ApifyMarketMaxItems[m],
 			Timeout:       cfg.ApifyTimeout,
 			MaxChargeUSD:  cfg.ApifyMaxChargeUSD,
 			Currency:      cfg.ApifyCurrencies[m],
@@ -336,7 +336,7 @@ func addApifyProviders(cfg config.Config, catalog *markets.Catalog, providers ma
 		name := "apify-" + m
 		providers[name] = chain
 		overrides[m] = name
-		log.Info("apify scraper enabled", "market", m, "actor", cfg.ApifyActors[m],
+		log.Info("apify scraper enabled", "market", m, "actor", cfg.ApifyActors[m], "max_items", cfg.ApifyMarketMaxItems[m],
 			"timeout", cfg.ApifyTimeout.String(), "search_timeout", cfg.SearchTimeout.String())
 	}
 	return catalog.WithProviders(overrides)

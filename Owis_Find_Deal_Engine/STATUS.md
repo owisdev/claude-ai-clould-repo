@@ -16,8 +16,8 @@ local test changes below (dedicated sources per shop).
 - Countries `usa`, `ksa`, `jor` → only the shops that deliver there
   ([markets.json](server/internal/markets/markets.json)).
 - Login required: JWT from the auth provider, verified locally (JWKS).
-- Cache with price-freshness strategy (fresh 2h, stale-while-revalidate
-  up to 24h, pull-to-refresh). **Cached answers are free** for users.
+- Cache with price-freshness strategy (fresh 48h, stale-while-revalidate
+  up to 72h, pull-to-refresh; was 2h / 24h until 2026-10-07). **Cached answers are free** for users.
 - Daily allowance per plan: free plan used up → 402, paid → 429.
 - Docker image + full stack in `docker-compose.yml` on private networks.
 
@@ -52,6 +52,8 @@ APIFY_TEMU_INPUT={"keyword":"{{query}}","max_items":{{max}},"region":"US","sort"
 # SHEIN (added 2026-10-07, not yet tested live): add ",shein" to APIFY_MARKETS
 APIFY_SHEIN_ACTOR=clearpath/shein-product-scraper
 APIFY_SHEIN_INPUT={"enrichDetails":false,"maxItemsPerSearch":{{max}},"quickShip":false,"searchTerms":["{{query}}"],"site":"us","sortBy":"recommend","category":""}
+APIFY_TEMU_MAX_ITEMS=5     # $0.01 per result
+APIFY_SHEIN_MAX_ITEMS=5    # $0.0066 per result
 APIFY_TIMEOUT=90s          # 60s was too short for AliExpress sometimes
 APIFY_MAX_CHARGE_USD=0.20   # cost cap per run, needed by per-event scrapers (SHEIN)
 APIFY_EMPTY_FALLBACK=false   # nothing relevant from a scraper = no results (no extra time or SerpApi search)
@@ -101,8 +103,18 @@ as returned ($3.00) — accepted. Temu run: 10 results, 12 s, **$0.100**
 
 **Cost of one live search (10 results per shop): ≈ $0.19 Apify + 1 SerpApi
 search (Amazon).** $3.34 left this month ≈ 17 live test searches; cached
-answers are free. Levers if needed: fewer results per shop for Temu /
-SHEIN (per-shop limit, not built yet), longer cache for scraper shops.
+answers are free.
+
+**Owner decisions (2026-10-07), built:** Temu and SHEIN 5 results per
+search (`APIFY_TEMU_MAX_ITEMS=5`, `APIFY_SHEIN_MAX_ITEMS=5`; ≈ $0.08
+instead of $0.17 for both) and cache fresh for 48 h (`CACHE_FRESH_TTL=48h`,
+`CACHE_STALE_TTL=72h`; now the defaults). Expected live search ≈ $0.10
+Apify + 1 SerpApi search, then free for 48 h.
+
+**SHEIN local site (open):** the Apify store assistant said a SHEIN
+scraper supports `sa` and `ae` (not `ar`) — but it named the "SHEIN Store
+Promotion Scraper", not `clearpath/shein-product-scraper`, so unverified.
+To check: one console run of clearpath with `"site": "sa"`.
 
 Scraper: `clearpath/shein-product-scraper`. Its items carry the sale price
 as `price.current` (flat, as the console exports it) or

@@ -116,8 +116,8 @@ not matter), in Redis when `REDIS_URL` is set:
 
 | Age of the cached answer | What happens | `X-Cache` |
 |---|---|---|
-| < `CACHE_FRESH_TTL` (2h) | served from cache | `HIT` |
-| up to `CACHE_STALE_TTL` (24h) | served instantly, refreshed in the background for the next user | `STALE` |
+| < `CACHE_FRESH_TTL` (48h) | served from cache | `HIT` |
+| up to `CACHE_STALE_TTL` (72h) | served instantly, refreshed in the background for the next user | `STALE` |
 | older / not cached | fetched live | `MISS` |
 
 - Results with a failed shop are fresh only 10 min, empty results 30 min.

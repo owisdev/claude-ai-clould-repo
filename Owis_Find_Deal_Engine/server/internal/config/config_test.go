@@ -30,7 +30,7 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.SerpAPIEngine != "google_shopping" || len(cfg.ApifyMarkets) != 0 {
 		t.Errorf("unexpected engine/apify defaults: %+v", cfg)
 	}
-	if !cfg.CacheEnabled || cfg.CacheFreshTTL != 2*time.Hour || cfg.CacheStaleTTL != 24*time.Hour {
+	if !cfg.CacheEnabled || cfg.CacheFreshTTL != 48*time.Hour || cfg.CacheStaleTTL != 72*time.Hour {
 		t.Errorf("unexpected cache defaults: %+v", cfg)
 	}
 	if len(cfg.CORSOrigins) != 2 {
@@ -81,7 +81,7 @@ func TestLoadCacheValidation(t *testing.T) {
 	t.Setenv("SEARCH_PROVIDERS", "searxng")
 	t.Setenv("SEARXNG_URL", "http://s")
 
-	t.Setenv("CACHE_FRESH_TTL", "48h") // longer than the 24h stale TTL
+	t.Setenv("CACHE_FRESH_TTL", "96h") // longer than the 72h stale TTL
 	if _, err := Load(); err == nil {
 		t.Error("fresh TTL longer than stale TTL accepted")
 	}
@@ -113,12 +113,20 @@ func TestLoadApify(t *testing.T) {
 	}
 
 	t.Setenv("APIFY_SHEIN_INPUT", `{"searchQueries":["{{query}}"]}`)
+	t.Setenv("APIFY_SHEIN_MAX_ITEMS", "0")
+	if _, err := Load(); err == nil {
+		t.Fatal("APIFY_SHEIN_MAX_ITEMS=0 accepted")
+	}
+	t.Setenv("APIFY_SHEIN_MAX_ITEMS", "5")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	if cfg.ApifyActors["temu"] != "someone~temu" || cfg.ApifyInputs["shein"] == "" {
 		t.Errorf("apify config = %+v %+v", cfg.ApifyActors, cfg.ApifyInputs)
+	}
+	if cfg.ApifyMarketMaxItems["shein"] != 5 || cfg.ApifyMarketMaxItems["temu"] != 10 {
+		t.Errorf("max items per market = %v, want shein 5, temu 10 (APIFY_MAX_ITEMS)", cfg.ApifyMarketMaxItems)
 	}
 	// 60s Apify + 8s web fallback + 2s margin.
 	if cfg.SearchTimeout != 70*time.Second {

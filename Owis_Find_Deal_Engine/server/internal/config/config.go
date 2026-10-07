@@ -36,6 +36,7 @@ type Config struct {
 	ApifyActors           map[string]string // market -> "owner~actor-name"
 	ApifyInputs           map[string]string // market -> input JSON template with {{query}}
 	ApifyCurrencies       map[string]string // market -> currency for prices given without one
+	ApifyMarketMaxItems   map[string]int    // market -> results per run (default ApifyMaxItems)
 	ApifyMaxItems         int
 	ApifyTimeout          time.Duration
 	ApifyMaxChargeUSD     float64 // max cost of one pay-per-event run; 0 = not sent
@@ -102,6 +103,7 @@ func Load() (Config, error) {
 		ApifyActors:               map[string]string{},
 		ApifyInputs:               map[string]string{},
 		ApifyCurrencies:           map[string]string{},
+		ApifyMarketMaxItems:       map[string]int{},
 		ApifyMaxItems:             parse(&errs, "APIFY_MAX_ITEMS", 10, strconv.Atoi),
 		ApifyEmptyFallback:        parse(&errs, "APIFY_EMPTY_FALLBACK", false, strconv.ParseBool),
 		ApifyTimeout:              parse(&errs, "APIFY_TIMEOUT", 60*time.Second, time.ParseDuration),
@@ -111,10 +113,10 @@ func Load() (Config, error) {
 		ProviderFailThreshold:     parse(&errs, "PROVIDER_FAILURE_THRESHOLD", 3, strconv.Atoi),
 		ProviderCooldown:          parse(&errs, "PROVIDER_COOLDOWN", time.Minute, time.ParseDuration),
 		CacheEnabled:              parse(&errs, "CACHE_ENABLED", true, strconv.ParseBool),
-		CacheFreshTTL:             parse(&errs, "CACHE_FRESH_TTL", 2*time.Hour, time.ParseDuration),
+		CacheFreshTTL:             parse(&errs, "CACHE_FRESH_TTL", 48*time.Hour, time.ParseDuration),
 		CachePartialTTL:           parse(&errs, "CACHE_PARTIAL_TTL", 10*time.Minute, time.ParseDuration),
 		CacheEmptyTTL:             parse(&errs, "CACHE_EMPTY_TTL", 30*time.Minute, time.ParseDuration),
-		CacheStaleTTL:             parse(&errs, "CACHE_STALE_TTL", 24*time.Hour, time.ParseDuration),
+		CacheStaleTTL:             parse(&errs, "CACHE_STALE_TTL", 72*time.Hour, time.ParseDuration),
 		CacheMinRefresh:           parse(&errs, "CACHE_MIN_REFRESH", 10*time.Minute, time.ParseDuration),
 		CacheMaxEntries:           parse(&errs, "CACHE_MAX_ENTRIES", 10000, strconv.Atoi),
 		CacheMaxBackgroundRefresh: parse(&errs, "CACHE_MAX_BACKGROUND_REFRESH", 4, strconv.Atoi),
@@ -168,6 +170,11 @@ func Load() (Config, error) {
 			cfg.ApifyActors[m] = os.Getenv(key + "_ACTOR")
 			cfg.ApifyInputs[m] = os.Getenv(key + "_INPUT")
 			cfg.ApifyCurrencies[m] = strings.TrimSpace(os.Getenv(key + "_CURRENCY"))
+			// Fewer results = lower cost for scrapers billed per result.
+			cfg.ApifyMarketMaxItems[m] = parse(&errs, key+"_MAX_ITEMS", cfg.ApifyMaxItems, strconv.Atoi)
+			if cfg.ApifyMarketMaxItems[m] <= 0 {
+				errs = append(errs, fmt.Errorf("%s_MAX_ITEMS must be positive", key))
+			}
 			in := cfg.ApifyInputs[m]
 			if cfg.ApifyActors[m] == "" || !(strings.Contains(in, "{{query}}") || strings.Contains(in, "{{query_url}}") || strings.Contains(in, "{{query_path}}") || strings.Contains(in, "{{query_slug}}")) {
 				errs = append(errs, fmt.Errorf("%s_ACTOR and %s_INPUT (JSON containing {{query}}, {{query_url}}, {{query_path}} or {{query_slug}}) are required for %s", key, key, m))
