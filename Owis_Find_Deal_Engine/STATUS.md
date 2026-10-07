@@ -31,7 +31,7 @@ rarely finds product pages; each shop needs its own source.
 | Amazon | SerpApi Amazon engine (on by default with `SERPAPI_KEY`) | ✅ ~10 products, price, rating, direct `/dp/` links, ~3 s |
 | AliExpress | Apify `piotrv1001/aliexpress-listings-scraper` | ✅ 10 products, price, direct `/item/` links, ~40 s |
 | Temu | Apify `crw/temu-products-scraper` (US catalogue only) | ✅ 10 products, price, `goods.html?goods_id=` links; empty for some items |
-| SHEIN | Apify `clearpath/shein-product-scraper` (site `us`) | 🔧 output mapped and tested with the owner's sample (2026-10-07); live retest pending |
+| SHEIN | Apify `clearpath/shein-product-scraper` (site `us`, needs `APIFY_MAX_CHARGE_USD`) | ✅ live 2026-10-07 (`usa`): 8 products, sale price, direct `-p-<id>.html` links |
 | eBay (usa, ksa) | fallback only | not tested yet |
 
 Example `m.2 enclosure` / `jor`: 31 products from 4 shops with prices,
@@ -75,7 +75,15 @@ First live test (`usa`): the SHEIN run was **aborted** ("reached its
 maximum cost of $0.00") — `clearpath/shein-product-scraper` is billed per
 event and the service sent no cost limit, so SHEIN fell back to Google
 Shopping. Fix: new `APIFY_MAX_CHARGE_USD` (default `0.20`, sent as
-`maxTotalChargeUsd`; ignored by per-result scrapers). Retest pending.
+`maxTotalChargeUsd`; ignored by per-result scrapers).
+
+Retest (`usb c ssd enclosure` / `usa`): SHEIN ✅ 8 products from Apify.
+But AliExpress fell back to Google Shopping (search links) and the search
+took 67 s (limit 70 s) — probably the AliExpress scraper hit
+`APIFY_TIMEOUT=60s`; waiting for the log line. Cost of that live search:
+3 SerpApi credits (Amazon, eBay, AliExpress fallback) + ~$0.16 Apify
+(per-run breakdown pending). $5/month free Apify credit ≈ 30 live
+searches — cached answers are free.
 
 Scraper: `clearpath/shein-product-scraper`. Its items carry the sale price
 as `price.current` (flat, as the console exports it) or
