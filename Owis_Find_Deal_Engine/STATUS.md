@@ -82,9 +82,7 @@ Retest (`usb c ssd enclosure` / `usa`): SHEIN ✅ 8 products from Apify.
 But AliExpress fell back to Google Shopping (search links) and the search
 took 67 s (limit 70 s) — probably the AliExpress scraper hit
 `APIFY_TIMEOUT=60s`; waiting for the log line. Cost of that live search:
-3 SerpApi credits (Amazon, eBay, AliExpress fallback) + ~$0.16 Apify
-(per-run breakdown pending). $5/month free Apify credit ≈ 30 live
-searches — cached answers are free.
+3 SerpApi credits (Amazon, eBay, AliExpress fallback) + Apify runs.
 
 With `APIFY_TIMEOUT=90s` (`iphone 18 max case` / `jor`): all 4 shops OK,
 no fallback, 36 s, 1 SerpApi credit (Amazon only). SHEIN links stay on
@@ -92,7 +90,10 @@ no fallback, 36 s, 1 SerpApi credit (Amazon only). SHEIN links stay on
 (prices are US prices; the page in Jordan showed JD 1.52 vs $10.42 from
 the scraper — new-shopper / deal prices are not returned, accepted) →
 new optional `APIFY_<MARKET>_CURRENCY` (`APIFY_ALIEXPRESS_CURRENCY=USD`).
-Per-run Apify costs still to check (balance $1.66 left).
+Apify usage so far (2026-10-06/07, all tests incl. console runs): $1.66 of
+the $5 monthly credit — Temu $0.80, SHEIN clearpath $0.65, AliExpress
+$0.17, SHEIN shahidirfan $0.04. Temu and SHEIN are the cost drivers;
+cost per run still to work out (runs per Actor).
 
 Scraper: `clearpath/shein-product-scraper`. Its items carry the sale price
 as `price.current` (flat, as the console exports it) or
