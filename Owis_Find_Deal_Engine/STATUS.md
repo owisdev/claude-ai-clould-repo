@@ -32,7 +32,7 @@ rarely finds product pages; each shop needs its own source.
 | AliExpress | Apify `piotrv1001/aliexpress-listings-scraper` | ✅ 10 products, price, direct `/item/` links, ~40 s |
 | Temu | Apify `crw/temu-products-scraper` (US catalogue only) | ✅ 10 products, price, `goods.html?goods_id=` links; empty for some items |
 | SHEIN | Apify `clearpath/shein-product-scraper` (site `us`, needs `APIFY_MAX_CHARGE_USD`) | ✅ live 2026-10-07 (`usa`): 8 products, sale price, direct `-p-<id>.html` links |
-| eBay (usa, ksa) | SerpApi eBay engine (`serpapi-ebay`, on by default with `SERPAPI_KEY`; built 2026-10-07) | 🔧 tested with a sample response; live test pending |
+| eBay (usa, ksa) | SerpApi eBay engine (`serpapi-ebay`, on by default with `SERPAPI_KEY`) | ✅ live 2026-10-07 (`ksa`): 10 products, direct `/itm/` links, price matches the page, condition + shipping |
 
 Example `m.2 enclosure` / `jor`: 31 products from 4 shops with prices,
 28.6 s live (both scrapers run in parallel), instant from cache.
@@ -48,7 +48,7 @@ APIFY_ALIEXPRESS_ACTOR=piotrv1001/aliexpress-listings-scraper
 APIFY_ALIEXPRESS_INPUT={"maxResults":{{max}},"searchQueries":["{{query}}"],"proxyConfiguration":{"useApifyProxy":true}}
 APIFY_ALIEXPRESS_CURRENCY=USD   # the scraper returns "currency": null
 APIFY_TEMU_ACTOR=crw/temu-products-scraper
-APIFY_TEMU_INPUT={"keyword":"{{query}}","max_items":{{max}},"region":"US","sort":"relevance"}
+APIFY_TEMU_INPUT={"keyword":"{{query}}","max_items":10,"region":"US","sort":"relevance"}   # Actor needs >= 10
 # SHEIN (added 2026-10-07, not yet tested live): add ",shein" to APIFY_MARKETS
 APIFY_SHEIN_ACTOR=clearpath/shein-product-scraper
 APIFY_SHEIN_INPUT={"enrichDetails":false,"maxItemsPerSearch":{{max}},"quickShip":false,"searchTerms":["{{query}}"],"site":"us","sortBy":"recommend","category":""}
@@ -181,9 +181,18 @@ location.
 **eBay (2026-10-07):** SerpApi's eBay engine (`engine=ebay`,
 `ebay_domain=ebay.com`) replaces Google Shopping for eBay: direct
 `/itm/<id>` links, eBay's price (lowest of a range), condition, shipping.
-Same cost as before (1 SerpApi search). Owner: live test `usa` and `ksa`
-and check that the response fields match (sample written from SerpApi's
-documented format). eBay Browse API (free) can replace it if the keys come.
+Same cost as before (1 SerpApi search). Live `ksa` test ✅ (Amazon and
+eBay links show the same price as returned). eBay Browse API (free) can
+replace it if the keys come.
+
+Same test: Temu's Apify run failed — `crw/temu-products-scraper` needs
+`max_items >= 10`, so `{{max}}` = 5 was rejected; Temu fell back to Google
+Shopping (+1 SerpApi credit) and SearXNG, which gave one bad result
+(title "Temu", link on the Slovak site `/sk-en/…`, removed there). Fixed:
+Temu input uses a fixed `"max_items":10` (`APIFY_TEMU_MAX_ITEMS=5` still
+caps kept / charged items via the run's `maxItems`); Temu links are
+rebuilt as `goods.html?goods_id=<id>` (no country prefix); web results
+whose title is only the shop name are dropped. Cache version `v6`.
 
 **Other open items:** loading
 bar in the app (first live search takes ~30–50 s; cached answers are

@@ -288,6 +288,10 @@ func toProducts(results []result, title string, targets []markets.Target) ([]sea
 			st.irrelevant++ // the engine ignored the query and returned any shop page
 			continue
 		}
+		if target.GenericTitle(r.Title) {
+			st.irrelevant++ // title is only the shop name ("Temu"): nothing to show
+			continue
+		}
 		seen[link] = true
 		positions[target.Market]++
 

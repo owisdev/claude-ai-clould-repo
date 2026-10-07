@@ -349,6 +349,9 @@ func webProducts(results []organicResult, title string, targets []markets.Target
 		if !search.Relevant(title, r.Title, r.Snippet, u.Path) {
 			continue // Google ignored the query and returned any shop page
 		}
+		if target.GenericTitle(r.Title) {
+			continue // title is only the shop name ("Temu"): nothing to show
+		}
 		seen[link] = true
 		positions[target.Market]++
 

@@ -178,8 +178,8 @@ func TestProductLink(t *testing.T) {
 		{target(usa, "ebay"), "https://www.ebay.com/sch/i.html?_nkw=ssk", ""},
 		{target(usa, "ebay"), "https://www.ebay.com/b/SSD-Enclosures/bn_7116", ""},
 		// Temu: product pages keep their path, tracking parameters removed.
-		{target(usa, "temu"), "https://www.temu.com/ssk-m2-enclosure-g-601099512345678.html?_x_ads=1", "https://www.temu.com/ssk-m2-enclosure-g-601099512345678.html"},
-		{target(usa, "temu"), "https://www.temu.com/sa-en/ssk-enclosure-g-601099512345678.html", "https://www.temu.com/sa-en/ssk-enclosure-g-601099512345678.html"},
+		{target(usa, "temu"), "https://www.temu.com/ssk-m2-enclosure-g-601099512345678.html?_x_ads=1", "https://www.temu.com/goods.html?goods_id=601099512345678"},
+		{target(usa, "temu"), "https://www.temu.com/sa-en/ssk-enclosure-g-601099512345678.html", "https://www.temu.com/goods.html?goods_id=601099512345678"},
 		{target(usa, "temu"), "https://www.temu.com/ssd-enclosures-o3-123.html", ""},
 		{target(usa, "temu"), "https://www.temu.com/", ""},
 		// SHEIN.
@@ -267,7 +267,7 @@ func TestTemuGoodsLink(t *testing.T) {
 	}
 	tests := map[string]string{
 		"https://www.temu.com/goods.html?_bg_fs=1&goods_id=606284493507175&_oak_mp_inf=x": "https://www.temu.com/goods.html?goods_id=606284493507175",
-		"https://www.temu.com/ssk-enclosure-g-601099512345678.html?_x=1":                  "https://www.temu.com/ssk-enclosure-g-601099512345678.html",
+		"https://www.temu.com/ssk-enclosure-g-601099512345678.html?_x=1":                  "https://www.temu.com/goods.html?goods_id=601099512345678",
 		"https://www.temu.com/goods.html?goods_id=abc":                                    "",
 		"https://www.temu.com/goods.html":                                                 "",
 	}
@@ -275,6 +275,35 @@ func TestTemuGoodsLink(t *testing.T) {
 		got, ok := temu.ProductLink(in)
 		if (want == "") == ok || got != want && want != "" {
 			t.Errorf("%s: got %q, %v; want %q", in, got, ok, want)
+		}
+	}
+}
+
+func TestTemuLinksDropLocale(t *testing.T) {
+	temu := Target{Market: "temu", Name: "Temu", Domain: "temu.com"}
+	cat, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ksa, _ := cat.Country("ksa")
+	for _, tg := range ksa.Targets {
+		if tg.Market == "temu" {
+			temu = tg
+		}
+	}
+	// From the ksa test: a SearXNG result on the Slovak site (removed there).
+	got, ok := temu.ProductLink("https://www.temu.com/sk-en/1pc-4-in-1-usb-hub-type-c--docking-station-g-606269746320463.html")
+	if !ok || got != "https://www.temu.com/goods.html?goods_id=606269746320463" {
+		t.Errorf("link = %q, %v", got, ok)
+	}
+	got, ok = temu.ProductLink("https://www.temu.com/goods.html?_bg_fs=1&goods_id=606284493507175&refer_page_sn=10009")
+	if !ok || got != "https://www.temu.com/goods.html?goods_id=606284493507175" {
+		t.Errorf("goods.html link = %q, %v", got, ok)
+	}
+	for title, want := range map[string]bool{"Temu": true, " temu.com ": true, "www.temu.com": true,
+		"4-in-1 USB Hub": false, "Temu USB hub": false} {
+		if temu.GenericTitle(title) != want {
+			t.Errorf("GenericTitle(%q) = %v, want %v", title, !want, want)
 		}
 	}
 }

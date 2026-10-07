@@ -115,6 +115,13 @@ func (t Target) ProductLink(link string) (string, bool) {
 	return "", false
 }
 
+// GenericTitle reports whether a result title is only the shop's name or
+// domain (e.g. "Temu"), which says nothing about the product.
+func (t Target) GenericTitle(title string) bool {
+	title = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(title)), "www.")
+	return title == "" || title == strings.ToLower(t.Name) || title == t.Domain || title == baseDomain(t.Domain)
+}
+
 // Matches reports whether a link host belongs to this target's marketplace.
 // Regional subdomains count as a match (e.g. sa.shein.com for ar.shein.com).
 func (t Target) Matches(host string) bool {

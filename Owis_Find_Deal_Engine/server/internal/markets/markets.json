@@ -35,7 +35,8 @@
           "^/(?:[a-z]{2}(?:-[a-z]{2})?/)?[^/]*-g-(?P<id>[0-9]{6,20})\\.html$",
           "^/(?:[a-z]{2}(?:-[a-z]{2})?/)?goods\\.html$"
         ],
-        "id_param": "goods_id"
+        "id_param": "goods_id",
+        "link": "https://{host}/goods.html?goods_id={id}"
       }
     },
     "shein": {
