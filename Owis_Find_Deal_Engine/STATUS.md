@@ -93,7 +93,10 @@ new optional `APIFY_<MARKET>_CURRENCY` (`APIFY_ALIEXPRESS_CURRENCY=USD`).
 Apify usage so far (2026-10-06/07, all tests incl. console runs): $1.66 of
 the $5 monthly credit — Temu $0.80, SHEIN clearpath $0.65, AliExpress
 $0.17, SHEIN shahidirfan $0.04. Temu and SHEIN are the cost drivers;
-cost per run still to work out (runs per Actor).
+cost per run still to work out (runs per Actor). SHEIN run from the
+service: 10 results, 8 s, **$0.066** (≈ $0.0066 per result, billed per
+event). SHEIN links in `jor` open on `us.shein.com` with the same price
+as returned ($3.00) — accepted.
 
 Scraper: `clearpath/shein-product-scraper`. Its items carry the sale price
 as `price.current` (flat, as the console exports it) or
