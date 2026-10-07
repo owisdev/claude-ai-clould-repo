@@ -111,6 +111,32 @@ instead of $0.17 for both) and cache fresh for 48 h (`CACHE_FRESH_TTL=48h`,
 `CACHE_STALE_TTL=72h`; now the defaults). Expected live search ≈ $0.10
 Apify + 1 SerpApi search, then free for 48 h.
 
+**Apify platform prices (owner's account, 2026-10-07) — what they mean
+for us.** Two ways an Actor is billed:
+
+- *Per result / per event* (Temu `crw/…` $0.01 per result, SHEIN
+  `clearpath/…` ≈ $0.0066 per result): the Actor's own price covers
+  everything; the platform prices below are **not** added on top.
+- *Per usage* (Actors without their own price): we pay the platform
+  prices below for what the run uses.
+
+| Item | Price | Relevant for us? |
+|---|---|---|
+| Compute units (CU) | $0.20 / CU | Yes, for per-usage Actors. 1 CU = 1 GB memory × 1 hour; a 60 s run with 1 GB ≈ 0.017 CU ≈ $0.003 |
+| Datacenter proxies | 5 IPs included | Yes — `"useApifyProxy": true` uses these by default (no extra cost) |
+| Residential proxies | $8.00 / GB | Avoid unless a shop blocks datacenter IPs; a scraper page load can be 1–5 MB |
+| Google SERP proxies | $2.50 / 1,000 searches | Not used. Possible later: Google Shopping via Apify (~$0.0025 per search) instead of SerpApi |
+| Unblocker | $1.50 / 1,000 requests | Not used |
+| Dataset storage / reads / writes | $1.00 per 1,000 GB-hours; $0.0004 / 1,000 reads; $0.005 / 1,000 writes | Negligible (10 items per run) |
+| Key-value store | $1.00 per 1,000 GB-hours; $0.005 / 1,000 reads; $0.05 / 1,000 writes; $0.05 / 1,000 lists | Negligible |
+| Request queue | $4.00 per 1,000 GB-hours; $0.004 / 1,000 reads; $0.01 / 1,000 writes | Negligible |
+| Data transfer | $0.20 / GB external, $0.05 / GB internal | Negligible (results are a few KB) |
+
+So the cost per search is driven by the Actors' own per-result prices
+(Temu, SHEIN), not by these platform prices. When choosing a new scraper,
+compare: per-result price × results per search, or for per-usage Actors
+memory × run time × $0.20 / CU (plus residential proxy if it needs one).
+
 **SHEIN scraper: keep `clearpath/shein-product-scraper` for now.** It
 supports the US site only (no `sa` / `ar`), so SHEIN links and prices are
 US ones in every country. Cost scales with the result count: a console
