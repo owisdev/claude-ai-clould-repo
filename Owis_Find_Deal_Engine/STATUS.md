@@ -111,10 +111,16 @@ instead of $0.17 for both) and cache fresh for 48 h (`CACHE_FRESH_TTL=48h`,
 `CACHE_STALE_TTL=72h`; now the defaults). Expected live search ≈ $0.10
 Apify + 1 SerpApi search, then free for 48 h.
 
-**SHEIN local site (open):** the Apify store assistant said a SHEIN
-scraper supports `sa` and `ae` (not `ar`) — but it named the "SHEIN Store
-Promotion Scraper", not `clearpath/shein-product-scraper`, so unverified.
-To check: one console run of clearpath with `"site": "sa"`.
+**SHEIN scraper: keep `clearpath/shein-product-scraper` for now.** It
+supports the US site only (no `sa` / `ar`), so SHEIN links and prices are
+US ones in every country. Cost scales with the result count: a console
+run with 100 results cost $0.516 (≈ $0.005 per result; the `category`
+field does not change that). **Later: check another SHEIN scraper** if one
+is cheaper or supports the Saudi / Arab sites (`sa`, `ar`, `ae`); the
+service only needs its Actor, input and one sample item.
+Console runs use the account balance as their cost limit (the service
+sends `APIFY_MAX_CHARGE_USD=0.20`), so keep `maxItemsPerSearch` small
+when testing in the console.
 
 Scraper: `clearpath/shein-product-scraper`. Its items carry the sale price
 as `price.current` (flat, as the console exports it) or
