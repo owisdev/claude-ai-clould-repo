@@ -40,7 +40,7 @@ func newServer(t *testing.T, status int, body string, check func(*http.Request, 
 func newClient(t *testing.T, baseURL string) *Client {
 	t.Helper()
 	c, err := New(Config{Token: "tok", Actor: "someone~temu-scraper", InputTemplate: temuTemplate,
-		MaxItems: 3, Timeout: 5 * time.Second, BaseURL: baseURL})
+		MaxItems: 3, Timeout: 5 * time.Second, MaxChargeUSD: 0.2, BaseURL: baseURL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestSearchRunsActorAndMapsItems(t *testing.T) {
 			t.Error("token must be sent as a Bearer header, not in the URL")
 		}
 		q := r.URL.Query()
-		if q.Get("maxItems") != "3" || q.Get("timeout") != "5" {
+		if q.Get("maxItems") != "3" || q.Get("timeout") != "5" || q.Get("maxTotalChargeUsd") != "0.2" {
 			t.Errorf("query = %v", q)
 		}
 		if input["searchQueries"].([]any)[0] != `s pen "pro"` || input["maxItems"].(float64) != 3 || input["country"] != "SA" {

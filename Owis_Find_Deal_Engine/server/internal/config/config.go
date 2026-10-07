@@ -37,8 +37,9 @@ type Config struct {
 	ApifyInputs           map[string]string // market -> input JSON template with {{query}}
 	ApifyMaxItems         int
 	ApifyTimeout          time.Duration
-	ApifyBaseURL          string // empty = Apify; for tests / outbound proxies
-	ApifyEmptyFallback    bool   // empty scraper result -> try the web providers
+	ApifyMaxChargeUSD     float64 // max cost of one pay-per-event run; 0 = not sent
+	ApifyBaseURL          string  // empty = Apify; for tests / outbound proxies
+	ApifyEmptyFallback    bool    // empty scraper result -> try the web providers
 	ProviderFailThreshold int
 	ProviderCooldown      time.Duration
 
@@ -102,6 +103,7 @@ func Load() (Config, error) {
 		ApifyMaxItems:             parse(&errs, "APIFY_MAX_ITEMS", 10, strconv.Atoi),
 		ApifyEmptyFallback:        parse(&errs, "APIFY_EMPTY_FALLBACK", false, strconv.ParseBool),
 		ApifyTimeout:              parse(&errs, "APIFY_TIMEOUT", 60*time.Second, time.ParseDuration),
+		ApifyMaxChargeUSD:         parse(&errs, "APIFY_MAX_CHARGE_USD", 0.20, parseFloat),
 		ProviderAttemptTimeout:    parse(&errs, "PROVIDER_ATTEMPT_TIMEOUT", 8*time.Second, time.ParseDuration),
 		SerpAPITimeout:            parse(&errs, "SERPAPI_TIMEOUT", 25*time.Second, time.ParseDuration),
 		ProviderFailThreshold:     parse(&errs, "PROVIDER_FAILURE_THRESHOLD", 3, strconv.Atoi),
@@ -155,6 +157,9 @@ func Load() (Config, error) {
 		}
 		if cfg.ApifyMaxItems <= 0 || cfg.ApifyTimeout <= 0 || cfg.ApifyTimeout > 300*time.Second {
 			errs = append(errs, errors.New("APIFY_MAX_ITEMS must be positive and APIFY_TIMEOUT between 1s and 300s"))
+		}
+		if cfg.ApifyMaxChargeUSD < 0 || cfg.ApifyMaxChargeUSD > 5 {
+			errs = append(errs, errors.New("APIFY_MAX_CHARGE_USD must be between 0 and 5"))
 		}
 		for _, m := range cfg.ApifyMarkets {
 			key := "APIFY_" + strings.ToUpper(m)
@@ -261,3 +266,5 @@ func splitList(s string) []string {
 	}
 	return out
 }
+
+func parseFloat(s string) (float64, error) { return strconv.ParseFloat(s, 64) }

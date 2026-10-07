@@ -313,6 +313,7 @@ func addApifyProviders(cfg config.Config, catalog *markets.Catalog, providers ma
 			InputTemplate: cfg.ApifyInputs[m],
 			MaxItems:      cfg.ApifyMaxItems,
 			Timeout:       cfg.ApifyTimeout,
+			MaxChargeUSD:  cfg.ApifyMaxChargeUSD,
 			Combined:      cfg.SearchCombined,
 			BaseURL:       cfg.ApifyBaseURL,
 			EmptyFallback: cfg.ApifyEmptyFallback,

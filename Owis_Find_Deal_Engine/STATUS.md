@@ -52,6 +52,7 @@ APIFY_TEMU_INPUT={"keyword":"{{query}}","max_items":{{max}},"region":"US","sort"
 APIFY_SHEIN_ACTOR=clearpath/shein-product-scraper
 APIFY_SHEIN_INPUT={"enrichDetails":false,"maxItemsPerSearch":{{max}},"quickShip":false,"searchTerms":["{{query}}"],"site":"us","sortBy":"recommend","category":""}
 APIFY_TIMEOUT=60s
+APIFY_MAX_CHARGE_USD=0.20   # cost cap per run, needed by per-event scrapers (SHEIN)
 APIFY_EMPTY_FALLBACK=false   # nothing relevant from a scraper = no results (no extra time or SerpApi search)
 ```
 
@@ -69,6 +70,12 @@ for "EAGET JHL7440"); cache keys carry a results version (`v4`), so a
 rebuild drops answers cached by an older build.
 
 ## SHEIN (2026-10-07): mapped, waiting for the owner's live test
+
+First live test (`usa`): the SHEIN run was **aborted** ("reached its
+maximum cost of $0.00") — `clearpath/shein-product-scraper` is billed per
+event and the service sent no cost limit, so SHEIN fell back to Google
+Shopping. Fix: new `APIFY_MAX_CHARGE_USD` (default `0.20`, sent as
+`maxTotalChargeUsd`; ignored by per-result scrapers). Retest pending.
 
 Scraper: `clearpath/shein-product-scraper`. Its items carry the sale price
 as `price.current` (flat, as the console exports it) or

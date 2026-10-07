@@ -44,6 +44,11 @@ type Config struct {
 	MaxItems int
 	// Timeout bounds one Actor run (Apify's synchronous limit is 300 s).
 	Timeout time.Duration
+	// MaxChargeUSD caps the cost of one run of a pay-per-event Actor
+	// (sent as maxTotalChargeUsd; Apify ignores it for other pricing).
+	// Without it such runs were aborted at once: "reached its maximum
+	// cost of $0.00". 0 = not sent.
+	MaxChargeUSD float64
 	// Combined only mirrors the search mode so this provider can be chained
 	// with the web providers; each run searches one marketplace.
 	Combined bool
@@ -128,6 +133,9 @@ func (c *Client) run(ctx context.Context, q search.Query, t markets.Target) ([]s
 	params.Set("maxItems", strconv.Itoa(c.cfg.MaxItems))
 	params.Set("limit", strconv.Itoa(c.cfg.MaxItems))
 	params.Set("clean", "1")
+	if c.cfg.MaxChargeUSD > 0 {
+		params.Set("maxTotalChargeUsd", strconv.FormatFloat(c.cfg.MaxChargeUSD, 'f', -1, 64))
+	}
 	endpoint := fmt.Sprintf("%s/v2/actors/%s/run-sync-get-dataset-items?%s",
 		c.cfg.BaseURL, url.PathEscape(c.cfg.Actor), params.Encode())
 
