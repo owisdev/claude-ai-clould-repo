@@ -380,6 +380,11 @@ and is pushed.
 other applications and AI agents → deployment. The user features (old
 phase 2) come after that.
 
+**Owner decisions (2026-10-11):** D1 React admin app inside the server
+image · D2 Firebase + admin list in the database + two-factor · D3 secrets
+editable in the panel (encrypted, write-only) · D4 own apps and agents
+first, keys made in the panel (partners later).
+
 **Phase 2 — admin panel** (control every setting of the service)
 
 7. **Database + settings store.** Postgres joins the stack (migrations,

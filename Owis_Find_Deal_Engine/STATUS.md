@@ -235,13 +235,21 @@ instant); label scraper prices as approximate in the app.
 4. **Phase 5 — users** (old phase 2).
 
 **Next session starts phase 2, step 7 (database + settings store).**
-Owner decisions needed before step 7 (details and recommendations in
-`docs/next_plan.pdf`):
+**Owner decisions D1–D4 (answered 2026-10-11):**
 
-- D1 admin web app: ★ React app built into the server image / server-rendered pages
-- D2 admin login: ★ Firebase + admin list in the DB + two-factor / without two-factor
-- D3 secrets: ★ changeable in the panel (encrypted, write-only) / `.env` only
-- D4 API users: ★ own apps and agents, keys made in the panel / also outside partners
+- **D1 admin web app:** small React app built into the server image,
+  served under `/admin` (one deployment).
+- **D2 admin login:** Firebase login + admin list in the database +
+  two-factor login required for admins. (Needed at step 8: the first
+  admin's email.)
+- **D3 secrets:** changeable in the admin panel — encrypted
+  (AES-256-GCM, key from the environment), write-only, never shown again.
+- **D4 API clients:** own apps and AI agents first; keys created by the
+  owner in the admin panel. API keys are for servers and agents only —
+  the mobile / web app keeps the user's Firebase token (a key inside an
+  app could be extracted). Keys stored hashed in the database, not in
+  `.env`. Partner self-service sign-up and billing later, on the same
+  key model.
 
 Later: D5 monthly budget alert (step 9), D6 hosting and D7 domain
 (step 14), D8 paid Apify / SerpApi plans (before real users).
@@ -252,7 +260,7 @@ Open the repository and say:
 
 > Continue the Owis_Find_Deal_Engine project from
 > `Owis_Find_Deal_Engine/STATUS.md` on branch `claude/cloud-vs-local-7xi988`.
-> Start phase 2, step 7. My answers: D1 …, D2 … (admin email …), D3 …, D4 …
+> Start phase 2, step 7. (Decisions D1–D4 are recorded in STATUS.md.)
 
 ## Run it on your PC
 
