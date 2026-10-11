@@ -1,4 +1,4 @@
-# owis_find_deal_engine — full stack: API server + SearXNG + Redis.
+# owis_find_deal_engine — full stack: API server + SearXNG + Redis + Postgres.
 #
 #   cp .env.example .env      # fill in secrets (see comments there)
 #   docker compose up -d --build
@@ -6,10 +6,11 @@
 # Networks:
 #   edge  - server and SearXNG; has internet access (SearXNG queries search
 #           engines, the server calls SerpApi and the auth provider's JWKS).
-#   data  - server and Redis only; internal: no internet, no published ports.
+#   data  - server, Redis and Postgres only; internal: no internet, no
+#           published ports.
 # Only the API port is published, on 127.0.0.1 by default: put a reverse
 # proxy (Caddy/Nginx) or a Cloudflare Tunnel in front of it in production.
-# SearXNG and Redis are never reachable from outside Docker.
+# SearXNG, Redis and Postgres are never reachable from outside Docker.
 
 name: owis_find_deal_engine
 
@@ -38,12 +39,17 @@ services:
       PORT: "3002"
       SEARXNG_URL: http://searxng:8080
       REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis:6379/0
+      # Runtime settings live in Postgres (changed without a restart, see
+      # README "Settings"). sslmode=disable: internal Docker network only.
+      DATABASE_URL: postgres://ofd:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/ofd?sslmode=disable
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?set SETTINGS_ENCRYPTION_KEY in .env}
     ports:
       - "${API_BIND:-127.0.0.1}:${API_PORT:-3002}:3002"
     networks: [edge, data]
     depends_on:
       redis: { condition: service_healthy }
       searxng: { condition: service_healthy }
+      postgres: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "/owis_find_deal_engine", "healthcheck"]
       interval: 30s
@@ -108,6 +114,31 @@ services:
     mem_limit: 320m
     pids_limit: 128
 
+  postgres:
+    <<: *hardening
+    image: docker.io/library/postgres:17-alpine
+    user: "70:70" # the image's postgres user; skips the root entrypoint step
+    # Settings, settings history and admins (more tables in later steps).
+    environment:
+      POSTGRES_USER: ofd
+      POSTGRES_DB: ofd
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    tmpfs:
+      - /var/run/postgresql:uid=70,gid=70
+      - /tmp
+    shm_size: 128m
+    networks: [data]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "ofd", "-d", "ofd"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    mem_limit: 256m
+    pids_limit: 128
+
 networks:
   edge: {}
   data:
@@ -115,3 +146,4 @@ networks:
 
 volumes:
   redis-data: {}
+  postgres-data: {}

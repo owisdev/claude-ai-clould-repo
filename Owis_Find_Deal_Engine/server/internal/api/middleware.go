@@ -21,6 +21,21 @@ func chain(h http.Handler, mws ...Middleware) http.Handler {
 	return h
 }
 
+// writeDeadline sets the response write deadline of each request (the
+// server's WriteTimeout, but changeable per router). It must be the
+// outermost middleware so it sees the connection's own ResponseWriter.
+func writeDeadline(d time.Duration) Middleware {
+	return func(next http.Handler) http.Handler {
+		if d <= 0 {
+			return next
+		}
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(d))
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 type requestIDKey struct{}
 
 // requestID tags every request with an ID (reusing a sane incoming one)

@@ -1,7 +1,8 @@
 # Project status and handoff
 
-Last updated: 2026-10-07 · Branch: `claude/cloud-vs-local-7xi988`
-(not merged into `main` yet).
+Last updated: 2026-10-11 · Branch: `claude/practical-clarke-limbco`
+(continues `claude/cloud-vs-local-7xi988`, which ends at the D1–D4
+decisions; neither is merged into `main` yet).
 
 Read first:
 - [docs/current_flow.pdf](docs/current_flow.pdf) — **how the service works
@@ -17,6 +18,53 @@ Regenerate the PDFs: `python3 docs/build_flow_and_plan_pdfs.py` and
 `python3 docs/build_architecture_pdf.py` (needs `reportlab`).
 
 ## Where we are
+
+**Phase 2, step 7 — database + settings store: done (2026-10-11).**
+
+- Postgres 17 joins the stack (`postgres` service on the internal `data`
+  network, `postgres-data` volume, non-root, read-only, no capabilities).
+- Tables `settings`, `settings_history`, `admins` (embedded migrations,
+  run at start).
+- Runtime settings (sources, shops, Apify / SerpApi, timeouts, cache,
+  plans, rate limits, CORS) live in the database; `.env` keeps only the
+  bootstrap values (database, encryption key, first admin, auth, Redis,
+  service addresses). **On the first start the runtime settings in `.env`
+  are copied into the database once**; after that `.env` no longer changes
+  them (the server logs a warning for keys that differ).
+- A change is validated as a whole and refused if invalid; the server sees
+  it within 10 s and swaps a new provider chain + cache front + router —
+  no restart, searches in flight finish on the old setup.
+- Secrets (`SERPAPI_KEY`, `APIFY_TOKEN`): AES-256-GCM with
+  `SETTINGS_ENCRYPTION_KEY`, never printed, never in the history.
+- First admin from `ADMIN_EMAIL` (used from step 8).
+- Until the admin panel exists: command line in the container —
+  `docker compose exec server /owis_find_deal_engine settings list`
+  (`get`, `set`, `unset`, `history`; `admins list`). See the server README
+  section "Settings".
+- Tested: unit tests + store tests against Postgres 16 locally (CI runs
+  them against Postgres 17), and an end-to-end run of the binary (import
+  from env, CLI change, hot reload, restart). **Not yet tested: the Docker
+  stack with Postgres** (no Docker in the cloud session) → owner, below.
+
+**Owner, to try step 7:**
+
+1. Add to `.env` (each `openssl rand -hex 32`):
+   `POSTGRES_PASSWORD=…`, `SETTINGS_ENCRYPTION_KEY=…` (keep a copy: the
+   stored secrets cannot be read without it), and
+   `ADMIN_EMAIL=<your Firebase login email>`.
+2. `docker compose up -d --build` → four containers healthy; the server
+   log shows "runtime settings imported from the environment".
+3. `docker compose exec server /owis_find_deal_engine settings list` — do
+   the values match your `.env`? Secrets show "(set, hidden)".
+4. Change one, e.g. `… settings set APIFY_SHEIN_MAX_ITEMS 3`, and check
+   the log line "settings applied" within ~10 s, then a search.
+5. Report problems with `docker compose logs server postgres`.
+
+**Next: phase 2, step 8 — admin API** (`/admin/v1/...`: Firebase login +
+admin list + two-factor, settings incl. countries / shops, write-only
+secrets, audit log, test search, cache tools).
+
+### Phase 1 (search service)
 
 **Phase 1 — search service: complete and tested locally** (plan steps
 1–6, see [PLAN.md](PLAN.md) section 9).
@@ -234,7 +282,7 @@ instant); label scraper prices as approximate in the app.
    CI/CD, monitoring).
 4. **Phase 5 — users** (old phase 2).
 
-**Next session starts phase 2, step 7 (database + settings store).**
+**Step 7 is done (2026-10-11); next session starts phase 2, step 8 (admin API).**
 **Owner decisions D1–D4 (answered 2026-10-11):**
 
 - **D1 admin web app:** small React app built into the server image,
@@ -259,8 +307,8 @@ Later: D5 monthly budget alert (step 9), D6 hosting and D7 domain
 Open the repository and say:
 
 > Continue the Owis_Find_Deal_Engine project from
-> `Owis_Find_Deal_Engine/STATUS.md` on branch `claude/cloud-vs-local-7xi988`.
-> Start phase 2, step 7. (Decisions D1–D4 are recorded in STATUS.md.)
+> `Owis_Find_Deal_Engine/STATUS.md` on branch `claude/practical-clarke-limbco`.
+> Start phase 2, step 8. (Decisions D1–D4 are recorded in STATUS.md.)
 
 ## Run it on your PC
 
@@ -272,7 +320,7 @@ git. Go is not needed for the Docker way.
 ```sh
 git clone https://github.com/owisdev/claude-ai-clould-repo.git
 cd claude-ai-clould-repo
-git checkout claude/cloud-vs-local-7xi988
+git checkout claude/practical-clarke-limbco
 cd Owis_Find_Deal_Engine/server
 ```
 
@@ -295,6 +343,9 @@ AUTH_AUDIENCE=<PROJECT_ID>
 
 SEARXNG_SECRET=<random 64 hex chars>
 REDIS_PASSWORD=<random 64 hex chars>
+POSTGRES_PASSWORD=<random 64 hex chars>
+SETTINGS_ENCRYPTION_KEY=<random 64 hex chars>   # keep a copy
+ADMIN_EMAIL=<your Firebase login email>
 
 # Free only. Add ",serpapi" and SERPAPI_KEY=... to enable the paid fallback.
 SEARCH_PROVIDERS=searxng
@@ -320,7 +371,7 @@ PowerShell: `-join ((1..32) | % { '{0:x2}' -f (Get-Random -Max 256) })`.
 
 ```sh
 docker compose up -d --build
-docker compose ps          # all three "healthy" after ~30 s
+docker compose ps          # all four "healthy" after ~30 s
 ```
 
 ### 5. Get a test token (valid 1 hour)
@@ -364,13 +415,18 @@ SearXNG directly (for debugging): stop, then
 `docker compose -f docker-compose.yml -f compose.dev.yml up -d` and open
 <http://127.0.0.1:8888>.
 
-Stop: `docker compose down` (add `-v` to also delete Redis data).
+Stop: `docker compose down` (add `-v` to also delete Redis data and the
+settings database — the next start imports `.env` again).
+
+Changing search settings after the first start: `.env` is no longer read
+for them; use `docker compose exec server /owis_find_deal_engine settings
+set KEY VALUE` (applied within ~10 s, no restart).
 
 ## Feedback checklist
 
 Please report:
 
-1. Did `docker compose up -d --build` work? All three containers healthy?
+1. Did `docker compose up -d --build` work? All four containers healthy?
 2. Search results for a few products per country (`usa`, `ksa`, `jor`):
    - number of results, which shops appear, are links correct?
    - `"provider"` in results (`searxng` or `serpapi`)?

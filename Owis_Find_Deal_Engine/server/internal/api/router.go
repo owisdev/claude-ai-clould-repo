@@ -4,6 +4,7 @@ package api
 import (
 	"log/slog"
 	"net/http"
+	"time"
 
 	"owis_find_deal_engine/internal/markets"
 	"owis_find_deal_engine/internal/ratelimit"
@@ -16,7 +17,10 @@ type Deps struct {
 	Verifier    TokenVerifier
 	Limiter     *ratelimit.Limiter
 	CORSOrigins []string
-	Log         *slog.Logger
+	// WriteTimeout bounds writing each response (0 = none). It is set per
+	// request because it follows the search timeout, a runtime setting.
+	WriteTimeout time.Duration
+	Log          *slog.Logger
 }
 
 // NewRouter returns the service's HTTP handler.
@@ -37,6 +41,7 @@ func NewRouter(d Deps) http.Handler {
 	))
 
 	return chain(mux,
+		writeDeadline(d.WriteTimeout),
 		requestID,
 		logRequests(d.Log),
 		recoverPanics(d.Log),

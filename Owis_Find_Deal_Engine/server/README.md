@@ -25,15 +25,18 @@ app ──POST /api/v1/search, Authorization: Bearer <JWT>──► server
 ### Full stack in Docker (production-like)
 
 ```sh
-cp .env.example .env        # AUTH_*, SEARXNG_SECRET, REDIS_PASSWORD (+ SERPAPI_KEY)
+cp .env.example .env        # AUTH_*, SEARXNG_SECRET, REDIS_PASSWORD, POSTGRES_PASSWORD,
+                            # SETTINGS_ENCRYPTION_KEY (+ SERPAPI_KEY)
 docker compose up -d --build
 curl localhost:3002/api/v1/health
 ```
 
-- `server`, `searxng`, `redis` run as non-root users, with read-only file
-  systems, all Linux capabilities dropped and memory limits.
+- `server`, `searxng`, `redis`, `postgres` run as non-root users, with
+  read-only file systems, all Linux capabilities dropped and memory limits.
 - Networks: `edge` (server + SearXNG, internet access) and `data`
-  (server + Redis, **internal**: no internet, nothing published).
+  (server + Redis + Postgres, **internal**: no internet, nothing published).
+- Postgres holds the runtime settings (see [Settings](#settings)); its
+  data is in the `postgres-data` volume (backups: phase 4).
 - Only the API is published, on `127.0.0.1:3002` (`API_BIND`/`API_PORT`).
   In production put Caddy/Nginx or a Cloudflare Tunnel in front for HTTPS.
 - Redis needs a password, keeps usage counters across restarts (AOF), and
@@ -45,10 +48,58 @@ curl localhost:3002/api/v1/health
 Requires Go 1.26+.
 
 ```sh
-docker compose -f docker-compose.yml -f compose.dev.yml up -d searxng redis
-set -a; . ./.env; set +a    # SEARXNG_URL / REDIS_URL point to 127.0.0.1
+docker compose -f docker-compose.yml -f compose.dev.yml up -d searxng redis postgres
+set -a; . ./.env; set +a    # SEARXNG_URL / REDIS_URL / DATABASE_URL point to 127.0.0.1
 go run ./cmd/owis_find_deal_engine
 ```
+
+## Settings
+
+Two kinds ([`internal/config/keys.go`](internal/config/keys.go)):
+
+- **bootstrap** — environment (`.env`) only, fixed while the server runs:
+  `PORT`, `DATABASE_URL`, `SETTINGS_ENCRYPTION_KEY`, `SETTINGS_POLL_INTERVAL`,
+  `ADMIN_EMAIL`, `AUTH_*`, `REDIS_URL`, `SEARXNG_URL`, `*_BASE_URL`,
+  `MARKETS_FILE`, `CACHE_MAX_ENTRIES`, `LOG_LEVEL`, `SHUTDOWN_TIMEOUT`;
+- **runtime** — everything about searches: providers, SerpApi / Apify
+  sources per shop (`APIFY_<SHOP>_*` included), timeouts, cache times,
+  plans, rate limits, CORS.
+
+With `DATABASE_URL` (always in docker compose) the runtime settings live in
+Postgres:
+
+- **First start:** migrations run, and the runtime settings found in the
+  environment are copied into the database once (history author
+  `import:env`). Afterwards `.env` no longer changes them; the server logs
+  a warning listing runtime keys in `.env` that differ from the database.
+- **Change without restart:** every change is validated as the whole
+  configuration it leads to and refused if invalid. The server checks the
+  settings version every `SETTINGS_POLL_INTERVAL` (10 s), builds a new
+  provider chain, cache front and router, and swaps them in at once;
+  searches already running finish on the old ones.
+- **Secrets** (`SERPAPI_KEY`, `APIFY_TOKEN`) are encrypted with AES-256-GCM
+  (`SETTINGS_ENCRYPTION_KEY`), write-only (never printed) and never written
+  to the history.
+- **History:** every change with who, when, old → new.
+
+Until the admin panel (step 8+), use the command line in the container:
+
+```sh
+S="docker compose exec server /owis_find_deal_engine"
+$S settings list                                  # value or (default), who changed it
+$S settings set APIFY_SHEIN_MAX_ITEMS 5 CACHE_FRESH_TTL 24h
+$S settings set -by owner APIFY_MARKETS aliexpress,temu,shein
+docker compose exec -T server /owis_find_deal_engine settings set SERPAPI_KEY - < serpapi.key
+$S settings unset CACHE_FRESH_TTL                 # back to the default
+$S settings history [KEY]
+$S admins list
+```
+
+Without `DATABASE_URL` all settings come from the environment, as before,
+and need a restart to change.
+
+Tables ([`internal/store/migrations`](internal/store/migrations)):
+`settings`, `settings_history`, `admins` (+ `schema_migrations`).
 
 ## Search providers
 
@@ -202,8 +253,12 @@ point `MARKETS_FILE` at another one); no code changes are needed.
 ## Layout
 
 ```
-cmd/owis_find_deal_engine   main: config, wiring, graceful shutdown
-internal/config             environment variables
+cmd/owis_find_deal_engine   main: config, wiring, settings swap, graceful
+                            shutdown; settings / admins command line
+internal/config             settings (environment or database), validation
+internal/settings           settings store: encryption, validated changes,
+                            import from .env, change watcher
+internal/store              Postgres: migrations, settings, history, admins
 internal/markets            countries -> marketplaces catalog
 internal/search             search service: worker pool, merge, ordering
 internal/search/fallback.go provider chain + circuit breaker
@@ -220,13 +275,15 @@ internal/api                router, handlers, middleware
 deploy/searxng              SearXNG settings
 Dockerfile                  distroless, non-root image (~19 MB)
 docker-compose.yml          full stack on private networks
-compose.dev.yml             dev override: SearXNG + Redis on 127.0.0.1
+compose.dev.yml             dev override: SearXNG, Redis, Postgres on 127.0.0.1
 ```
 
 ## Test
 
 ```sh
 gofmt -l . && go vet ./... && go test -race ./...
+# store tests need an empty throwaway database (its tables are dropped):
+TEST_DATABASE_URL=postgres://user:pass@127.0.0.1:5432/ofd_test?sslmode=disable go test -race ./internal/store
 go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 ```
 

@@ -2,6 +2,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -11,6 +12,8 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -25,6 +28,8 @@ import (
 	"owis_find_deal_engine/internal/providers/serpapi"
 	"owis_find_deal_engine/internal/ratelimit"
 	"owis_find_deal_engine/internal/search"
+	"owis_find_deal_engine/internal/settings"
+	"owis_find_deal_engine/internal/store"
 	"owis_find_deal_engine/internal/usage"
 
 	"github.com/redis/go-redis/v9"
@@ -38,6 +43,9 @@ func main() {
 	// curl in the image (distroless).
 	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
 		os.Exit(healthcheck())
+	}
+	if len(os.Args) > 1 && (os.Args[1] == "settings" || os.Args[1] == "admins") {
+		os.Exit(adminCommand(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 	}
 	if err := run(); err != nil {
 		slog.Error("server stopped", "err", err)
@@ -66,50 +74,56 @@ func healthcheck() int {
 }
 
 func run() error {
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("config: %w", err)
-	}
-
 	var level slog.Level
-	if err := level.UnmarshalText([]byte(cfg.LogLevel)); err != nil {
+	if err := level.UnmarshalText([]byte(cmp.Or(os.Getenv("LOG_LEVEL"), "info"))); err != nil {
 		return fmt.Errorf("LOG_LEVEL: %w", err)
 	}
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 	slog.SetDefault(log)
 
-	catalog, err := markets.Load(cfg.MarketsFile)
-	if err != nil {
-		return err
-	}
-	web, err := buildWebProvider(cfg, log)
-	if err != nil {
-		return err
-	}
-	log.Info("search providers", "chain", web.Name())
-
-	providers := map[string]search.Provider{"web": web}
-	catalog, err = addSerpAPIMarkets(cfg, catalog, providers, web, log)
-	if err != nil {
-		return err
-	}
-	catalog, err = addApifyProviders(cfg, catalog, providers, web, log)
-	if err != nil {
-		return err
-	}
-
-	searcher := search.NewService(catalog,
-		providers,
-		search.Options{Timeout: cfg.SearchTimeout, MaxConcurrency: cfg.MaxConcurrency,
-			PerMarket: cfg.ResultsPerMarket},
-		log)
-
 	// ctx is cancelled on SIGINT/SIGTERM and stops background goroutines.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	limiter := ratelimit.New(cfg.RateLimitRPS, cfg.RateLimitBurst, 10*time.Minute)
-	go limiter.Cleanup(ctx, time.Minute)
+	// Settings: from the database when DATABASE_URL is set (changes are
+	// applied without a restart), otherwise from the environment.
+	var (
+		cfg         config.Config
+		settingsVer int64
+		mgr         *settings.Manager
+	)
+	if os.Getenv("DATABASE_URL") != "" {
+		db, m, err := openSettings(ctx, log)
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		mgr = m
+		if cfg, settingsVer, err = mgr.Config(ctx); err != nil {
+			return fmt.Errorf("settings: %w", err)
+		}
+		if cfg.AdminEmail != "" {
+			added, err := db.EnsureFirstAdmin(ctx, cfg.AdminEmail)
+			if err != nil {
+				return fmt.Errorf("admins: %w", err)
+			}
+			if added {
+				log.Info("first admin added", "email", cfg.AdminEmail)
+			}
+		}
+		log.Info("settings loaded from the database", "settings_version", settingsVer)
+	} else {
+		var err error
+		if cfg, err = config.Load(); err != nil {
+			return fmt.Errorf("config: %w", err)
+		}
+		log.Warn("DATABASE_URL not set: settings come from the environment and need a restart to change")
+	}
+
+	baseCatalog, err := markets.Load(cfg.MarketsFile)
+	if err != nil {
+		return err
+	}
 
 	// Auth: download the provider's public keys once, then keep them fresh.
 	jwks := auth.NewJWKS(cfg.AuthJWKSURL, log)
@@ -128,14 +142,7 @@ func run() error {
 
 	// Redis (when configured) holds usage counters and the search cache so
 	// several instances share them; otherwise both live in memory.
-	plans, err := usage.ParsePlans(cfg.Plans, cfg.DefaultPlan)
-	if err != nil {
-		return err
-	}
-	var (
-		usageStore usage.Store
-		cacheStore cache.Store
-	)
+	sh := shared{log: log, catalog: baseCatalog, verifier: verifier}
 	if cfg.RedisURL != "" {
 		opts, err := redis.ParseURL(cfg.RedisURL)
 		if err != nil {
@@ -149,56 +156,63 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("redis: %w", err)
 		}
-		usageStore = usage.NewRedisStore(rdb)
-		cacheStore = cache.NewRedisStore(rdb)
+		sh.usageStore = usage.NewRedisStore(rdb)
+		sh.cacheStore = cache.NewRedisStore(rdb)
 		log.Info("usage counters and search cache in redis")
 	} else {
 		mem := usage.NewMemoryStore()
 		go mem.Cleanup(ctx, 10*time.Minute)
-		usageStore = mem
-		cacheStore = cache.NewMemoryStore(cfg.CacheMaxEntries)
+		sh.usageStore = mem
+		sh.cacheStore = cache.NewMemoryStore(cfg.CacheMaxEntries)
 		log.Warn("REDIS_URL not set: usage counters and search cache in memory, reset on restart")
 	}
 
-	cacheOrLive := metering.WithoutCache(searcher)
-	var searchCache *cache.Cache
-	if cfg.CacheEnabled {
-		searchCache = cache.New(searcher, cacheStore, catalog, cache.Options{
-			FreshTTL:             cfg.CacheFreshTTL,
-			PartialTTL:           cfg.CachePartialTTL,
-			EmptyTTL:             cfg.CacheEmptyTTL,
-			StaleTTL:             cfg.CacheStaleTTL,
-			MinRefresh:           cfg.CacheMinRefresh,
-			FetchTimeout:         cfg.SearchTimeout + 5*time.Second,
-			MaxBackgroundRefresh: cfg.CacheMaxBackgroundRefresh,
-			Variant: fmt.Sprintf("providers=%s;apify=%s;apify_empty_fallback=%t;serpapi_markets=%s;per_market=%d;searxng_one_query=%t;serpapi=%s",
-				web.Name(), strings.Join(cfg.ApifyMarkets, ","), cfg.ApifyEmptyFallback, strings.Join(cfg.SerpAPIMarkets, ","),
-				cfg.ResultsPerMarket, cfg.SearXNGOneQuery, cfg.SerpAPIEngine),
-		}, log)
-		cacheOrLive = searchCache
-		log.Info("search cache enabled", "fresh", cfg.CacheFreshTTL.String(), "stale", cfg.CacheStaleTTL.String())
+	first, err := buildApp(ctx, cfg, sh)
+	if err != nil {
+		return err
+	}
+	var (
+		current  atomic.Pointer[app]
+		retiring sync.WaitGroup
+	)
+	current.Store(first)
+	if mgr != nil {
+		// A settings change builds a new provider chain, cache front and
+		// router and swaps them in at once. Requests already running finish
+		// on the old ones, which are closed afterwards.
+		apply := func(next config.Config, v int64) error {
+			a, err := buildApp(ctx, next, sh)
+			if err != nil {
+				return err
+			}
+			old := current.Swap(a)
+			log.Info("settings applied", "settings_version", v)
+			retiring.Go(func() {
+				closeCtx, cancel := context.WithTimeout(context.Background(), old.cfg.SearchTimeout+15*time.Second)
+				defer cancel()
+				old.close(closeCtx)
+			})
+			return nil
+		}
+		go mgr.Watch(ctx, cfg.SettingsPollInterval, settingsVer, apply, log)
 	}
 
 	srv := &http.Server{
 		Addr: net.JoinHostPort("", cfg.Port),
-		Handler: api.NewRouter(api.Deps{
-			Catalog:     catalog,
-			Searcher:    metering.New(cacheOrLive, usage.NewQuota(usageStore, plans), log),
-			Verifier:    verifier,
-			Limiter:     limiter,
-			CORSOrigins: cfg.CORSOrigins,
-			Log:         log,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			current.Load().handler.ServeHTTP(w, r)
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      cfg.SearchTimeout + 10*time.Second,
-		IdleTimeout:       60 * time.Second,
-		MaxHeaderBytes:    16 << 10,
+		// The write timeout follows the search timeout, which is a runtime
+		// setting: the router sets it per request.
+		IdleTimeout:    60 * time.Second,
+		MaxHeaderBytes: 16 << 10,
 	}
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info("server started", "addr", srv.Addr, "version", version, "countries", len(catalog.Countries()))
+		log.Info("server started", "addr", srv.Addr, "version", version, "countries", len(baseCatalog.Countries()))
 		errCh <- srv.ListenAndServe()
 	}()
 
@@ -217,16 +231,155 @@ func run() error {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
 	}
-	if searchCache != nil {
-		// Let running background refreshes finish (they write to the cache).
-		if err := searchCache.Close(shutdownCtx); err != nil {
-			log.Warn("cache refreshes still running at shutdown", "err", err)
-		}
-		hits, stale, misses := searchCache.Stats()
-		log.Info("search cache stats", "hits", hits, "stale", stale, "misses", misses)
-	}
+	current.Load().close(shutdownCtx)
+	retiring.Wait()
 	log.Info("server stopped cleanly")
 	return nil
+}
+
+// openSettings connects to the database, applies migrations and, on the
+// first start, moves the runtime settings of the environment (.env) into
+// the database.
+func openSettings(ctx context.Context, log *slog.Logger) (*store.DB, *settings.Manager, error) {
+	db, mgr, err := connectSettings(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	imported, err := mgr.ImportEnv(ctx, os.Environ())
+	if err != nil {
+		db.Close()
+		return nil, nil, err
+	}
+	if len(imported) > 0 {
+		log.Info("runtime settings imported from the environment into the database", "keys", imported)
+	}
+	values, _, err := mgr.Values(ctx)
+	if err != nil {
+		db.Close()
+		return nil, nil, err
+	}
+	if ignored := settings.IgnoredEnv(values, os.Environ()); len(ignored) > 0 {
+		log.Warn("runtime settings in the environment differ from the database and are ignored; change them with the settings command",
+			"keys", ignored)
+	}
+	return db, mgr, nil
+}
+
+// connectSettings opens the database (migrated) and the settings manager.
+func connectSettings(ctx context.Context) (*store.DB, *settings.Manager, error) {
+	key := os.Getenv("SETTINGS_ENCRYPTION_KEY")
+	if key == "" {
+		return nil, nil, errors.New("SETTINGS_ENCRYPTION_KEY is required when DATABASE_URL is set")
+	}
+	cipher, err := settings.NewCipher(key)
+	if err != nil {
+		return nil, nil, err
+	}
+	db, err := store.Open(ctx, os.Getenv("DATABASE_URL"))
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, err := db.Migrate(ctx); err != nil {
+		db.Close()
+		return nil, nil, fmt.Errorf("database migrations: %w", err)
+	}
+	return db, settings.NewManager(db, cipher, os.LookupEnv), nil
+}
+
+// shared are the parts that stay when the runtime settings change.
+type shared struct {
+	log        *slog.Logger
+	catalog    *markets.Catalog // countries and shops, before source overrides
+	verifier   *auth.Verifier
+	usageStore usage.Store
+	cacheStore cache.Store
+}
+
+// app is everything built from the runtime settings: providers, search
+// service, cache front, quotas, rate limiter and router.
+type app struct {
+	cfg     config.Config
+	handler http.Handler
+	cache   *cache.Cache // nil when the cache is off
+	stop    context.CancelFunc
+	log     *slog.Logger
+}
+
+func buildApp(ctx context.Context, cfg config.Config, sh shared) (*app, error) {
+	log := sh.log
+	web, err := buildWebProvider(cfg, log)
+	if err != nil {
+		return nil, err
+	}
+	log.Info("search providers", "chain", web.Name())
+
+	providers := map[string]search.Provider{"web": web}
+	catalog, err := addSerpAPIMarkets(cfg, sh.catalog, providers, web, log)
+	if err != nil {
+		return nil, err
+	}
+	catalog, err = addApifyProviders(cfg, catalog, providers, web, log)
+	if err != nil {
+		return nil, err
+	}
+	plans, err := usage.ParsePlans(cfg.Plans, cfg.DefaultPlan)
+	if err != nil {
+		return nil, err
+	}
+
+	searcher := search.NewService(catalog,
+		providers,
+		search.Options{Timeout: cfg.SearchTimeout, MaxConcurrency: cfg.MaxConcurrency,
+			PerMarket: cfg.ResultsPerMarket},
+		log)
+
+	ctx, stop := context.WithCancel(ctx)
+	limiter := ratelimit.New(cfg.RateLimitRPS, cfg.RateLimitBurst, 10*time.Minute)
+	go limiter.Cleanup(ctx, time.Minute)
+
+	a := &app{cfg: cfg, stop: stop, log: log}
+	cacheOrLive := metering.WithoutCache(searcher)
+	if cfg.CacheEnabled {
+		a.cache = cache.New(searcher, sh.cacheStore, catalog, cache.Options{
+			FreshTTL:             cfg.CacheFreshTTL,
+			PartialTTL:           cfg.CachePartialTTL,
+			EmptyTTL:             cfg.CacheEmptyTTL,
+			StaleTTL:             cfg.CacheStaleTTL,
+			MinRefresh:           cfg.CacheMinRefresh,
+			FetchTimeout:         cfg.SearchTimeout + 5*time.Second,
+			MaxBackgroundRefresh: cfg.CacheMaxBackgroundRefresh,
+			Variant: fmt.Sprintf("providers=%s;apify=%s;apify_empty_fallback=%t;serpapi_markets=%s;per_market=%d;searxng_one_query=%t;serpapi=%s",
+				web.Name(), strings.Join(cfg.ApifyMarkets, ","), cfg.ApifyEmptyFallback, strings.Join(cfg.SerpAPIMarkets, ","),
+				cfg.ResultsPerMarket, cfg.SearXNGOneQuery, cfg.SerpAPIEngine),
+		}, log)
+		cacheOrLive = a.cache
+		log.Info("search cache enabled", "fresh", cfg.CacheFreshTTL.String(), "stale", cfg.CacheStaleTTL.String())
+	}
+
+	a.handler = api.NewRouter(api.Deps{
+		Catalog:      catalog,
+		Searcher:     metering.New(cacheOrLive, usage.NewQuota(sh.usageStore, plans), log),
+		Verifier:     sh.verifier,
+		Limiter:      limiter,
+		CORSOrigins:  cfg.CORSOrigins,
+		WriteTimeout: cfg.SearchTimeout + 10*time.Second,
+		Log:          log,
+	})
+	return a, nil
+}
+
+// close stops the app's background work and lets running cache refreshes
+// finish until ctx ends.
+func (a *app) close(ctx context.Context) {
+	a.stop()
+	if a.cache == nil {
+		return
+	}
+	if err := a.cache.Close(ctx); err != nil {
+		a.log.Warn("cache refreshes still running at shutdown", "err", err)
+	}
+	hits, stale, misses := a.cache.Stats()
+	a.log.Info("search cache stats", "hits", hits, "stale", stale, "misses", misses)
 }
 
 // buildWebProvider creates the configured providers in SEARCH_PROVIDERS

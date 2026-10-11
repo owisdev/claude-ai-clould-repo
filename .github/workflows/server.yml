@@ -26,6 +26,18 @@ jobs:
     name: format, vet, test, vulnerabilities
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      # Throwaway database for the store tests (TEST_DATABASE_URL).
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ofd
+          POSTGRES_PASSWORD: ofd
+          POSTGRES_DB: ofd_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ofd -d ofd_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v7
 
@@ -52,6 +64,8 @@ jobs:
         run: go vet ./...
 
       - name: Test (race detector)
+        env:
+          TEST_DATABASE_URL: postgres://ofd:ofd@localhost:5432/ofd_test?sslmode=disable
         run: go test -race -count=1 ./...
 
       - name: Known vulnerabilities
@@ -67,7 +81,7 @@ jobs:
 
       - name: Validate docker-compose files
         run: |
-          printf 'SEARXNG_SECRET=ci\nREDIS_PASSWORD=ci\n' > .env
+          printf 'SEARXNG_SECRET=ci\nREDIS_PASSWORD=ci\nPOSTGRES_PASSWORD=ci\nSETTINGS_ENCRYPTION_KEY=ci\n' > .env
           docker compose config -q
           docker compose -f docker-compose.yml -f compose.dev.yml config -q
           rm .env

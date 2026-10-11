@@ -300,14 +300,24 @@ All paths under `/api/v1`. Errors: `{"error": {"code", "message"}}`.
 | POST | `/mcp` (MCP tools for AI agents) | API key | step 13 |
 | * | `/admin/v1/...` (settings, clients, usage, audit) | JWT + admin role | steps 8–11 |
 | POST | `/search` `{"title","country"}` | JWT + quota | ✅ |
-| GET/PATCH | `/me` | JWT | step 7 |
-| GET/POST | `/cart`, PATCH/DELETE `/cart/{id}` | JWT | step 9 |
-| POST | `/clicks` | JWT | step 10 |
-| GET/POST | `/purchases` | JWT | step 10 |
-| GET | `/notifications`, POST `/notifications/{id}/read` | JWT | step 11 |
-| POST | `/devices` | JWT | step 11 |
+| GET/PATCH | `/me` | JWT | step 15 |
+| GET/POST | `/cart`, PATCH/DELETE `/cart/{id}` | JWT | step 17 |
+| POST | `/clicks` | JWT | step 18 |
+| GET/POST | `/purchases` | JWT | step 18 |
+| GET | `/notifications`, POST `/notifications/{id}/read` | JWT | step 19 |
+| POST | `/devices` | JWT | step 19 |
 
-## 7. Data model (PostgreSQL, from step 6)
+## 7. Data model (PostgreSQL)
+
+Since step 7 (✅):
+
+```
+settings          key (PK), value (secrets AES-256-GCM encrypted), secret, updated_at, updated_by
+settings_history  id, key, old_value, new_value (NULL for secrets), secret, changed_by, changed_at
+admins            id, email (unique, lower case), firebase_uid (unique, NULL until first login), created_at, created_by, disabled_at
+```
+
+Users (phase 5):
 
 ```
 users          id, firebase_uid (unique), email, country, language, plan_id, created_at
@@ -339,8 +349,9 @@ Owis_Find_Deal_Engine/
 │       ├── usage/                   # plans, daily quotas (Redis / memory)
 │       ├── ratelimit/               # per-user token bucket
 │       ├── api/                     # router, handlers, middleware
-│       ├── store/                   # Postgres (step 6)
-│       └── notify/                  # inbox + FCM (step 10)
+│       ├── settings/                # settings store: encryption, validation, watcher (step 7)
+│       ├── store/                   # Postgres: migrations, settings, admins (step 7)
+│       └── notify/                  # inbox + FCM (step 19)
 └── app/                             # client apps (later)
 ```
 
@@ -387,13 +398,23 @@ first, keys made in the panel (partners later).
 
 **Phase 2 — admin panel** (control every setting of the service)
 
-7. **Database + settings store.** Postgres joins the stack (migrations,
+7. ✅ **Database + settings store.** Postgres joins the stack (migrations,
    private network, backups later). Tables: `settings` (current values),
    `settings_history` (every change: who, when, old → new), `admins`.
    Runtime settings move from `.env` to the database; `.env` keeps only
    bootstrap values (database URL, auth issuer, encryption key, first
    admin). On change the server rebuilds its provider chain and swaps it
    atomically — no restart, searches in flight finish on the old one.
+   *Built 2026-10-11:* Postgres 17 on the internal `data` network; embedded
+   SQL migrations (advisory lock, safe with several instances); on the
+   first start the runtime settings in `.env` are imported once; every
+   change validated as a whole before it is stored; secrets AES-256-GCM
+   (`SETTINGS_ENCRYPTION_KEY`), write-only, not in the history; the server
+   polls the settings version (`SETTINGS_POLL_INTERVAL`, 10 s) and swaps a
+   new provider chain + cache front + router atomically; first admin from
+   `ADMIN_EMAIL`; command line `settings list|get|set|unset|history`,
+   `admins list` until the admin API exists. Countries and shops
+   (`markets.json`) stay a file until step 8.
 8. **Admin API** `/admin/v1/...` — separate from the public API:
    - login with the same auth provider (Firebase) **plus** an admin role
      (admin allow-list in the database / custom claim); every call checked
