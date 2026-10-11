@@ -18,6 +18,7 @@ export interface AdminConfig {
   firebase_auth_domain: string;
   firebase_project_id: string;
   require_2fa: boolean;
+  require_verified_email: boolean;
 }
 
 let auth: Auth | null = null;

@@ -26,6 +26,7 @@ type Config struct {
 	FirebaseAuthDomain string `json:"firebase_auth_domain"`
 	FirebaseProjectID  string `json:"firebase_project_id"`
 	Require2FA         bool   `json:"require_2fa"`
+	RequireVerified    bool   `json:"require_verified_email"`
 }
 
 // csp allows only the app's own files and the Firebase sign-in endpoints.

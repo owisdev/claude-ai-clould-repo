@@ -490,7 +490,9 @@ first, keys made in the panel (partners later).
 Redis, Postgres)
 
 14. **Turn on two-factor admin login** (`ADMIN_REQUIRE_2FA=true`, Firebase
-    Identity Platform, admins enrolled; disabled since 2026-10-11).
+    Identity Platform, admins enrolled; disabled since 2026-10-11) **and
+    admin email verification** (`ADMIN_REQUIRE_VERIFIED_EMAIL=true`, real
+    admin emails, verified; disabled since 2026-10-11).
     Hosting choice (section 10), domain, HTTPS (Caddy / Cloudflare),
     hardening of section 3.2, secrets in the host's secret store,
     Postgres backups, staging + production, CI/CD deploy from `main`,

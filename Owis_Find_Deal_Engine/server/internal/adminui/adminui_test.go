@@ -49,7 +49,7 @@ func TestServesApp(t *testing.T) {
 		t.Errorf("traversal = %d %q", rec.Code, rec.Body)
 	}
 	rec = get(t, h, "GET", "/admin/config.json")
-	if rec.Code != 200 || rec.Body.String() != `{"firebase_api_key":"key","firebase_auth_domain":"","firebase_project_id":"p","require_2fa":false}` {
+	if rec.Code != 200 || rec.Body.String() != `{"firebase_api_key":"key","firebase_auth_domain":"","firebase_project_id":"p","require_2fa":false,"require_verified_email":false}` {
 		t.Errorf("config = %d %s", rec.Code, rec.Body)
 	}
 }
