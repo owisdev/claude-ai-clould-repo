@@ -95,6 +95,11 @@ $S settings history [KEY]
 $S admins list
 ```
 
+Git Bash on Windows rewrites arguments starting with `/` into Windows
+paths ("no such file"): run `export MSYS_NO_PATHCONV=1` first, or write
+`//owis_find_deal_engine`. In PowerShell pipe secrets in instead of `<`:
+`"key" | docker compose exec -T server /owis_find_deal_engine settings set SERPAPI_KEY -`.
+
 Without `DATABASE_URL` all settings come from the environment, as before,
 and need a restart to change.
 

@@ -56,6 +56,9 @@ Regenerate the PDFs: `python3 docs/build_flow_and_plan_pdfs.py` and
    log shows "runtime settings imported from the environment".
 3. `docker compose exec server /owis_find_deal_engine settings list` — do
    the values match your `.env`? Secrets show "(set, hidden)".
+   (Git Bash: `export MSYS_NO_PATHCONV=1` first, otherwise the `/…` path
+   is turned into a Windows path. Owner check 2026-10-11: containers
+   healthy, import correct.)
 4. Change one, e.g. `… settings set APIFY_SHEIN_MAX_ITEMS 3`, and check
    the log line "settings applied" within ~10 s, then a search.
 5. Report problems with `docker compose logs server postgres`.
