@@ -18,6 +18,7 @@ import (
 	"owis_find_deal_engine/internal/markets"
 	"owis_find_deal_engine/internal/search"
 	"owis_find_deal_engine/internal/settings"
+	"owis_find_deal_engine/internal/stats"
 	"owis_find_deal_engine/internal/store"
 )
 
@@ -408,6 +409,49 @@ func (h *adminHandlers) providers(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"settings_version": rt.Status().SettingsVersion,
 		"chains":           rt.Health(),
+	})
+}
+
+// usage is the usage and cost dashboard for the last ?days= UTC days
+// (today included), with the ?top= most searched queries and this month's
+// budget.
+func (h *adminHandlers) usage(w http.ResponseWriter, r *http.Request) {
+	days, err := queryInt(r, "days", 30, 1, 400)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		return
+	}
+	top, err := queryInt(r, "top", 20, 1, 100)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		return
+	}
+	now := time.Now().UTC()
+	to := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	from := to.AddDate(0, 0, -(days - 1))
+	month := stats.MonthStart(now)
+
+	ctx := r.Context()
+	rows, err := h.d.Store.UsageRows(ctx, from, to)
+	var queries []store.QueryRow
+	if err == nil {
+		queries, err = h.d.Store.TopQueries(ctx, from, to, top)
+	}
+	var spent float64
+	if err == nil {
+		spent, err = h.d.Store.UsageCost(ctx, month, to)
+	}
+	if err != nil {
+		h.storeError(w, r, err)
+		return
+	}
+	st := h.d.Runtime().Status()
+	rep := stats.BuildReport(from, to, rows, queries, stats.NewBudget(month, spent, st.BudgetMonthlyUSD, st.BudgetAlertPercent))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"report": rep,
+		"note": "Counts are saved by each server every " + stats.FlushInterval.String() +
+			" (UTC days). Costs are estimates from SERPAPI_SEARCH_COST_USD and APIFY_<SHOP>_RUN_COST_USD; " +
+			"check the Apify and SerpApi consoles for the bill.",
 	})
 }
 

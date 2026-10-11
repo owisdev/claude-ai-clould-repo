@@ -65,6 +65,11 @@ type Config struct {
 	// (0 = free plan / unknown), shown by the admin test search.
 	SerpAPISearchCostUSD float64
 
+	// Monthly budget for the estimated cost of sources (0 = none) and the
+	// share of it that raises an alert (usage dashboard, step 9).
+	BudgetMonthlyUSD   float64
+	BudgetAlertPercent int
+
 	// End-user JWTs from the auth provider (Firebase, Supabase, Clerk, ...).
 	AuthJWKSURL   string
 	AuthIssuer    string
@@ -159,6 +164,8 @@ func LoadFrom(lookup Lookup) (Config, error) {
 		ApifyRunCostUSD:           map[string]float64{},
 		SerpAPISearchCostUSD:      parse(getenv, &errs, "SERPAPI_SEARCH_COST_USD", 0, parseFloat),
 		CacheGeneration:           parse(getenv, &errs, "CACHE_GENERATION", 0, strconv.Atoi),
+		BudgetMonthlyUSD:          parse(getenv, &errs, "BUDGET_MONTHLY_USD", 0, parseFloat),
+		BudgetAlertPercent:        parse(getenv, &errs, "BUDGET_ALERT_PERCENT", 80, strconv.Atoi),
 		ApifyMaxItems:             parse(getenv, &errs, "APIFY_MAX_ITEMS", 10, strconv.Atoi),
 		ApifyEmptyFallback:        parse(getenv, &errs, "APIFY_EMPTY_FALLBACK", false, strconv.ParseBool),
 		ApifyTimeout:              parse(getenv, &errs, "APIFY_TIMEOUT", 60*time.Second, time.ParseDuration),
@@ -198,6 +205,9 @@ func LoadFrom(lookup Lookup) (Config, error) {
 	}
 	if cfg.AdminSessionMaxAge < 5*time.Minute {
 		errs = append(errs, errors.New("ADMIN_SESSION_MAX_AGE must be at least 5m"))
+	}
+	if cfg.BudgetMonthlyUSD < 0 || cfg.BudgetAlertPercent < 1 || cfg.BudgetAlertPercent > 100 {
+		errs = append(errs, errors.New("BUDGET_MONTHLY_USD must not be negative and BUDGET_ALERT_PERCENT must be 1-100"))
 	}
 	if cfg.SerpAPISearchCostUSD < 0 || cfg.CacheGeneration < 0 {
 		errs = append(errs, errors.New("SERPAPI_SEARCH_COST_USD and CACHE_GENERATION must not be negative"))

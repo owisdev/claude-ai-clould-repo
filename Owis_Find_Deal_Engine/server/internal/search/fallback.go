@@ -22,6 +22,9 @@ type FallbackOptions struct {
 	// Cooldown (circuit breaker), so a broken instance adds no latency.
 	FailureThreshold int
 	Cooldown         time.Duration
+	// Recorder, if set, is told every time the chain moves on to the next
+	// provider (usage dashboard).
+	Recorder Recorder
 }
 
 // Fallback tries providers in order (e.g. free SearXNG, then paid SerpApi)
@@ -116,6 +119,7 @@ func (f *Fallback) Search(ctx context.Context, q Query) ([]Product, error) {
 		b := f.breakers[i]
 		if !last && !b.allow() {
 			errs = append(errs, fmt.Errorf("%s: skipped, circuit open", p.Name()))
+			f.recordFallback(i, FallbackCircuitOpen)
 			continue
 		}
 
@@ -155,6 +159,7 @@ func (f *Fallback) Search(ctx context.Context, q Query) ([]Product, error) {
 			if !last && ctx.Err() == nil {
 				f.log.InfoContext(ctx, "some markets not answered, asking next provider",
 					"provider", p.Name(), "next", f.providers[i+1].Name(), "markets", targetIDs(open))
+				f.recordFallback(i, FallbackPartial)
 			}
 		} else {
 			errs = append(errs, err)
@@ -175,6 +180,7 @@ func (f *Fallback) Search(ctx context.Context, q Query) ([]Product, error) {
 		}
 		f.log.InfoContext(ctx, "provider failed, falling back",
 			"provider", p.Name(), "next", f.providers[i+1].Name(), "err", err)
+		f.recordFallback(i, FallbackError)
 	}
 	if !partial {
 		return nil, errors.Join(errs...)
@@ -191,6 +197,13 @@ func (f *Fallback) Search(ctx context.Context, q Query) ([]Product, error) {
 		return found, nil
 	}
 	return nil, &PartialError{Products: found, Failed: still}
+}
+
+// recordFallback reports moving from provider i to the next one.
+func (f *Fallback) recordFallback(i int, reason string) {
+	if f.opts.Recorder != nil && i+1 < len(f.providers) {
+		f.opts.Recorder.Fallback(f.name, f.providers[i].Name(), f.providers[i+1].Name(), reason)
+	}
 }
 
 // breaker is a minimal consecutive-failure circuit breaker. After cooldown

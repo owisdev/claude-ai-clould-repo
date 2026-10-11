@@ -443,10 +443,19 @@ first, keys made in the panel (partners later).
    (`SERPAPI_SEARCH_COST_USD`, `APIFY_<SHOP>_RUN_COST_USD`); forget one
    cached search; bump `CACHE_GENERATION`; breaker state per source.
    Command line gained `admins add|disable|enable|unlink` and `audit`.
-9. **Usage and cost dashboard:** live searches, cache hit rate, fallbacks
+9. ✅ **Usage and cost dashboard:** live searches, cache hit rate, fallbacks
    and errors per source, estimated cost per day (Apify runs × price per
    Actor, SerpApi searches), top queries; alert when the monthly budget
    reaches a limit set in the panel.
+   *Built 2026-10-11:* counters in memory, added to Postgres every 30 s and
+   at shutdown (`usage_daily` per UTC day, kept 400 days; `query_daily` for
+   top queries, no user ids, kept 90 days; several instances add up);
+   every source call is counted per shop with outcome, time and estimated
+   cost, every fallback with its reason, every user search as hit / stale /
+   live / quota / error; `GET /admin/v1/usage`; budget settings
+   `BUDGET_MONTHLY_USD`, `BUDGET_ALERT_PERCENT` → alert (error log + audit
+   entry `budget.alert`, once per level and month) and dashboard status.
+   No hard stop yet.
 10. **Admin web app** (desktop browser): settings forms with validation,
     dashboard, audit log, API clients (step 11). Built as a static web app
     and served by the same server under `/admin` (same origin, one deploy).

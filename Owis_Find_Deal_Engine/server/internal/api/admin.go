@@ -40,6 +40,9 @@ type AdminStore interface {
 	Settings(ctx context.Context) ([]store.Setting, int64, error)
 	SettingsVersion(ctx context.Context) (int64, error)
 	SettingsHistory(ctx context.Context, key string, limit int) ([]store.Change, error)
+	UsageRows(ctx context.Context, from, to time.Time) ([]store.UsageRow, error)
+	TopQueries(ctx context.Context, from, to time.Time, limit int) ([]store.QueryRow, error)
+	UsageCost(ctx context.Context, from, to time.Time) (float64, error)
 }
 
 // SettingsChanger validates and stores settings changes (settings.Manager).
@@ -69,6 +72,9 @@ type RuntimeStatus struct {
 	MarketsJSON     []byte `json:"-"`
 	CacheEnabled    bool   `json:"cache_enabled"`
 	CacheGeneration int    `json:"cache_generation"`
+	// Monthly budget of the estimated source cost (0 = none).
+	BudgetMonthlyUSD   float64 `json:"budget_monthly_usd"`
+	BudgetAlertPercent int     `json:"budget_alert_percent"`
 }
 
 // AdminDeps are the admin router's dependencies.
@@ -114,6 +120,7 @@ const adminWriteTimeout = 330 * time.Second
 //	POST   /admin/v1/tools/cache/forget      {"title", "country"}
 //	POST   /admin/v1/tools/cache/bump        every cached answer becomes a miss
 //	GET    /admin/v1/tools/providers         circuit breaker state per source
+//	GET    /admin/v1/usage                   usage and cost dashboard: ?days=30&top=20
 func NewAdminRouter(d AdminDeps) http.Handler {
 	if d.IPLimiter == nil {
 		d.IPLimiter = ratelimit.New(10, 40, 10*time.Minute)
@@ -146,6 +153,7 @@ func NewAdminRouter(d AdminDeps) http.Handler {
 	mux.HandleFunc("POST /admin/v1/tools/cache/forget", h.forgetCached)
 	mux.HandleFunc("POST /admin/v1/tools/cache/bump", h.bumpCache)
 	mux.HandleFunc("GET /admin/v1/tools/providers", h.providers)
+	mux.HandleFunc("GET /admin/v1/usage", h.usage)
 	mux.HandleFunc("/admin/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "no such admin endpoint")
 	})

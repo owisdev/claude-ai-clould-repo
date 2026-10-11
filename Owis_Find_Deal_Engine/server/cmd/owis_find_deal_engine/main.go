@@ -29,6 +29,7 @@ import (
 	"owis_find_deal_engine/internal/ratelimit"
 	"owis_find_deal_engine/internal/search"
 	"owis_find_deal_engine/internal/settings"
+	"owis_find_deal_engine/internal/stats"
 	"owis_find_deal_engine/internal/store"
 	"owis_find_deal_engine/internal/usage"
 
@@ -138,6 +139,18 @@ func run() error {
 	// Redis (when configured) holds usage counters and the search cache so
 	// several instances share them; otherwise both live in memory.
 	sh := shared{log: log, verifier: verifier}
+	if db != nil {
+		// Usage counters for the dashboard: saved every 30 s, the last ones
+		// after shutdown (before the database closes).
+		sh.stats = stats.NewRecorder()
+		statsCtx, stopStats := context.WithCancel(context.Background())
+		var statsDone sync.WaitGroup
+		defer func() {
+			stopStats()
+			statsDone.Wait()
+		}()
+		statsDone.Go(func() { sh.stats.Run(statsCtx, db, stats.FlushInterval, log) })
+	}
 	if cfg.RedisURL != "" {
 		opts, err := redis.ParseURL(cfg.RedisURL)
 		if err != nil {
@@ -190,6 +203,10 @@ func run() error {
 			return nil
 		}
 		go mgr.Watch(ctx, cfg.SettingsPollInterval, settingsVer, apply, log)
+	}
+
+	if db != nil {
+		go watchUsage(ctx, db, func() config.Config { return current.Load().cfg }, log)
 	}
 
 	// The admin API (with a database only) stays while the settings change;
@@ -306,6 +323,7 @@ func connectSettings(ctx context.Context) (*store.DB, *settings.Manager, error) 
 
 // shared are the parts that stay when the runtime settings change.
 type shared struct {
+	stats      *stats.Recorder // usage counters; nil without a database
 	log        *slog.Logger
 	verifier   *auth.Verifier
 	usageStore usage.Store
@@ -326,18 +344,19 @@ type app struct {
 
 func buildApp(ctx context.Context, cfg config.Config, settingsVersion int64, sh shared) (*app, error) {
 	log := sh.log
-	web, err := buildWebProvider(cfg, log)
+	rec := sh.recorder()
+	web, err := buildWebProvider(cfg, rec, log)
 	if err != nil {
 		return nil, err
 	}
 	log.Info("search providers", "chain", web.Name())
 
 	providers := map[string]search.Provider{"web": web}
-	catalog, err := addSerpAPIMarkets(cfg, cfg.Catalog, providers, web, log)
+	catalog, err := addSerpAPIMarkets(cfg, cfg.Catalog, providers, web, rec, log)
 	if err != nil {
 		return nil, err
 	}
-	catalog, err = addApifyProviders(cfg, catalog, providers, web, log)
+	catalog, err = addApifyProviders(cfg, catalog, providers, web, rec, log)
 	if err != nil {
 		return nil, err
 	}
@@ -377,7 +396,7 @@ func buildApp(ctx context.Context, cfg config.Config, settingsVersion int64, sh 
 
 	a.handler = api.NewRouter(api.Deps{
 		Catalog:      catalog,
-		Searcher:     metering.New(cacheOrLive, usage.NewQuota(sh.usageStore, plans), log),
+		Searcher:     metering.New(cacheOrLive, usage.NewQuota(sh.usageStore, plans), log).WithRecorder(sh.searchRecorder()),
 		Verifier:     sh.verifier,
 		Limiter:      limiter,
 		CORSOrigins:  cfg.CORSOrigins,
@@ -394,7 +413,8 @@ type adminRuntime struct {
 }
 
 func (r adminRuntime) Probe(ctx context.Context, req search.ProbeRequest) (*search.ProbeResult, error) {
-	return r.a.searcher.Probe(ctx, req, r.a.cost)
+	cfg := r.a.cfg
+	return r.a.searcher.Probe(ctx, req, func(provider, market string) float64 { return sourceCost(cfg, provider, market) })
 }
 
 func (r adminRuntime) ForgetCached(ctx context.Context, req search.Request) (bool, error) {
@@ -416,18 +436,90 @@ func (r adminRuntime) Status() api.RuntimeStatus {
 		MarketsJSON:     c.MarketsJSON,
 		CacheEnabled:    c.CacheEnabled,
 		CacheGeneration: c.CacheGeneration,
+
+		BudgetMonthlyUSD:   c.BudgetMonthlyUSD,
+		BudgetAlertPercent: c.BudgetAlertPercent,
 	}
 }
 
-// cost estimates one call of a source for a shop, from the cost settings.
-func (a *app) cost(provider, market string) float64 {
+// sourceCost estimates one call of a source for one shop, from the cost
+// settings.
+func sourceCost(cfg config.Config, provider, market string) float64 {
 	switch {
 	case provider == "apify":
-		return a.cfg.ApifyRunCostUSD[market]
+		return cfg.ApifyRunCostUSD[market]
 	case strings.HasPrefix(provider, "serpapi"):
-		return a.cfg.SerpAPISearchCostUSD
+		return cfg.SerpAPISearchCostUSD
 	}
 	return 0
+}
+
+// callCost estimates one call of a source for several shops: a scraper
+// runs once per shop, a SerpApi call is one search whatever the shops.
+func callCost(cfg config.Config, provider string) func(markets []string) float64 {
+	return func(markets []string) float64 {
+		if provider == "apify" {
+			var sum float64
+			for _, m := range markets {
+				sum += sourceCost(cfg, provider, m)
+			}
+			return sum
+		}
+		if len(markets) == 0 {
+			return 0
+		}
+		return sourceCost(cfg, provider, markets[0])
+	}
+}
+
+// recorder returns the usage counters as a search.Recorder (nil = off).
+func (sh shared) recorder() search.Recorder {
+	if sh.stats == nil {
+		return nil
+	}
+	return sh.stats
+}
+
+// searchRecorder returns the usage counters as a metering.SearchRecorder.
+func (sh shared) searchRecorder() metering.SearchRecorder {
+	if sh.stats == nil {
+		return nil
+	}
+	return sh.stats
+}
+
+// Usage data is kept this long (UTC days).
+const (
+	usageRetention   = 400 * 24 * time.Hour
+	queriesRetention = 90 * 24 * time.Hour
+)
+
+// watchUsage checks the monthly budget every minute (alert in the log and
+// the audit log) and deletes old usage data every hour, until ctx ends.
+func watchUsage(ctx context.Context, db *store.DB, cfg func() config.Config, log *slog.Logger) {
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	var lastPrune time.Time
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		c := cfg()
+		if c.BudgetMonthlyUSD > 0 {
+			if _, err := stats.CheckBudget(ctx, db, time.Now(), c.BudgetMonthlyUSD, c.BudgetAlertPercent, log); err != nil && ctx.Err() == nil {
+				log.Warn("budget check failed", "err", err)
+			}
+		}
+		if time.Since(lastPrune) > time.Hour {
+			now := time.Now().UTC()
+			if err := db.PruneUsage(ctx, now.Add(-usageRetention), now.Add(-queriesRetention)); err != nil && ctx.Err() == nil {
+				log.Warn("deleting old usage data failed", "err", err)
+			}
+			lastPrune = time.Now()
+		}
+	}
 }
 
 // close stops the app's background work and lets running cache refreshes
@@ -446,7 +538,7 @@ func (a *app) close(ctx context.Context) {
 
 // buildWebProvider creates the configured providers in SEARCH_PROVIDERS
 // order and chains them: the first that succeeds answers the search.
-func buildWebProvider(cfg config.Config, log *slog.Logger) (search.Provider, error) {
+func buildWebProvider(cfg config.Config, rec search.Recorder, log *slog.Logger) (search.Provider, error) {
 	providers := make([]search.Provider, 0, len(cfg.SearchProviders))
 	for i, name := range cfg.SearchProviders {
 		last := i == len(cfg.SearchProviders)-1
@@ -470,13 +562,14 @@ func buildWebProvider(cfg config.Config, log *slog.Logger) (search.Provider, err
 		if err != nil {
 			return nil, err
 		}
-		providers = append(providers, p)
+		providers = append(providers, search.Instrument(p, rec, callCost(cfg, p.Name())))
 	}
 	return search.NewFallback(providers, search.FallbackOptions{
 		AttemptTimeout:   cfg.ProviderAttemptTimeout,
 		Timeouts:         map[string]time.Duration{"serpapi": cfg.SerpAPITimeout},
 		FailureThreshold: cfg.ProviderFailThreshold,
 		Cooldown:         cfg.ProviderCooldown,
+		Recorder:         rec,
 	}, log)
 }
 
@@ -484,7 +577,7 @@ func buildWebProvider(cfg config.Config, log *slog.Logger) (search.Provider, err
 // dedicated SerpApi engine (Amazon / eBay Search API), with the web
 // providers as fallback when it fails.
 func addSerpAPIMarkets(cfg config.Config, catalog *markets.Catalog, providers map[string]search.Provider,
-	web search.Provider, log *slog.Logger) (*markets.Catalog, error) {
+	web search.Provider, rec search.Recorder, log *slog.Logger) (*markets.Catalog, error) {
 	if len(cfg.SerpAPIMarkets) == 0 {
 		return catalog, nil
 	}
@@ -507,11 +600,13 @@ func addSerpAPIMarkets(cfg config.Config, catalog *markets.Catalog, providers ma
 		if err != nil {
 			return nil, err
 		}
+		engine = search.Instrument(engine, rec, callCost(cfg, engine.Name()))
 		chain, err := search.NewFallback([]search.Provider{engine, web}, search.FallbackOptions{
 			AttemptTimeout:   cfg.SerpAPITimeout,
 			Timeouts:         map[string]time.Duration{web.Name(): cfg.SearchTimeout},
 			FailureThreshold: cfg.ProviderFailThreshold,
 			Cooldown:         cfg.ProviderCooldown,
+			Recorder:         rec,
 		}, log)
 		if err != nil {
 			return nil, err
@@ -528,7 +623,7 @@ func addSerpAPIMarkets(cfg config.Config, catalog *markets.Catalog, providers ma
 // scraper, with the web providers as fallback when the scraper fails or is
 // too slow. Other marketplaces keep using the web providers.
 func addApifyProviders(cfg config.Config, catalog *markets.Catalog, providers map[string]search.Provider,
-	web search.Provider, log *slog.Logger) (*markets.Catalog, error) {
+	web search.Provider, rec search.Recorder, log *slog.Logger) (*markets.Catalog, error) {
 	if len(cfg.ApifyMarkets) == 0 {
 		return catalog, nil
 	}
@@ -549,13 +644,15 @@ func addApifyProviders(cfg config.Config, catalog *markets.Catalog, providers ma
 		if err != nil {
 			return nil, fmt.Errorf("APIFY_%s: %w", strings.ToUpper(m), err)
 		}
-		chain, err := search.NewFallback([]search.Provider{scraper, web}, search.FallbackOptions{
+		source := search.Instrument(scraper, rec, callCost(cfg, scraper.Name()))
+		chain, err := search.NewFallback([]search.Provider{source, web}, search.FallbackOptions{
 			AttemptTimeout: cfg.ApifyTimeout,
 			// The web chain has its own per-provider timeouts; the search
 			// timeout still bounds the whole search.
 			Timeouts:         map[string]time.Duration{web.Name(): cfg.SearchTimeout},
 			FailureThreshold: cfg.ProviderFailThreshold,
 			Cooldown:         cfg.ProviderCooldown,
+			Recorder:         rec,
 		}, log)
 		if err != nil {
 			return nil, err

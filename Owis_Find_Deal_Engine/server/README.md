@@ -64,7 +64,8 @@ Two kinds ([`internal/config/keys.go`](internal/config/keys.go)):
 - **runtime** — everything about searches: countries and shops
   (`MARKETS`), providers, SerpApi / Apify sources per shop
   (`APIFY_<SHOP>_*` included), estimated costs (`SERPAPI_SEARCH_COST_USD`,
-  `APIFY_<SHOP>_RUN_COST_USD`), timeouts, cache times and generation,
+  `APIFY_<SHOP>_RUN_COST_USD`), monthly budget (`BUDGET_MONTHLY_USD`,
+  `BUDGET_ALERT_PERCENT`), timeouts, cache times and generation,
   plans, rate limits, CORS.
 
 With `DATABASE_URL` (always in docker compose) the runtime settings live in
@@ -109,7 +110,8 @@ Without `DATABASE_URL` all settings come from the environment, as before,
 and need a restart to change.
 
 Tables ([`internal/store/migrations`](internal/store/migrations)):
-`settings`, `settings_history`, `admins`, `audit_log` (+ `schema_migrations`).
+`settings`, `settings_history`, `admins`, `audit_log`, `usage_daily`,
+`query_daily` (+ `schema_migrations`).
 
 ## Admin API
 
@@ -153,12 +155,39 @@ never secret values). Answers carry `Cache-Control: no-store`.
 | `POST /admin/v1/tools/cache/forget` | `{"title", "country"}` — next search for it is live |
 | `POST /admin/v1/tools/cache/bump` | raises `CACHE_GENERATION`: every cached answer becomes a miss |
 | `GET /admin/v1/tools/providers` | circuit breaker per source: `closed`, `open` (skipped until …), `half_open` |
+| `GET /admin/v1/usage?days=30&top=20` | usage and cost dashboard (see below) |
 
 Changes apply within `SETTINGS_POLL_INTERVAL` on every instance. Errors
 have the usual shape; extra codes: `forbidden`, `second_factor_required`,
 `session_expired`, `not_found`, `conflict`, `cache_disabled`.
 
-Try it (token of an admin who signed in with a second factor):
+### Usage and cost dashboard
+
+`GET /admin/v1/usage?days=30&top=20` — the last `days` UTC days (today
+included):
+
+- `totals`, `days` (one row per day), `countries`: user searches split into
+  `cache_hits`, `cache_stale`, `live`, `quota_refused`, `errors`, the
+  `cache_hit_rate` (cached share of answered searches), plus source calls,
+  fallbacks and estimated `cost_usd`;
+- `sources`: per source and shop — calls, `ok` / `no_results` / `errors`,
+  `error_rate`, `avg_ms`, `cost_usd` (admin test searches included: they
+  cost money too);
+- `fallbacks`: how often a chain moved on (`from` → `to`, reason `error`,
+  `partial` or `circuit_open`);
+- `top_queries`: most searched queries (normalized, per country, no user
+  ids; kept 90 days);
+- `budget`: this month's estimated cost against `BUDGET_MONTHLY_USD`,
+  `status` `none` / `ok` / `warning` (≥ `BUDGET_ALERT_PERCENT`) / `exceeded`.
+  Each level reached raises one alert per month: an `ERROR` log line and
+  an audit entry `budget.alert` (actor `system`). Nothing is blocked.
+
+Costs are **estimates** from `SERPAPI_SEARCH_COST_USD` (per SerpApi call)
+and `APIFY_<SHOP>_RUN_COST_USD` (per scraper run); the bill is in the
+SerpApi / Apify consoles. Each server keeps its counts in memory and adds
+them to Postgres every 30 s and at shutdown (`usage_daily`, kept 400 days).
+
+Try it (token of an admin):
 
 ```sh
 curl -H "Authorization: Bearer $ADMIN_TOKEN" localhost:3002/admin/v1/settings
@@ -344,6 +373,9 @@ internal/ratelimit          per-user token bucket
 internal/api                router, handlers, middleware; admin.go +
                             admin_handlers.go: the admin API
 internal/search/probe.go    admin test search, provider health
+internal/search/instrument.go  reports source calls and fallbacks
+internal/stats              usage counters (flushed to Postgres), dashboard
+                            report, monthly budget alert
 deploy/searxng              SearXNG settings
 Dockerfile                  distroless, non-root image (~19 MB)
 docker-compose.yml          full stack on private networks

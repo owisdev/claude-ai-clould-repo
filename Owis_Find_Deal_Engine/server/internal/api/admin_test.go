@@ -138,6 +138,22 @@ func (f *fakeAdminStore) SettingsHistory(context.Context, string, int) ([]store.
 	return append([]store.Change(nil), f.history...), nil
 }
 
+func (f *fakeAdminStore) UsageRows(_ context.Context, from, to time.Time) ([]store.UsageRow, error) {
+	return []store.UsageRow{
+		{Day: to, Kind: "search", K1: "jor", K2: "hit", Count: 3},
+		{Day: to, Kind: "search", K1: "jor", K2: "live", Count: 1},
+		{Day: to, Kind: "source", K1: "apify", K2: "temu", K3: "ok", Count: 1, CostUSD: 0.1, TotalMS: 30000},
+	}, nil
+}
+
+func (f *fakeAdminStore) TopQueries(context.Context, time.Time, time.Time, int) ([]store.QueryRow, error) {
+	return []store.QueryRow{{Country: "jor", Query: "usb hub", Searches: 4, Live: 1}}, nil
+}
+
+func (f *fakeAdminStore) UsageCost(context.Context, time.Time, time.Time) (float64, error) {
+	return 4.5, nil
+}
+
 func (f *fakeAdminStore) lastAudit() store.AuditEntry {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -193,7 +209,8 @@ func (f *fakeRuntime) Health() []search.ChainHealth {
 }
 
 func (f *fakeRuntime) Status() RuntimeStatus {
-	return RuntimeStatus{SettingsVersion: 3, MarketsSource: "built-in", MarketsJSON: markets.Default(), CacheEnabled: f.cacheOn, CacheGeneration: 4}
+	return RuntimeStatus{SettingsVersion: 3, MarketsSource: "built-in", MarketsJSON: markets.Default(), CacheEnabled: f.cacheOn, CacheGeneration: 4,
+		BudgetMonthlyUSD: 5, BudgetAlertPercent: 80}
 }
 
 type adminEnv struct {
@@ -524,4 +541,28 @@ func verifierFor(t *testing.T, p *authtest.Provider) *auth.Verifier {
 		t.Fatal(err)
 	}
 	return v
+}
+
+func TestAdminUsage(t *testing.T) {
+	e := newAdminEnv(t)
+	tok := e.token(t, "uid-1", "owner@example.com", nil)
+	rec, out := e.do(t, "GET", "/admin/v1/usage?days=7", tok, "")
+	if rec.Code != 200 {
+		t.Fatalf("usage = %d %s", rec.Code, rec.Body)
+	}
+	rep := out["report"].(map[string]any)
+	totals := rep["totals"].(map[string]any)
+	if totals["searches"] != 4.0 || totals["cache_hit_rate"] != 0.75 || totals["cost_usd"] != 0.1 || len(rep["days"].([]any)) != 7 {
+		t.Errorf("report = %v", rep)
+	}
+	budget := rep["budget"].(map[string]any)
+	if budget["status"] != "warning" || budget["percent"] != 90.0 || budget["limit_usd"] != 5.0 {
+		t.Errorf("budget = %v", budget)
+	}
+	if len(rep["top_queries"].([]any)) != 1 || out["note"] == "" {
+		t.Errorf("top queries / note = %v", out)
+	}
+	if rec, _ := e.do(t, "GET", "/admin/v1/usage?days=0", tok, ""); rec.Code != 400 {
+		t.Errorf("days=0 = %d", rec.Code)
+	}
 }

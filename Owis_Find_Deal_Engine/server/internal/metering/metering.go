@@ -55,11 +55,56 @@ type Outcome struct {
 	QuotaKnown bool
 }
 
+// Search outcomes reported to a SearchRecorder.
+const (
+	OutcomeHit   = "hit"   // fresh cached answer (free)
+	OutcomeStale = "stale" // cached answer past its fresh time (free, refreshed)
+	OutcomeLive  = "live"  // searched live (counted)
+	OutcomeQuota = "quota" // refused: daily allowance used up
+	OutcomeError = "error" // failed
+)
+
+// SearchRecorder receives every metered search (usage dashboard). Searches
+// with invalid input are not reported.
+type SearchRecorder interface {
+	Search(country, title, outcome string)
+}
+
 // Service meters searches. Safe for concurrent use.
 type Service struct {
 	searcher Searcher
 	quota    Quota
 	log      *slog.Logger
+	rec      SearchRecorder
+}
+
+// WithRecorder reports every search to rec; nil turns reporting off.
+func (s *Service) WithRecorder(rec SearchRecorder) *Service {
+	s.rec = rec
+	return s
+}
+
+// Search runs and reports a search; see search.
+func (s *Service) Search(ctx context.Context, user auth.User, req search.Request) (Outcome, error) {
+	out, err := s.search(ctx, user, req)
+	if s.rec != nil && user.ID != "" && !errors.Is(err, search.ErrInvalidTitle) && !errors.Is(err, search.ErrUnknownCountry) {
+		var quotaErr *QuotaError
+		outcome := OutcomeError
+		switch {
+		case err == nil && out.Result.Cached && out.Result.Stale:
+			outcome = OutcomeStale
+		case err == nil && out.Result.Cached:
+			outcome = OutcomeHit
+		case err == nil:
+			outcome = OutcomeLive
+		case errors.As(err, &quotaErr):
+			outcome = OutcomeQuota
+		case errors.Is(err, context.Canceled):
+			return out, err // client went away: not a search
+		}
+		s.rec.Search(req.Country, req.Title, outcome)
+	}
+	return out, err
 }
 
 // New returns a metering Service.
@@ -67,7 +112,7 @@ func New(searcher Searcher, quota Quota, log *slog.Logger) *Service {
 	return &Service{searcher: searcher, quota: quota, log: log}
 }
 
-// Search runs a search for user:
+// search runs a search for user:
 //  1. answer cached → returned free (not counted), even when the
 //     allowance is used up;
 //  2. otherwise one unit of the daily allowance is taken (*QuotaError when
@@ -77,7 +122,7 @@ func New(searcher Searcher, quota Quota, log *slog.Logger) *Service {
 //     given back.
 //
 // Search errors (search.ErrInvalidTitle, ...) are returned unchanged.
-func (s *Service) Search(ctx context.Context, user auth.User, req search.Request) (Outcome, error) {
+func (s *Service) search(ctx context.Context, user auth.User, req search.Request) (Outcome, error) {
 	if user.ID == "" {
 		return Outcome{}, errors.New("metering: unauthenticated search")
 	}

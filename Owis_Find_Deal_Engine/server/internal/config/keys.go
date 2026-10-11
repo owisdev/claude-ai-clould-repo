@@ -52,6 +52,8 @@ var runtimeKeys = []string{
 	"CORS_ALLOWED_ORIGINS",
 	"MARKETS",
 	"SERPAPI_SEARCH_COST_USD",
+	"BUDGET_MONTHLY_USD",
+	"BUDGET_ALERT_PERCENT",
 }
 
 // apifyMarketKey matches the per-shop Apify settings, e.g. APIFY_TEMU_INPUT.
