@@ -429,7 +429,8 @@ first, keys made in the panel (partners later).
      clear cache for a query / bump results version, provider health and
      circuit state.
    *Built 2026-10-11:* Firebase ID token + two-factor sign-in
-   (`firebase.sign_in_second_factor`, `ADMIN_REQUIRE_2FA`) + sign-in not
+   (`firebase.sign_in_second_factor`, `ADMIN_REQUIRE_2FA`; **disabled for
+   now** by the owner, default `false` — turn on at step 14) + sign-in not
    older than `ADMIN_SESSION_MAX_AGE` (12 h) + active entry in `admins`
    (uid linked at the first sign-in with a verified email); rate limits per
    IP, per admin and for the test search; table `audit_log` (every change,
@@ -471,7 +472,9 @@ first, keys made in the panel (partners later).
 **Phase 4 — deployment** (all parts: server, admin web app, SearXNG,
 Redis, Postgres)
 
-14. Hosting choice (section 10), domain, HTTPS (Caddy / Cloudflare),
+14. **Turn on two-factor admin login** (`ADMIN_REQUIRE_2FA=true`, Firebase
+    Identity Platform, admins enrolled; disabled since 2026-10-11).
+    Hosting choice (section 10), domain, HTTPS (Caddy / Cloudflare),
     hardening of section 3.2, secrets in the host's secret store,
     Postgres backups, staging + production, CI/CD deploy from `main`,
     monitoring and alerts (metrics; replace the hand-written circuit

@@ -206,7 +206,7 @@ func run() error {
 			Log:           log,
 		})
 		if !cfg.AdminRequire2FA {
-			log.Warn("ADMIN_REQUIRE_2FA=false: admins can sign in without a second factor; only for local tests")
+			log.Warn("two-factor admin login is disabled (ADMIN_REQUIRE_2FA=false); set it to true before production")
 		}
 	}
 

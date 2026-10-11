@@ -121,8 +121,10 @@ request is checked on the server:
 2. **signed in with a second factor** (`firebase.sign_in_second_factor`
    in the token; Firebase multi-factor needs *Identity Platform* turned on
    in the Firebase console — SMS or authenticator app). Without it:
-   `403 second_factor_required`. `ADMIN_REQUIRE_2FA=false` turns this off
-   for a local test only;
+   `403 second_factor_required`. **Currently disabled**
+   (`ADMIN_REQUIRE_2FA=false`, the default, owner decision 2026-10-11):
+   the check and the setting stay in place; **set `ADMIN_REQUIRE_2FA=true`
+   before production** (phase 4);
 3. a **recent sign-in**: older than `ADMIN_SESSION_MAX_AGE` (12 h) →
    `401 session_expired`, sign in again;
 4. an **active entry in the admin list**. The first sign-in with a

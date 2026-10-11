@@ -26,6 +26,8 @@ type Config struct {
 	AdminEmail           string        // first admin, added once to an empty admin list
 	// Admin API login (bootstrap): two-factor sign-in required, and how old
 	// the sign-in may be before the admin has to sign in again.
+	// Two-factor is off by default for now (owner, 2026-10-11); turn it on
+	// (ADMIN_REQUIRE_2FA=true) before production.
 	AdminRequire2FA    bool
 	AdminSessionMaxAge time.Duration
 
@@ -131,7 +133,7 @@ func LoadFrom(lookup Lookup) (Config, error) {
 		SettingsKey:               getenv("SETTINGS_ENCRYPTION_KEY"),
 		SettingsPollInterval:      parse(getenv, &errs, "SETTINGS_POLL_INTERVAL", 10*time.Second, time.ParseDuration),
 		AdminEmail:                strings.ToLower(strings.TrimSpace(getenv("ADMIN_EMAIL"))),
-		AdminRequire2FA:           parse(getenv, &errs, "ADMIN_REQUIRE_2FA", true, strconv.ParseBool),
+		AdminRequire2FA:           parse(getenv, &errs, "ADMIN_REQUIRE_2FA", false, strconv.ParseBool),
 		AdminSessionMaxAge:        parse(getenv, &errs, "ADMIN_SESSION_MAX_AGE", 12*time.Hour, time.ParseDuration),
 		AuthJWKSURL:               getenv("AUTH_JWKS_URL"),
 		AuthIssuer:                getenv("AUTH_ISSUER"),

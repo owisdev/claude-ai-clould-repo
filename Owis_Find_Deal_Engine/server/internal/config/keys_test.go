@@ -105,7 +105,7 @@ func TestLoadMarketsSetting(t *testing.T) {
 		return LoadFrom(func(k string) (string, bool) { v, ok := m[k]; return v, ok })
 	}
 	cfg, err := load(nil)
-	if err != nil || cfg.MarketsSource != "built-in" || cfg.Catalog == nil || len(cfg.MarketsJSON) == 0 || !cfg.AdminRequire2FA {
+	if err != nil || cfg.MarketsSource != "built-in" || cfg.Catalog == nil || len(cfg.MarketsJSON) == 0 || cfg.AdminRequire2FA {
 		t.Fatalf("default = %v %q %v", err, cfg.MarketsSource, cfg.AdminRequire2FA)
 	}
 	one := `{"markets":{"amazon":{"name":"Amazon","provider":"web"}},

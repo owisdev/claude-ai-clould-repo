@@ -54,16 +54,19 @@ README section "Admin API", PLAN.md step 8.
   audited, settings change applied in 1 s, secret never in logs / audit /
   database in clear, test search with all sources, cache bump, CLI.
 
-**Owner, to try step 8 (local, before the admin web app):**
+**Two-factor admin login: disabled for now (owner, 2026-10-11).** The
+check and its setting `ADMIN_REQUIRE_2FA` stay in the code; the default
+is `false`, so admins sign in with Firebase + the admin list only (the
+server logs a warning). **To do before production (phase 4, step 14):**
+turn on Firebase *Identity Platform* (Authentication → Settings → upgrade;
+free tier), let admins enrol a second factor (sign-in page of the admin
+web app, step 10) and set `ADMIN_REQUIRE_2FA=true`.
 
-Two-factor sign-in needs Firebase *Identity Platform* (Authentication →
-Settings → upgrade; free tier) and a sign-in page that can enrol a second
-factor — that page comes with the admin web app (step 10). Until then, for
-a **local** test only:
+**Owner, to try step 8:**
 
 1. In `.env`: `ADMIN_EMAIL=<your Firebase login email>` (already set at
-   step 7) and `ADMIN_REQUIRE_2FA=false`; `docker compose up -d --build`.
-   The log warns that 2FA is off. **Never use `false` once deployed.**
+   step 7); `ADMIN_REQUIRE_2FA` can stay out (default `false`);
+   `docker compose up -d --build`.
 2. The email must be verified once: sign in (`accounts:signInWithPassword`,
    README step 5), then
    `curl -s -X POST "https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=<WEB_API_KEY>" -H "Content-Type: application/json" -d '{"requestType":"VERIFY_EMAIL","idToken":"<idToken>"}'`
@@ -354,6 +357,9 @@ instant); label scraper prices as approximate in the app.
 - **D2 admin login:** Firebase login + admin list in the database +
   two-factor login required for admins. (Needed at step 8: the first
   admin's email.)
+  *Update 2026-10-11:* two-factor is **disabled for now**
+  (`ADMIN_REQUIRE_2FA=false`, setting kept) and turned on before
+  production.
 - **D3 secrets:** changeable in the admin panel — encrypted
   (AES-256-GCM, key from the environment), write-only, never shown again.
 - **D4 API clients:** own apps and AI agents first; keys created by the
