@@ -1,8 +1,13 @@
 # Project status and handoff
 
 Last updated: 2026-10-11 · Branch: `claude/awesome-edison-2a2fwh`
-(step 10; steps 7–9 are merged into `claude/cloud-vs-local-7xi988`, the
+(phase 2 complete and merged into `claude/cloud-vs-local-7xi988`, the
 project branch; nothing is merged into `main` yet).
+
+> **Next session: start phase 3, step 11 — API clients and keys.**
+> Say: "Continue the Owis_Find_Deal_Engine project from
+> `Owis_Find_Deal_Engine/STATUS.md` on branch `claude/cloud-vs-local-7xi988`.
+> Start phase 3, step 11."
 
 Read first:
 - [docs/current_flow.pdf](docs/current_flow.pdf) — **how the service works
@@ -42,6 +47,10 @@ complete.** Details: server README section "Admin web app", PLAN.md step 10.
   light and dark mode) against the server with a fake Firebase: sign-in,
   every page, saving a setting, an invalid change refused with the
   server's message, a test search; no script or CSP errors.
+
+**Owner check (2026-10-11):** steps 7–10 merged; signed in to the admin
+web app on the Docker stack (test admin with a made-up email, email
+verification off).
 
 **Owner, to try step 10:**
 
