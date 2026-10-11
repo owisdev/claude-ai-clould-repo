@@ -221,7 +221,9 @@ func run() error {
 			Verifier:      verifier,
 			Require2FA:    cfg.AdminRequire2FA,
 			SessionMaxAge: cfg.AdminSessionMaxAge,
-			Log:           log,
+
+			RequireVerifiedEmail: cfg.AdminRequireVerifiedEmail,
+			Log:                  log,
 		})
 		api := admin
 		ui := adminui.Handler(adminui.Config{
@@ -229,6 +231,7 @@ func run() error {
 			FirebaseAuthDomain: cfg.AdminFirebaseAuthDomain,
 			FirebaseProjectID:  cfg.AuthAudience,
 			Require2FA:         cfg.AdminRequire2FA,
+			RequireVerified:    cfg.AdminRequireVerifiedEmail,
 		})
 		admin = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if strings.HasPrefix(r.URL.Path, "/admin/v1/") {
@@ -239,6 +242,9 @@ func run() error {
 		})
 		if cfg.AdminFirebaseAPIKey == "" {
 			log.Warn("ADMIN_FIREBASE_API_KEY not set: the admin web app (/admin/) cannot sign in")
+		}
+		if !cfg.AdminRequireVerifiedEmail {
+			log.Warn("admin email verification is disabled (ADMIN_REQUIRE_VERIFIED_EMAIL=false); set it to true before production")
 		}
 		if !cfg.AdminRequire2FA {
 			log.Warn("two-factor admin login is disabled (ADMIN_REQUIRE_2FA=false); set it to true before production")

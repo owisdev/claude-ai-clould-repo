@@ -30,6 +30,11 @@ type Config struct {
 	// (ADMIN_REQUIRE_2FA=true) before production.
 	AdminRequire2FA    bool
 	AdminSessionMaxAge time.Duration
+	// AdminRequireVerifiedEmail: an admin's email must be verified before
+	// the first sign-in links it to the admin list. Off by default during
+	// development (owner, 2026-10-11, test accounts with made-up emails);
+	// turn it on (true) before production.
+	AdminRequireVerifiedEmail bool
 	// Admin web app sign-in (bootstrap): the Firebase project's Web API key
 	// (public) and auth domain (default <project>.firebaseapp.com).
 	AdminFirebaseAPIKey     string
@@ -145,6 +150,7 @@ func LoadFrom(lookup Lookup) (Config, error) {
 		AdminEmail:                strings.ToLower(strings.TrimSpace(getenv("ADMIN_EMAIL"))),
 		AdminRequire2FA:           parse(getenv, &errs, "ADMIN_REQUIRE_2FA", false, strconv.ParseBool),
 		AdminSessionMaxAge:        parse(getenv, &errs, "ADMIN_SESSION_MAX_AGE", 12*time.Hour, time.ParseDuration),
+		AdminRequireVerifiedEmail: parse(getenv, &errs, "ADMIN_REQUIRE_VERIFIED_EMAIL", false, strconv.ParseBool),
 		AdminFirebaseAPIKey:       strings.TrimSpace(getenv("ADMIN_FIREBASE_API_KEY")),
 		AdminFirebaseAuthDomain:   strings.TrimSpace(getenv("ADMIN_FIREBASE_AUTH_DOMAIN")),
 		AuthJWKSURL:               getenv("AUTH_JWKS_URL"),

@@ -238,7 +238,7 @@ func newAdminEnv(t *testing.T) *adminEnv {
 	rt := &fakeRuntime{cacheOn: true}
 	h := NewAdminRouter(AdminDeps{
 		Store: st, Settings: fakeSettings{st: st}, Runtime: func() AdminRuntime { return rt },
-		Verifier: v, Require2FA: true, SessionMaxAge: time.Hour, Log: log,
+		Verifier: v, Require2FA: true, RequireVerifiedEmail: true, SessionMaxAge: time.Hour, Log: log,
 		ToolLimiter: ratelimit.New(0.001, 2, time.Minute),
 	})
 	return &adminEnv{handler: h, provider: p, store: st, runtime: rt}
@@ -331,6 +331,23 @@ func TestAdminAccess(t *testing.T) {
 	}
 	if rec, out := e.do(t, "GET", "/admin/v1/nope", "", ""); rec.Code != 401 {
 		t.Errorf("unknown path without login: %d %v", rec.Code, out)
+	}
+}
+
+func TestAdminUnverifiedEmailWhenNotRequired(t *testing.T) {
+	e := newAdminEnv(t)
+	e.handler = NewAdminRouter(AdminDeps{
+		Store: e.store, Settings: fakeSettings{st: e.store}, Runtime: func() AdminRuntime { return e.runtime },
+		Verifier: verifierFor(t, e.provider), RequireVerifiedEmail: false, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	tok := e.token(t, "uid-1", "owner@example.com", jwt.MapClaims{"email_verified": false})
+	if rec, out := e.do(t, "GET", "/admin/v1/me", tok, ""); rec.Code != 200 || out["email"] != "owner@example.com" {
+		t.Errorf("unverified admin email, verification off: %d %v", rec.Code, out)
+	}
+	// Still only emails on the admin list.
+	other := e.token(t, "uid-7", "someone@example.com", jwt.MapClaims{"email_verified": false})
+	if rec, _ := e.do(t, "GET", "/admin/v1/me", other, ""); rec.Code != 403 {
+		t.Errorf("email not on the list: %d", rec.Code)
 	}
 }
 

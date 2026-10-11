@@ -85,6 +85,10 @@ type AdminDeps struct {
 	Verifier TokenVerifier
 	// Require2FA refuses admins who signed in without a second factor.
 	Require2FA bool
+	// RequireVerifiedEmail links a login to the admin entry with its email
+	// only when the email is verified (otherwise any login with that email
+	// could claim the entry first).
+	RequireVerifiedEmail bool
 	// SessionMaxAge: an admin must sign in again after this long, even
 	// with fresh tokens (0 = no limit).
 	SessionMaxAge time.Duration
@@ -224,7 +228,8 @@ func (h *adminHandlers) requireAdmin(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, CodeSessionExpired, "sign in again: the admin session is older than "+h.d.SessionMaxAge.String())
 			return
 		}
-		admin, err := h.d.Store.AdminForLogin(r.Context(), user.ID, user.Email, user.EmailVerified)
+		verified := user.EmailVerified || !h.d.RequireVerifiedEmail
+		admin, err := h.d.Store.AdminForLogin(r.Context(), user.ID, user.Email, verified)
 		switch {
 		case errors.Is(err, store.ErrNotAdmin):
 			deny(http.StatusForbidden, CodeForbidden, "not an admin", "not on the admin list")

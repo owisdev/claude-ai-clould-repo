@@ -59,7 +59,7 @@ Two kinds ([`internal/config/keys.go`](internal/config/keys.go)):
 
 - **bootstrap** — environment (`.env`) only, fixed while the server runs:
   `PORT`, `DATABASE_URL`, `SETTINGS_ENCRYPTION_KEY`, `SETTINGS_POLL_INTERVAL`,
-  `ADMIN_EMAIL`, `ADMIN_REQUIRE_2FA`, `ADMIN_SESSION_MAX_AGE`,
+  `ADMIN_EMAIL`, `ADMIN_REQUIRE_2FA`, `ADMIN_REQUIRE_VERIFIED_EMAIL`, `ADMIN_SESSION_MAX_AGE`,
   `ADMIN_FIREBASE_API_KEY`, `ADMIN_FIREBASE_AUTH_DOMAIN`, `AUTH_*`, `REDIS_URL`, `SEARXNG_URL`, `*_BASE_URL`,
   `MARKETS_FILE`, `CACHE_MAX_ENTRIES`, `LOG_LEVEL`, `SHUTDOWN_TIMEOUT`;
 - **runtime** — everything about searches: countries and shops
@@ -157,10 +157,15 @@ request is checked on the server:
    before production** (phase 4);
 3. a **recent sign-in**: older than `ADMIN_SESSION_MAX_AGE` (12 h) →
    `401 session_expired`, sign in again;
-4. an **active entry in the admin list**. The first sign-in with a
-   verified email links the login (Firebase uid) to the entry; afterwards
+4. an **active entry in the admin list**. The first sign-in with the
+   entry's email links the login (Firebase uid) to the entry; afterwards
    only that uid counts. A login created again for the same email is
-   refused until `admins unlink EMAIL`.
+   refused until `admins unlink EMAIL`. With
+   `ADMIN_REQUIRE_VERIFIED_EMAIL=true` the email must be verified for
+   that first link. **Currently disabled** (default `false`, owner
+   decision 2026-10-11, so test admins can use made-up emails); **set it
+   to `true` before production** (phase 4) — otherwise whoever first
+   creates a Firebase login with an admin's email could claim that entry.
 
 Rate limits: per IP before sign-in (10/s), per admin (5/s), test search
 (one per ~6 s, 5 in a row). Every change, test search and refused login

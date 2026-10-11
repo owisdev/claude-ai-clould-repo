@@ -72,7 +72,7 @@ export function App() {
   if (cfgError) return <Centered><ErrorBox text={cfgError} /></Centered>;
   if (!cfg || user === undefined) return <Centered><p className="muted">Loading…</p></Centered>;
   if (!user) return <SignIn />;
-  if (!me) return <NotAdmin user={user} denied={denied} />;
+  if (!me) return <NotAdmin user={user} denied={denied} needVerified={cfg.require_verified_email} />;
   return <Shell me={me} />;
 }
 
@@ -143,7 +143,7 @@ function SignIn() {
   );
 }
 
-function NotAdmin({ user, denied }: { user: User; denied: string }) {
+function NotAdmin({ user, denied, needVerified }: { user: User; denied: string; needVerified: boolean }) {
   const [sent, setSent] = useState(false);
   return (
     <div className="signin card">
@@ -152,7 +152,13 @@ function NotAdmin({ user, denied }: { user: User; denied: string }) {
         Signed in as <b>{user.email}</b>.
       </p>
       {denied ? <ErrorBox text={denied} /> : <p className="muted">Checking…</p>}
-      {!user.emailVerified && (
+      {denied && (
+        <p className="muted small">
+          Only emails on the admin list can enter. Another admin can add yours on the Admins page, or on the server:{" "}
+          <code>owis_find_deal_engine admins add {user.email}</code>
+        </p>
+      )}
+      {needVerified && !user.emailVerified && (
         <p className="notice">
           Your email is not verified. Admins must verify their email once.{" "}
           {sent ? (

@@ -48,9 +48,11 @@ complete.** Details: server README section "Admin web app", PLAN.md step 10.
 1. In `.env`: `ADMIN_FIREBASE_API_KEY=<WEB_API_KEY>` (the Web API key you
    use for test tokens), then `docker compose up -d --build` (the image
    now also builds the web app; the first build takes a bit longer).
-2. Open <http://localhost:3002/admin/> and sign in with your
-   `ADMIN_EMAIL` account. If it says the email is not verified: click
-   "Send verification email", open the link, sign in again.
+2. Open <http://localhost:3002/admin/> and sign in with the Firebase
+   user (email + password; create it in Firebase console → Authentication
+   → Users → Add user) whose email is on the admin list (`ADMIN_EMAIL`, or
+   `docker compose exec server /owis_find_deal_engine admins add EMAIL`).
+   Email verification is off for now, so a made-up email works.
 3. Go through the pages. Useful first steps: Settings → add
    `APIFY_TEMU_RUN_COST_USD` = 0.10, `APIFY_SHEIN_RUN_COST_USD` = 0.033,
    `APIFY_ALIEXPRESS_RUN_COST_USD` = 0.02 (Add a setting); then a test
@@ -133,6 +135,34 @@ server logs a warning). **To do before production (phase 4, step 14):**
 turn on Firebase *Identity Platform* (Authentication → Settings → upgrade;
 free tier), let admins enrol a second factor (sign-in page of the admin
 web app, step 10) and set `ADMIN_REQUIRE_2FA=true`.
+
+**Admin email verification: disabled for now (owner, 2026-10-11).** The
+check and its setting `ADMIN_REQUIRE_VERIFIED_EMAIL` stay in the code; the
+default is `false`, so a test admin with a made-up email (that cannot
+receive the verification link) can sign in once it is on the admin list.
+**To do before production (phase 4, step 14):** use real admin emails,
+verify them, and set `ADMIN_REQUIRE_VERIFIED_EMAIL=true` (otherwise
+whoever first creates a Firebase login with an admin's email could claim
+that admin entry).
+
+**Note (owner, 2026-10-11): fake emails in Firebase during development.**
+
+- Firebase Authentication only checks that an email *looks* valid
+  (`user@domain.com`); it does not check that the inbox exists. Fake /
+  dummy emails (`test@test.com`, `user@example.com`) are fine for
+  development and testing.
+- Other sign-in methods (phone, anonymous, custom / third-party SSO) show
+  a phone number, a UID or a custom string as the identifier instead of
+  an email.
+- Caveats: verification and password-reset emails never arrive at a fake
+  address; in production fake emails are discouraged (no way to contact
+  users, recover accounts or send security notices).
+- Good practice while developing: use reserved domains (`@example.com`,
+  `@test.com`) so nothing is ever mailed to a stranger; skip the
+  verification check (what `ADMIN_REQUIRE_VERIFIED_EMAIL=false` does) or
+  mark test users verified with the Firebase Admin SDK; or use the
+  **Firebase Local Emulator** (Auth), which accepts any email and shows
+  verification / reset links in its local UI without sending mail.
 
 **Owner, to try step 8:**
 
