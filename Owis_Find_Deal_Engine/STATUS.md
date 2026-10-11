@@ -42,9 +42,11 @@ Regenerate the PDFs: `python3 docs/build_flow_and_plan_pdfs.py` and
   (`get`, `set`, `unset`, `history`; `admins list`). See the server README
   section "Settings".
 - Tested: unit tests + store tests against Postgres 16 locally (CI runs
-  them against Postgres 17), and an end-to-end run of the binary (import
-  from env, CLI change, hot reload, restart). **Not yet tested: the Docker
-  stack with Postgres** (no Docker in the cloud session) → owner, below.
+  them against Postgres 17), an end-to-end run of the binary (import from
+  env, CLI change, hot reload, restart), and **by the owner on the Docker
+  stack (2026-10-11, Windows, Git Bash): four containers healthy, `.env`
+  imported correctly, a change applied without restart ("settings
+  applied", settings version 37)**.
 
 **Owner, to try step 7:**
 
