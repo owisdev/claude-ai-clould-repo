@@ -331,12 +331,31 @@ func TestCallerCancelDoesNotCancelSharedFetch(t *testing.T) {
 	}
 }
 
+func TestForget(t *testing.T) {
+	e := newEnv(t, Options{})
+	e.search(t, "samsung s pen", false)
+	ctx := context.Background()
+	if ok, err := e.cache.Forget(ctx, search.Request{Title: " Samsung S  PEN", Country: "jor"}); !ok || err != nil {
+		t.Fatalf("Forget = %v, %v", ok, err)
+	}
+	if res := e.search(t, "samsung s pen", false); res.Cached || e.up.calls.Load() != 2 {
+		t.Errorf("after Forget: cached %v, upstream calls %d", res.Cached, e.up.calls.Load())
+	}
+	if ok, err := e.cache.Forget(ctx, search.Request{Title: "never searched", Country: "jor"}); ok || err != nil {
+		t.Errorf("Forget of a miss = %v, %v", ok, err)
+	}
+	if _, err := e.cache.Forget(ctx, search.Request{Title: "x", Country: "jor"}); !errors.Is(err, search.ErrInvalidTitle) {
+		t.Errorf("Forget invalid = %v", err)
+	}
+}
+
 type brokenStore struct{}
 
 func (brokenStore) Get(context.Context, string) (*Entry, error) { return nil, errors.New("down") }
 func (brokenStore) Set(context.Context, string, *Entry, time.Duration) error {
 	return errors.New("down")
 }
+func (brokenStore) Delete(context.Context, string) (bool, error) { return false, errors.New("down") }
 
 func TestBrokenStoreStillSearches(t *testing.T) {
 	cat, _ := markets.Load("")
@@ -430,6 +449,12 @@ func TestRedisStore(t *testing.T) {
 	}
 	if ttl := mr.TTL("k"); ttl != time.Hour {
 		t.Errorf("ttl = %v", ttl)
+	}
+	if ok, err := s.Delete(ctx, "k"); !ok || err != nil || mr.Exists("k") {
+		t.Errorf("Delete = %v, %v", ok, err)
+	}
+	if ok, _ := s.Delete(ctx, "k"); ok {
+		t.Error("second Delete found the key")
 	}
 	mr.Set("bad", "not json")
 	if e, err := s.Get(ctx, "bad"); e != nil || err != nil {

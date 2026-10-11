@@ -31,6 +31,16 @@ container: docker compose exec server /owis_find_deal_engine settings list):
   settings unset [-by NAME] KEY ... back to the default
   settings history [KEY]            latest changes, newest first
   admins list                       the admin list
+  admins add EMAIL                  put EMAIL on the admin list
+  admins disable EMAIL              (the last active admin cannot be disabled)
+  admins enable EMAIL
+  admins unlink EMAIL               forget the login linked to EMAIL (the
+                                    account was deleted and created again);
+                                    the next sign-in links it again
+  audit [ACTION-PREFIX]             latest admin actions, newest first
+
+The admin API (/admin/v1) does the same with a login; this command line
+is for setup and for recovery (e.g. every admin locked out).
 
 Changes are validated as a whole before they are stored, and the running
 server applies them within SETTINGS_POLL_INTERVAL (default 10s).
@@ -39,7 +49,7 @@ server applies them within SETTINGS_POLL_INTERVAL (default 10s).
 // adminCommand runs the settings / admins command line and returns the
 // process exit code.
 func adminCommand(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	if len(args) < 2 {
+	if len(args) < 2 && !(len(args) == 1 && args[0] == "audit") {
 		fmt.Fprint(stderr, adminUsage)
 		return 2
 	}
@@ -59,7 +69,14 @@ func adminCommand(args []string, stdin io.Reader, stdout, stderr io.Writer) int 
 	defer db.Close()
 
 	cmd := adminCmd{db: db, mgr: mgr, stdin: bufio.NewReader(stdin), out: stdout}
-	switch args[0] + " " + args[1] {
+	sub := args[0]
+	if len(args) > 1 {
+		sub += " " + args[1]
+	}
+	if args[0] == "audit" {
+		sub = "audit"
+	}
+	switch sub {
 	case "settings list":
 		err = cmd.list(ctx)
 	case "settings get":
@@ -78,6 +95,18 @@ func adminCommand(args []string, stdin io.Reader, stdout, stderr io.Writer) int 
 		err = cmd.history(ctx, key)
 	case "admins list":
 		err = cmd.admins(ctx)
+	case "admins add", "admins disable", "admins enable", "admins unlink":
+		if len(args) != 3 {
+			err = errUsage
+			break
+		}
+		err = cmd.changeAdmin(ctx, args[1], args[2])
+	case "audit":
+		prefix := ""
+		if len(args) > 1 {
+			prefix = args[1]
+		}
+		err = cmd.audit(ctx, prefix)
 	default:
 		err = errUsage
 	}
@@ -240,6 +269,44 @@ func (c adminCmd) admins(ctx context.Context) error {
 			status = "disabled"
 		}
 		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\n", a.ID, a.Email, status, a.CreatedAt.UTC().Format(time.DateTime), a.CreatedBy)
+	}
+	return tw.Flush()
+}
+
+func (c adminCmd) changeAdmin(ctx context.Context, action, email string) error {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if !strings.Contains(email, "@") {
+		return fmt.Errorf("%q is not an email address", email)
+	}
+	var err error
+	switch action {
+	case "add":
+		_, err = c.db.AddAdmin(ctx, email, "cli")
+	case "disable", "enable":
+		err = c.db.SetAdminDisabled(ctx, email, action == "disable")
+	case "unlink":
+		err = c.db.UnlinkAdmin(ctx, email)
+	}
+	if err != nil {
+		return err
+	}
+	if err := c.db.AddAudit(ctx, store.AuditEntry{Actor: "cli", Action: "admins." + action, Target: email}); err != nil {
+		return fmt.Errorf("done, but the audit log write failed: %w", err)
+	}
+	fmt.Fprintf(c.out, "%s: %s\n", action, email)
+	return nil
+}
+
+func (c adminCmd) audit(ctx context.Context, prefix string) error {
+	entries, err := c.db.AuditLog(ctx, store.AuditFilter{Action: prefix, Limit: 50})
+	if err != nil {
+		return err
+	}
+	tw := tabwriter.NewWriter(c.out, 0, 4, 2, ' ', 0)
+	fmt.Fprintf(tw, "ID\tWHEN (UTC)\tACTOR\tACTION\tTARGET\tOUTCOME\tDETAIL\n")
+	for _, e := range entries {
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n", e.ID, e.At.UTC().Format(time.DateTime), e.Actor, e.Action,
+			oneLine(e.Target), e.Outcome, oneLine(string(e.Detail)))
 	}
 	return tw.Flush()
 }

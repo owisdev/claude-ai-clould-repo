@@ -22,6 +22,14 @@ type User struct {
 	ID    string // the token's "sub"
 	Email string
 	Plan  string // from the plan claim; empty if absent
+
+	EmailVerified bool
+	// SecondFactor is the second factor used at sign-in ("phone", "totp"),
+	// empty without two-factor login (Firebase: firebase.sign_in_second_factor).
+	SecondFactor string
+	// AuthTime is when the user last signed in (the "auth_time" claim);
+	// tokens are refreshed hourly, the sign-in stays. Zero if absent.
+	AuthTime time.Time
 }
 
 // KeySource returns the public key for a key ID.
@@ -87,6 +95,13 @@ func (v *Verifier) Verify(ctx context.Context, token string) (User, error) {
 	}
 	u := User{ID: sub}
 	u.Email, _ = claims["email"].(string)
+	u.EmailVerified, _ = claims["email_verified"].(bool)
+	if fb, ok := claims["firebase"].(map[string]any); ok {
+		u.SecondFactor, _ = fb["sign_in_second_factor"].(string)
+	}
+	if at, ok := claims["auth_time"].(float64); ok && at > 0 {
+		u.AuthTime = time.Unix(int64(at), 0)
+	}
 	if v.cfg.PlanClaim != "" {
 		u.Plan, _ = claims[v.cfg.PlanClaim].(string)
 	}

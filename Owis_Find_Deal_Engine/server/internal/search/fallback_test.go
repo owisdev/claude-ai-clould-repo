@@ -131,8 +131,15 @@ func TestFallbackCircuitBreaker(t *testing.T) {
 		t.Errorf("broken provider called %d times, want 2 (then skipped)", got)
 	}
 
+	if h := f.Health(); h[0].State != "open" || h[0].ConsecutiveFailures != 2 || h[1].State != "closed" {
+		t.Errorf("health while open = %+v", h)
+	}
+
 	// After the cooldown one trial goes through; success closes the circuit.
 	now = now.Add(2 * time.Minute)
+	if h := f.Health(); h[0].State != "half_open" {
+		t.Errorf("health after cooldown = %+v", h)
+	}
 	free.err = nil
 	got, _ := f.Search(context.Background(), oneTarget)
 	if got[0].Provider != "searxng" {

@@ -44,15 +44,18 @@ var runtimeKeys = []string{
 	"CACHE_STALE_TTL",
 	"CACHE_MIN_REFRESH",
 	"CACHE_MAX_BACKGROUND_REFRESH",
+	"CACHE_GENERATION",
 	"PLANS",
 	"DEFAULT_PLAN",
 	"RATE_LIMIT_RPS",
 	"RATE_LIMIT_BURST",
 	"CORS_ALLOWED_ORIGINS",
+	"MARKETS",
+	"SERPAPI_SEARCH_COST_USD",
 }
 
 // apifyMarketKey matches the per-shop Apify settings, e.g. APIFY_TEMU_INPUT.
-var apifyMarketKey = regexp.MustCompile(`^APIFY_[A-Z0-9][A-Z0-9_]*_(ACTOR|INPUT|CURRENCY|MAX_ITEMS)$`)
+var apifyMarketKey = regexp.MustCompile(`^APIFY_[A-Z0-9][A-Z0-9_]*_(ACTOR|INPUT|CURRENCY|MAX_ITEMS|RUN_COST_USD)$`)
 
 // secretKeys are runtime settings that are stored encrypted and never
 // shown again once set.

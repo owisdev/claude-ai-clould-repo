@@ -29,6 +29,10 @@ type Store interface {
 	SetSettings(ctx context.Context, by string, updates []store.Update) (int64, error)
 }
 
+// ErrInvalid wraps every reason a change is refused (unknown key, or the
+// configuration it leads to is invalid); nothing was stored.
+var ErrInvalid = errors.New("invalid settings, nothing changed")
+
 // Manager reads and changes the runtime settings. Safe for concurrent use.
 type Manager struct {
 	store  Store
@@ -97,10 +101,10 @@ func (m *Manager) Set(ctx context.Context, by string, changes map[string]*string
 		}
 	}
 	if err := errors.Join(errs...); err != nil {
-		return 0, nil, err
+		return 0, nil, fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
 	if _, err := config.LoadFrom(config.Layered(next, m.env)); err != nil {
-		return 0, nil, fmt.Errorf("invalid settings, nothing changed: %w", err)
+		return 0, nil, fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
 
 	var (

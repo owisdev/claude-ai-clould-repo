@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -356,6 +357,21 @@ func MatchTarget(host string, targets []Target) (Target, bool) {
 	}
 	return Target{}, false
 }
+
+// HasMarket reports whether some country lists the marketplace id.
+func (c *Catalog) HasMarket(id string) bool {
+	for _, country := range c.countries {
+		for _, t := range country.Targets {
+			if t.Market == id {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Default returns the built-in catalog JSON (markets.json).
+func Default() []byte { return slices.Clone(defaultCatalog) }
 
 // WithProviders returns a copy of the catalog in which the given
 // marketplaces use another provider, e.g. {"temu": "apify-temu"}.

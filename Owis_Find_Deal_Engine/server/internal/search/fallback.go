@@ -69,7 +69,34 @@ func NewFallback(providers []Provider, opts FallbackOptions, log *slog.Logger) (
 }
 
 func (f *Fallback) Name() string { return f.name }
-func (f *Fallback) Batch() bool  { return f.providers[0].Batch() }
+
+// Providers returns the chained providers in order.
+func (f *Fallback) Providers() []Provider { return f.providers }
+
+// SourceHealth is one provider's circuit breaker state in a chain.
+type SourceHealth struct {
+	Provider string `json:"provider"`
+	// State is "closed" (used), "open" (skipped until OpenUntil) or
+	// "half_open" (cooldown over: the next search tries it again).
+	State               string     `json:"state"`
+	ConsecutiveFailures int        `json:"consecutive_failures"`
+	OpenUntil           *time.Time `json:"open_until,omitempty"`
+	// LastResort marks the chain's last provider: always tried.
+	LastResort bool `json:"last_resort,omitempty"`
+}
+
+// Health returns the breaker state of each provider in the chain.
+func (f *Fallback) Health() []SourceHealth {
+	out := make([]SourceHealth, len(f.providers))
+	for i, p := range f.providers {
+		h := f.breakers[i].health()
+		h.Provider = p.Name()
+		h.LastResort = i == len(f.providers)-1
+		out[i] = h
+	}
+	return out
+}
+func (f *Fallback) Batch() bool { return f.providers[0].Batch() }
 
 // Search returns the first provider's successful result. The last provider
 // is always tried, even if its breaker is open: it is the last resort.
@@ -205,6 +232,21 @@ func (b *breaker) success() {
 	defer b.mu.Unlock()
 	b.failures = 0
 	b.openUntil = time.Time{}
+}
+
+func (b *breaker) health() SourceHealth {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	h := SourceHealth{State: "closed", ConsecutiveFailures: b.failures}
+	if !b.openUntil.IsZero() {
+		until := b.openUntil
+		h.OpenUntil = &until
+		h.State = "open"
+		if !b.clock().Before(until) {
+			h.State = "half_open"
+		}
+	}
+	return h
 }
 
 // failure records a failure and reports whether the circuit just opened.
