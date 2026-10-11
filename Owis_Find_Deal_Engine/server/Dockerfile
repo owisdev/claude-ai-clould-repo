@@ -1,7 +1,10 @@
 # syntax=docker/dockerfile:1
 
-# Admin web app (React): type-checked and built, then embedded in the binary.
+# Base images (ARGs used in FROM must come before the first FROM).
 ARG NODE_IMAGE=node:22-alpine
+ARG GO_IMAGE=golang:1.26-alpine
+
+# Admin web app (React): type-checked and built, then embedded in the binary.
 FROM ${NODE_IMAGE} AS web
 WORKDIR /web
 COPY web/admin/package.json web/admin/package-lock.json ./
@@ -10,7 +13,6 @@ COPY web/admin/ ./
 RUN npx tsc --noEmit && npx vite build --outDir /dist --emptyOutDir
 
 # Build: static Go binary (no cgo), reproducible paths, debug info stripped.
-ARG GO_IMAGE=golang:1.26-alpine
 FROM ${GO_IMAGE} AS build
 WORKDIR /src
 COPY go.mod go.sum ./
