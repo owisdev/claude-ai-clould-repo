@@ -59,10 +59,12 @@ Two kinds ([`internal/config/keys.go`](internal/config/keys.go)):
 
 - **bootstrap** — environment (`.env`) only, fixed while the server runs:
   `PORT`, `DATABASE_URL`, `SETTINGS_ENCRYPTION_KEY`, `SETTINGS_POLL_INTERVAL`,
-  `ADMIN_EMAIL`, `AUTH_*`, `REDIS_URL`, `SEARXNG_URL`, `*_BASE_URL`,
+  `ADMIN_EMAIL`, `ADMIN_REQUIRE_2FA`, `ADMIN_SESSION_MAX_AGE`, `AUTH_*`, `REDIS_URL`, `SEARXNG_URL`, `*_BASE_URL`,
   `MARKETS_FILE`, `CACHE_MAX_ENTRIES`, `LOG_LEVEL`, `SHUTDOWN_TIMEOUT`;
-- **runtime** — everything about searches: providers, SerpApi / Apify
-  sources per shop (`APIFY_<SHOP>_*` included), timeouts, cache times,
+- **runtime** — everything about searches: countries and shops
+  (`MARKETS`), providers, SerpApi / Apify sources per shop
+  (`APIFY_<SHOP>_*` included), estimated costs (`SERPAPI_SEARCH_COST_USD`,
+  `APIFY_<SHOP>_RUN_COST_USD`), timeouts, cache times and generation,
   plans, rate limits, CORS.
 
 With `DATABASE_URL` (always in docker compose) the runtime settings live in
@@ -82,7 +84,8 @@ Postgres:
   to the history.
 - **History:** every change with who, when, old → new.
 
-Until the admin panel (step 8+), use the command line in the container:
+Change them with the [admin API](#admin-api) (`PATCH /admin/v1/settings`)
+or, for setup and recovery, the command line in the container:
 
 ```sh
 S="docker compose exec server /owis_find_deal_engine"
@@ -93,6 +96,8 @@ docker compose exec -T server /owis_find_deal_engine settings set SERPAPI_KEY - 
 $S settings unset CACHE_FRESH_TTL                 # back to the default
 $S settings history [KEY]
 $S admins list
+$S admins add|disable|enable|unlink EMAIL
+$S audit [ACTION-PREFIX]                          # latest admin actions
 ```
 
 Git Bash on Windows rewrites arguments starting with `/` into Windows
@@ -104,7 +109,64 @@ Without `DATABASE_URL` all settings come from the environment, as before,
 and need a restart to change.
 
 Tables ([`internal/store/migrations`](internal/store/migrations)):
-`settings`, `settings_history`, `admins` (+ `schema_migrations`).
+`settings`, `settings_history`, `admins`, `audit_log` (+ `schema_migrations`).
+
+## Admin API
+
+`/admin/v1/...`, separate from the public API, only with a database. Every
+request is checked on the server:
+
+1. a valid Firebase ID token (`Authorization: Bearer …`, same project as
+   the app);
+2. **signed in with a second factor** (`firebase.sign_in_second_factor`
+   in the token; Firebase multi-factor needs *Identity Platform* turned on
+   in the Firebase console — SMS or authenticator app). Without it:
+   `403 second_factor_required`. **Currently disabled**
+   (`ADMIN_REQUIRE_2FA=false`, the default, owner decision 2026-10-11):
+   the check and the setting stay in place; **set `ADMIN_REQUIRE_2FA=true`
+   before production** (phase 4);
+3. a **recent sign-in**: older than `ADMIN_SESSION_MAX_AGE` (12 h) →
+   `401 session_expired`, sign in again;
+4. an **active entry in the admin list**. The first sign-in with a
+   verified email links the login (Firebase uid) to the entry; afterwards
+   only that uid counts. A login created again for the same email is
+   refused until `admins unlink EMAIL`.
+
+Rate limits: per IP before sign-in (10/s), per admin (5/s), test search
+(one per ~6 s, 5 in a row). Every change, test search and refused login
+of a valid token (at most once a minute per login) goes to the **audit log** (who, when, IP, request id;
+never secret values). Answers carry `Cache-Control: no-store`.
+
+| Call | What |
+|---|---|
+| `GET /admin/v1/me` | the signed-in admin |
+| `GET /admin/v1/status` | build, applied and stored settings version, markets source, cache generation |
+| `GET /admin/v1/settings` | every runtime setting: value or default, who changed it; secrets only `"set": true` |
+| `PATCH /admin/v1/settings` | `{"changes": {"KEY": "value", "OTHER": null}}` — validated as a whole, `null` = back to default, secrets write-only |
+| `GET /admin/v1/settings/history?key=&limit=` | old → new per change (secrets: only that they changed) |
+| `GET /admin/v1/markets` | countries and shops (`markets.json` format) and where they come from |
+| `PUT /admin/v1/markets` | replace them (whole JSON, validated); `DELETE` = back to the file / built-in |
+| `GET /admin/v1/admins`, `POST /admin/v1/admins` `{"email"}` | admin list, add one |
+| `POST /admin/v1/admins/{email}/disable\|enable\|unlink` | not yourself; never the last active admin |
+| `GET /admin/v1/audit?actor=&action=&before=&limit=` | audit log, newest first (`before` = id for paging) |
+| `POST /admin/v1/tools/test-search` | `{"title", "country", "markets": [..], "all_sources": false}` — asks each shop's source directly (no cache, quota, breaker or fallback): its products, time, error, estimated cost. `all_sources: true` also asks the fallbacks (each paid one is charged) |
+| `POST /admin/v1/tools/cache/forget` | `{"title", "country"}` — next search for it is live |
+| `POST /admin/v1/tools/cache/bump` | raises `CACHE_GENERATION`: every cached answer becomes a miss |
+| `GET /admin/v1/tools/providers` | circuit breaker per source: `closed`, `open` (skipped until …), `half_open` |
+
+Changes apply within `SETTINGS_POLL_INTERVAL` on every instance. Errors
+have the usual shape; extra codes: `forbidden`, `second_factor_required`,
+`session_expired`, `not_found`, `conflict`, `cache_disabled`.
+
+Try it (token of an admin who signed in with a second factor):
+
+```sh
+curl -H "Authorization: Bearer $ADMIN_TOKEN" localhost:3002/admin/v1/settings
+curl -X PATCH -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+     -d '{"changes":{"APIFY_SHEIN_MAX_ITEMS":"5"}}' localhost:3002/admin/v1/settings
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+     -d '{"title":"usb hub","country":"jor","markets":["temu"]}' localhost:3002/admin/v1/tools/test-search
+```
 
 ## Search providers
 
@@ -252,8 +314,10 @@ Errors always look like `{"error": {"code": "...", "message": "..."}}`:
 ## Countries and marketplaces
 
 Defined in [`internal/markets/markets.json`](internal/markets/markets.json)
-and embedded in the binary. To add a country or a shop, edit that file (or
-point `MARKETS_FILE` at another one); no code changes are needed.
+and embedded in the binary. With a database they are edited with
+`PUT /admin/v1/markets` (stored as the `MARKETS` setting, applied without
+a restart); otherwise edit that file or point `MARKETS_FILE` at another
+one. No code changes are needed.
 
 ## Layout
 
@@ -263,7 +327,8 @@ cmd/owis_find_deal_engine   main: config, wiring, settings swap, graceful
 internal/config             settings (environment or database), validation
 internal/settings           settings store: encryption, validated changes,
                             import from .env, change watcher
-internal/store              Postgres: migrations, settings, history, admins
+internal/store              Postgres: migrations, settings, history, admins,
+                            audit log
 internal/markets            countries -> marketplaces catalog
 internal/search             search service: worker pool, merge, ordering
 internal/search/fallback.go provider chain + circuit breaker
@@ -276,7 +341,9 @@ internal/auth               JWT verification + JWKS key cache
 internal/auth/authtest      fake auth provider for tests
 internal/usage              plans, daily quotas, Redis/memory counters
 internal/ratelimit          per-user token bucket
-internal/api                router, handlers, middleware
+internal/api                router, handlers, middleware; admin.go +
+                            admin_handlers.go: the admin API
+internal/search/probe.go    admin test search, provider health
 deploy/searxng              SearXNG settings
 Dockerfile                  distroless, non-root image (~19 MB)
 docker-compose.yml          full stack on private networks

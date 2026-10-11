@@ -415,7 +415,7 @@ first, keys made in the panel (partners later).
    `ADMIN_EMAIL`; command line `settings list|get|set|unset|history`,
    `admins list` until the admin API exists. Countries and shops
    (`markets.json`) stay a file until step 8.
-8. **Admin API** `/admin/v1/...` — separate from the public API:
+8. ✅ **Admin API** `/admin/v1/...` — separate from the public API:
    - login with the same auth provider (Firebase) **plus** an admin role
      (admin allow-list in the database / custom claim); every call checked
      server-side; admin actions rate-limited and written to the audit log;
@@ -428,6 +428,21 @@ first, keys made in the panel (partners later).
    - tools: "test search" (shows each source's raw answer, time, cost),
      clear cache for a query / bump results version, provider health and
      circuit state.
+   *Built 2026-10-11:* Firebase ID token + two-factor sign-in
+   (`firebase.sign_in_second_factor`, `ADMIN_REQUIRE_2FA`; **disabled for
+   now** by the owner, default `false` — turn on at step 14) + sign-in not
+   older than `ADMIN_SESSION_MAX_AGE` (12 h) + active entry in `admins`
+   (uid linked at the first sign-in with a verified email); rate limits per
+   IP, per admin and for the test search; table `audit_log` (every change,
+   tool use and refused login; never secret values). Settings read / change
+   (validated as a whole, secrets write-only) and history; countries and
+   shops as the runtime setting `MARKETS` (`GET` / `PUT` / `DELETE
+   /admin/v1/markets`, hot-applied); admin list (add, disable, enable,
+   unlink; never yourself or the last one); test search asking each source
+   directly with time, products, error and estimated cost
+   (`SERPAPI_SEARCH_COST_USD`, `APIFY_<SHOP>_RUN_COST_USD`); forget one
+   cached search; bump `CACHE_GENERATION`; breaker state per source.
+   Command line gained `admins add|disable|enable|unlink` and `audit`.
 9. **Usage and cost dashboard:** live searches, cache hit rate, fallbacks
    and errors per source, estimated cost per day (Apify runs × price per
    Actor, SerpApi searches), top queries; alert when the monthly budget
@@ -457,7 +472,9 @@ first, keys made in the panel (partners later).
 **Phase 4 — deployment** (all parts: server, admin web app, SearXNG,
 Redis, Postgres)
 
-14. Hosting choice (section 10), domain, HTTPS (Caddy / Cloudflare),
+14. **Turn on two-factor admin login** (`ADMIN_REQUIRE_2FA=true`, Firebase
+    Identity Platform, admins enrolled; disabled since 2026-10-11).
+    Hosting choice (section 10), domain, HTTPS (Caddy / Cloudflare),
     hardening of section 3.2, secrets in the host's secret store,
     Postgres backups, staging + production, CI/CD deploy from `main`,
     monitoring and alerts (metrics; replace the hand-written circuit

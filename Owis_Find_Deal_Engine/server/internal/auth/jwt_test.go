@@ -43,6 +43,31 @@ func TestVerifyValid(t *testing.T) {
 	}
 }
 
+func TestVerifyAdminClaims(t *testing.T) {
+	p := authtest.New(t)
+	v, _ := newVerifier(t, p)
+	signedIn := time.Now().Add(-3 * time.Hour).Unix()
+
+	u, err := v.Verify(context.Background(), p.Token(t, "admin-1", jwt.MapClaims{
+		"email": "a@b.c", "email_verified": true, "auth_time": signedIn,
+		"firebase": map[string]any{"sign_in_provider": "password", "sign_in_second_factor": "totp"},
+	}))
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if !u.EmailVerified || u.SecondFactor != "totp" || u.AuthTime.Unix() != signedIn {
+		t.Errorf("user = %+v", u)
+	}
+
+	u, err = v.Verify(context.Background(), p.Token(t, "user-2", jwt.MapClaims{"email": "x@y.z"}))
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if u.EmailVerified || u.SecondFactor != "" || !u.AuthTime.IsZero() {
+		t.Errorf("user without the claims = %+v", u)
+	}
+}
+
 func TestVerifyRejects(t *testing.T) {
 	p := authtest.New(t)
 	v, _ := newVerifier(t, p)

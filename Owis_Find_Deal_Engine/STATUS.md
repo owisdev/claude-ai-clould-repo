@@ -1,8 +1,8 @@
 # Project status and handoff
 
-Last updated: 2026-10-11 · Branch: `claude/practical-clarke-limbco`
-(continues `claude/cloud-vs-local-7xi988`, which ends at the D1–D4
-decisions; neither is merged into `main` yet).
+Last updated: 2026-10-11 · Branch: `claude/awesome-edison-2a2fwh`
+(continues `claude/cloud-vs-local-7xi988` = `claude/practical-clarke-limbco`,
+which end at step 7; none is merged into `main` yet).
 
 Read first:
 - [docs/current_flow.pdf](docs/current_flow.pdf) — **how the service works
@@ -18,6 +18,71 @@ Regenerate the PDFs: `python3 docs/build_flow_and_plan_pdfs.py` and
 `python3 docs/build_architecture_pdf.py` (needs `reportlab`).
 
 ## Where we are
+
+**Phase 2, step 8 — admin API: done (2026-10-11).** Details: server
+README section "Admin API", PLAN.md step 8.
+
+- `/admin/v1/...`, separate from the public API (only with a database).
+  Every request: valid Firebase token **+ two-factor sign-in + sign-in
+  not older than 12 h + active entry in the admin list** (D2). The first
+  sign-in with a verified email links the Firebase login to the entry.
+- Settings: list (secrets only "set"), change (validated as a whole,
+  refused if invalid, applied within 10 s), history. Secrets write-only
+  (D3).
+- Countries and shops: now the runtime setting `MARKETS` (whole
+  `markets.json` format), `GET` / `PUT` / `DELETE /admin/v1/markets`,
+  applied without restart. Without it, `MARKETS_FILE` / built-in file.
+- Admin list: add, disable, enable, unlink (not yourself, never the last
+  active admin).
+- Audit log (new table `audit_log`): every change, test search, cache
+  tool and refused login, with who / when / IP / request id; never secret
+  values. `GET /admin/v1/audit`, CLI `audit`.
+- Tools: **test search** (asks each shop's source directly — no cache,
+  quota, breaker or fallback — and shows products, time, error and
+  estimated cost; `all_sources` also asks the fallbacks), forget one cached
+  search, bump the results version (`CACHE_GENERATION`), circuit breaker
+  state per source.
+- Estimated costs are settings: `SERPAPI_SEARCH_COST_USD`,
+  `APIFY_<SHOP>_RUN_COST_USD` (default 0 = unknown; suggested values in
+  `.env.example`). Step 9 builds the dashboard on them.
+- Rate limits: per IP, per admin, test search ≈ 1 per 6 s.
+- Command line also: `admins add|disable|enable|unlink EMAIL`, `audit`
+  (for setup and when every admin is locked out).
+- Tested: unit tests (admin access rules, every endpoint, probe, breaker
+  health, cache forget, store against Postgres 16) and an end-to-end run
+  of the binary with a fake Firebase (JWKS) and Postgres: refused logins
+  audited, settings change applied in 1 s, secret never in logs / audit /
+  database in clear, test search with all sources, cache bump, CLI.
+
+**Two-factor admin login: disabled for now (owner, 2026-10-11).** The
+check and its setting `ADMIN_REQUIRE_2FA` stay in the code; the default
+is `false`, so admins sign in with Firebase + the admin list only (the
+server logs a warning). **To do before production (phase 4, step 14):**
+turn on Firebase *Identity Platform* (Authentication → Settings → upgrade;
+free tier), let admins enrol a second factor (sign-in page of the admin
+web app, step 10) and set `ADMIN_REQUIRE_2FA=true`.
+
+**Owner, to try step 8:**
+
+1. In `.env`: `ADMIN_EMAIL=<your Firebase login email>` (already set at
+   step 7); `ADMIN_REQUIRE_2FA` can stay out (default `false`);
+   `docker compose up -d --build`.
+2. The email must be verified once: sign in (`accounts:signInWithPassword`,
+   README step 5), then
+   `curl -s -X POST "https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=<WEB_API_KEY>" -H "Content-Type: application/json" -d '{"requestType":"VERIFY_EMAIL","idToken":"<idToken>"}'`
+   and open the link in the email. Sign in again → new `idToken` =
+   `$ADMIN_TOKEN`.
+3. `curl -H "Authorization: Bearer $ADMIN_TOKEN" localhost:3002/admin/v1/me`
+   → your email. Then try `GET /admin/v1/settings`, a `PATCH`, a test
+   search (examples in the server README, section "Admin API"), and
+   `docker compose exec server /owis_find_deal_engine audit`.
+4. Optional: set the cost estimates, e.g.
+   `{"changes":{"APIFY_TEMU_RUN_COST_USD":"0.10","APIFY_SHEIN_RUN_COST_USD":"0.033","APIFY_ALIEXPRESS_RUN_COST_USD":"0.02"}}`.
+
+**Next: phase 2, step 9 — usage and cost dashboard** (live searches,
+cache hit rate, fallbacks and errors per source, estimated cost per day,
+top queries; D5 monthly budget alert). Then step 10, the admin web app
+(D1), including the sign-in page with two-factor enrolment.
 
 **Phase 2, step 7 — database + settings store: done (2026-10-11).**
 
@@ -65,9 +130,6 @@ Regenerate the PDFs: `python3 docs/build_flow_and_plan_pdfs.py` and
    the log line "settings applied" within ~10 s, then a search.
 5. Report problems with `docker compose logs server postgres`.
 
-**Next: phase 2, step 8 — admin API** (`/admin/v1/...`: Firebase login +
-admin list + two-factor, settings incl. countries / shops, write-only
-secrets, audit log, test search, cache tools).
 
 ### Phase 1 (search service)
 
@@ -287,7 +349,7 @@ instant); label scraper prices as approximate in the app.
    CI/CD, monitoring).
 4. **Phase 5 — users** (old phase 2).
 
-**Step 7 is done (2026-10-11); next session starts phase 2, step 8 (admin API).**
+**Steps 7 and 8 are done (2026-10-11); next session starts phase 2, step 9 (usage and cost dashboard).**
 **Owner decisions D1–D4 (answered 2026-10-11):**
 
 - **D1 admin web app:** small React app built into the server image,
@@ -295,6 +357,9 @@ instant); label scraper prices as approximate in the app.
 - **D2 admin login:** Firebase login + admin list in the database +
   two-factor login required for admins. (Needed at step 8: the first
   admin's email.)
+  *Update 2026-10-11:* two-factor is **disabled for now**
+  (`ADMIN_REQUIRE_2FA=false`, setting kept) and turned on before
+  production.
 - **D3 secrets:** changeable in the admin panel — encrypted
   (AES-256-GCM, key from the environment), write-only, never shown again.
 - **D4 API clients:** own apps and AI agents first; keys created by the
@@ -312,8 +377,8 @@ Later: D5 monthly budget alert (step 9), D6 hosting and D7 domain
 Open the repository and say:
 
 > Continue the Owis_Find_Deal_Engine project from
-> `Owis_Find_Deal_Engine/STATUS.md` on branch `claude/practical-clarke-limbco`.
-> Start phase 2, step 8. (Decisions D1–D4 are recorded in STATUS.md.)
+> `Owis_Find_Deal_Engine/STATUS.md` on branch `claude/awesome-edison-2a2fwh`.
+> Start phase 2, step 9. (Decisions D1–D4 are recorded in STATUS.md.)
 
 ## Run it on your PC
 
@@ -325,7 +390,7 @@ git. Go is not needed for the Docker way.
 ```sh
 git clone https://github.com/owisdev/claude-ai-clould-repo.git
 cd claude-ai-clould-repo
-git checkout claude/practical-clarke-limbco
+git checkout claude/awesome-edison-2a2fwh
 cd Owis_Find_Deal_Engine/server
 ```
 

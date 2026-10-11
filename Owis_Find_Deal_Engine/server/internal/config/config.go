@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"owis_find_deal_engine/internal/markets"
 )
 
 // Config holds all runtime settings.
@@ -22,6 +24,12 @@ type Config struct {
 	SettingsKey          string        // AES-256 key for secret settings (base64 or hex)
 	SettingsPollInterval time.Duration // how often the database is checked for changes
 	AdminEmail           string        // first admin, added once to an empty admin list
+	// Admin API login (bootstrap): two-factor sign-in required, and how old
+	// the sign-in may be before the admin has to sign in again.
+	// Two-factor is off by default for now (owner, 2026-10-11); turn it on
+	// (ADMIN_REQUIRE_2FA=true) before production.
+	AdminRequire2FA    bool
+	AdminSessionMaxAge time.Duration
 
 	// Search providers, tried in order until one succeeds.
 	SearchProviders        []string // "searxng", "serpapi"
@@ -40,11 +48,12 @@ type Config struct {
 
 	// Apify scrapers for marketplaces without an official API (Temu, SHEIN).
 	ApifyToken            string
-	ApifyMarkets          []string          // e.g. temu,shein
-	ApifyActors           map[string]string // market -> "owner~actor-name"
-	ApifyInputs           map[string]string // market -> input JSON template with {{query}}
-	ApifyCurrencies       map[string]string // market -> currency for prices given without one
-	ApifyMarketMaxItems   map[string]int    // market -> results per run (default ApifyMaxItems)
+	ApifyMarkets          []string           // e.g. temu,shein
+	ApifyActors           map[string]string  // market -> "owner~actor-name"
+	ApifyInputs           map[string]string  // market -> input JSON template with {{query}}
+	ApifyCurrencies       map[string]string  // market -> currency for prices given without one
+	ApifyMarketMaxItems   map[string]int     // market -> results per run (default ApifyMaxItems)
+	ApifyRunCostUSD       map[string]float64 // market -> estimated cost of one run (0 = unknown)
 	ApifyMaxItems         int
 	ApifyTimeout          time.Duration
 	ApifyMaxChargeUSD     float64 // max cost of one pay-per-event run; 0 = not sent
@@ -52,6 +61,9 @@ type Config struct {
 	ApifyEmptyFallback    bool    // empty scraper result -> try the web providers
 	ProviderFailThreshold int
 	ProviderCooldown      time.Duration
+	// SerpAPISearchCostUSD is the estimated cost of one SerpApi search
+	// (0 = free plan / unknown), shown by the admin test search.
+	SerpAPISearchCostUSD float64
 
 	// End-user JWTs from the auth provider (Firebase, Supabase, Clerk, ...).
 	AuthJWKSURL   string
@@ -72,17 +84,25 @@ type Config struct {
 	CacheMinRefresh           time.Duration
 	CacheMaxEntries           int
 	CacheMaxBackgroundRefresh int
+	// CacheGeneration is part of every cache key: raising it (admin tool
+	// "bump results version") makes every cached answer a miss.
+	CacheGeneration int
 
 	SearchCombined   bool // one provider call per search instead of one per market
 	ResultsPerMarket int
 	MarketsFile      string
-	CORSOrigins      []string
-	RateLimitRPS     float64 // per user, burst smoothing
-	RateLimitBurst   int
-	SearchTimeout    time.Duration
-	MaxConcurrency   int
-	ShutdownTimeout  time.Duration
-	LogLevel         string
+	// Catalog is the countries and shops: the MARKETS setting (JSON, edited
+	// in the admin panel), else MARKETS_FILE, else the built-in markets.json.
+	Catalog         *markets.Catalog
+	MarketsSource   string // "setting", "file" or "built-in"
+	MarketsJSON     []byte // the catalog as read
+	CORSOrigins     []string
+	RateLimitRPS    float64 // per user, burst smoothing
+	RateLimitBurst  int
+	SearchTimeout   time.Duration
+	MaxConcurrency  int
+	ShutdownTimeout time.Duration
+	LogLevel        string
 }
 
 // Load reads the environment. Required: the AUTH_* settings and the
@@ -113,6 +133,8 @@ func LoadFrom(lookup Lookup) (Config, error) {
 		SettingsKey:               getenv("SETTINGS_ENCRYPTION_KEY"),
 		SettingsPollInterval:      parse(getenv, &errs, "SETTINGS_POLL_INTERVAL", 10*time.Second, time.ParseDuration),
 		AdminEmail:                strings.ToLower(strings.TrimSpace(getenv("ADMIN_EMAIL"))),
+		AdminRequire2FA:           parse(getenv, &errs, "ADMIN_REQUIRE_2FA", false, strconv.ParseBool),
+		AdminSessionMaxAge:        parse(getenv, &errs, "ADMIN_SESSION_MAX_AGE", 12*time.Hour, time.ParseDuration),
 		AuthJWKSURL:               getenv("AUTH_JWKS_URL"),
 		AuthIssuer:                getenv("AUTH_ISSUER"),
 		AuthAudience:              getenv("AUTH_AUDIENCE"),
@@ -134,6 +156,9 @@ func LoadFrom(lookup Lookup) (Config, error) {
 		ApifyInputs:               map[string]string{},
 		ApifyCurrencies:           map[string]string{},
 		ApifyMarketMaxItems:       map[string]int{},
+		ApifyRunCostUSD:           map[string]float64{},
+		SerpAPISearchCostUSD:      parse(getenv, &errs, "SERPAPI_SEARCH_COST_USD", 0, parseFloat),
+		CacheGeneration:           parse(getenv, &errs, "CACHE_GENERATION", 0, strconv.Atoi),
 		ApifyMaxItems:             parse(getenv, &errs, "APIFY_MAX_ITEMS", 10, strconv.Atoi),
 		ApifyEmptyFallback:        parse(getenv, &errs, "APIFY_EMPTY_FALLBACK", false, strconv.ParseBool),
 		ApifyTimeout:              parse(getenv, &errs, "APIFY_TIMEOUT", 60*time.Second, time.ParseDuration),
@@ -170,6 +195,12 @@ func LoadFrom(lookup Lookup) (Config, error) {
 	}
 	if cfg.SettingsPollInterval < time.Second {
 		errs = append(errs, errors.New("SETTINGS_POLL_INTERVAL must be at least 1s"))
+	}
+	if cfg.AdminSessionMaxAge < 5*time.Minute {
+		errs = append(errs, errors.New("ADMIN_SESSION_MAX_AGE must be at least 5m"))
+	}
+	if cfg.SerpAPISearchCostUSD < 0 || cfg.CacheGeneration < 0 {
+		errs = append(errs, errors.New("SERPAPI_SEARCH_COST_USD and CACHE_GENERATION must not be negative"))
 	}
 	if cfg.AdminEmail != "" && !strings.Contains(cfg.AdminEmail, "@") {
 		errs = append(errs, fmt.Errorf("ADMIN_EMAIL: %q is not an email address", cfg.AdminEmail))
@@ -214,6 +245,10 @@ func LoadFrom(lookup Lookup) (Config, error) {
 			if cfg.ApifyMarketMaxItems[m] <= 0 {
 				errs = append(errs, fmt.Errorf("%s_MAX_ITEMS must be positive", key))
 			}
+			cfg.ApifyRunCostUSD[m] = parse(getenv, &errs, key+"_RUN_COST_USD", 0, parseFloat)
+			if cfg.ApifyRunCostUSD[m] < 0 {
+				errs = append(errs, fmt.Errorf("%s_RUN_COST_USD must not be negative", key))
+			}
 			in := cfg.ApifyInputs[m]
 			if cfg.ApifyActors[m] == "" || !(strings.Contains(in, "{{query}}") || strings.Contains(in, "{{query_url}}") || strings.Contains(in, "{{query_path}}") || strings.Contains(in, "{{query_slug}}")) {
 				errs = append(errs, fmt.Errorf("%s_ACTOR and %s_INPUT (JSON containing {{query}}, {{query_url}}, {{query_path}} or {{query_slug}}) are required for %s", key, key, m))
@@ -240,6 +275,17 @@ func LoadFrom(lookup Lookup) (Config, error) {
 			errs = append(errs, errors.New("SERPAPI_KEY is required when SERPAPI_MARKETS is set"))
 		case slices.Contains(cfg.ApifyMarkets, m):
 			errs = append(errs, fmt.Errorf("%s is in both SERPAPI_MARKETS and APIFY_MARKETS", m))
+		}
+	}
+
+	var err error
+	if cfg.Catalog, cfg.MarketsJSON, cfg.MarketsSource, err = loadCatalog(getenv("MARKETS"), cfg.MarketsFile); err != nil {
+		errs = append(errs, err)
+	} else {
+		for _, m := range slices.Concat(cfg.ApifyMarkets, cfg.SerpAPIMarkets) {
+			if !cfg.Catalog.HasMarket(m) {
+				errs = append(errs, fmt.Errorf("%s is in APIFY_MARKETS or SERPAPI_MARKETS but not a shop in MARKETS", m))
+			}
 		}
 	}
 
@@ -285,6 +331,31 @@ func LoadFrom(lookup Lookup) (Config, error) {
 		}
 	}
 	return cfg, errors.Join(errs...)
+}
+
+// loadCatalog parses the countries and shops from the MARKETS setting,
+// else from file, else the built-in catalog.
+func loadCatalog(setting, file string) (*markets.Catalog, []byte, string, error) {
+	data, source := []byte(setting), "setting"
+	switch {
+	case strings.TrimSpace(setting) != "":
+	case file != "":
+		var err error
+		if data, err = os.ReadFile(file); err != nil {
+			return nil, nil, "", fmt.Errorf("read markets file: %w", err)
+		}
+		source = "file"
+	default:
+		data, source = markets.Default(), "built-in"
+	}
+	c, err := markets.Parse(data)
+	if err != nil {
+		if source == "setting" {
+			err = fmt.Errorf("MARKETS: %w", err)
+		}
+		return nil, nil, "", err
+	}
+	return c, data, source, nil
 }
 
 func parse[T any](getenv func(string) string, errs *[]error, key string, def T, fn func(string) (T, error)) T {

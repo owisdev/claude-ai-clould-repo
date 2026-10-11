@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"sync"
@@ -22,7 +24,7 @@ func openTest(t *testing.T) *DB {
 		t.Fatal(err)
 	}
 	t.Cleanup(db.Close)
-	if _, err := db.pool.Exec(ctx, `DROP TABLE IF EXISTS settings, settings_history, admins, schema_migrations`); err != nil {
+	if _, err := db.pool.Exec(ctx, `DROP TABLE IF EXISTS settings, settings_history, admins, audit_log, schema_migrations`); err != nil {
 		t.Fatal(err)
 	}
 	return db
@@ -57,8 +59,8 @@ func TestMigrateConcurrentAndIdempotent(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	if total != 1 {
-		t.Fatalf("migrations applied %d times, want 1", total)
+	if total != 2 {
+		t.Fatalf("migrations applied %d times, want 2 (once each)", total)
 	}
 }
 
@@ -136,5 +138,102 @@ func TestEnsureFirstAdmin(t *testing.T) {
 	list, err := db.Admins(ctx)
 	if err != nil || len(list) != 1 || list[0].Email != "owner@example.com" || list[0].DisabledAt != nil {
 		t.Fatalf("Admins = %+v, %v", list, err)
+	}
+}
+
+func TestAdminLoginAndList(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+	if _, err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.EnsureFirstAdmin(ctx, "owner@example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Unverified email: no link. Unknown email: not an admin.
+	if _, err := db.AdminForLogin(ctx, "uid-1", "owner@example.com", false); !errors.Is(err, ErrNotAdmin) {
+		t.Errorf("unverified email: %v", err)
+	}
+	if _, err := db.AdminForLogin(ctx, "uid-9", "nobody@example.com", true); !errors.Is(err, ErrNotAdmin) {
+		t.Errorf("unknown email: %v", err)
+	}
+	// First login links the uid; afterwards the uid alone counts.
+	a, err := db.AdminForLogin(ctx, "uid-1", "Owner@Example.com", true)
+	if err != nil || a.FirebaseUID == nil || *a.FirebaseUID != "uid-1" {
+		t.Fatalf("first login = %+v, %v", a, err)
+	}
+	if a, err := db.AdminForLogin(ctx, "uid-1", "changed@example.com", false); err != nil || a.Email != "owner@example.com" {
+		t.Errorf("login by uid = %+v, %v", a, err)
+	}
+	// Same email, other login (account created again): refused until unlinked.
+	if _, err := db.AdminForLogin(ctx, "uid-2", "owner@example.com", true); !errors.Is(err, ErrAdminLinked) {
+		t.Errorf("other uid: %v", err)
+	}
+	if err := db.UnlinkAdmin(ctx, "owner@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if a, err := db.AdminForLogin(ctx, "uid-2", "owner@example.com", true); err != nil || *a.FirebaseUID != "uid-2" {
+		t.Errorf("after unlink = %+v, %v", a, err)
+	}
+
+	if _, err := db.AddAdmin(ctx, " Second@Example.com", "admin:owner@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AddAdmin(ctx, "second@example.com", "x"); !errors.Is(err, ErrAdminExists) {
+		t.Errorf("duplicate add: %v", err)
+	}
+	if err := db.SetAdminDisabled(ctx, "second@example.com", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetAdminDisabled(ctx, "owner@example.com", true); !errors.Is(err, ErrLastAdmin) {
+		t.Errorf("disable last active admin: %v", err)
+	}
+	if err := db.SetAdminDisabled(ctx, "ghost@example.com", false); !errors.Is(err, ErrAdminNotFound) {
+		t.Errorf("enable unknown: %v", err)
+	}
+	list, err := db.Admins(ctx)
+	if err != nil || len(list) != 2 || list[1].DisabledAt == nil || list[1].CreatedBy != "admin:owner@example.com" {
+		t.Fatalf("Admins = %+v, %v", list, err)
+	}
+	if err := db.SetAdminDisabled(ctx, "second@example.com", false); err != nil {
+		t.Fatal(err)
+	}
+	if list, _ := db.Admins(ctx); list[1].DisabledAt != nil {
+		t.Error("enable did not clear disabled_at")
+	}
+}
+
+func TestAuditLog(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+	if _, err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []AuditEntry{
+		{Actor: "admin:a@x.y", Action: "settings.change", Target: "PLANS", Detail: json.RawMessage(`{"keys":["PLANS"]}`)},
+		{Actor: "admin:b@x.y", Action: "admins.add", Target: "c@x.y", RequestID: "r1", RemoteIP: "10.0.0.1"},
+		{Actor: "user:u1", Action: "login", Outcome: OutcomeDenied},
+	} {
+		if err := db.AddAudit(ctx, e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.AddAudit(ctx, AuditEntry{Action: "x"}); err == nil {
+		t.Error("entry without actor accepted")
+	}
+
+	all, err := db.AuditLog(ctx, AuditFilter{})
+	if err != nil || len(all) != 3 || all[0].Action != "login" || all[0].Outcome != OutcomeDenied || string(all[2].Detail) != `{"keys": ["PLANS"]}` {
+		t.Fatalf("AuditLog = %+v, %v", all, err)
+	}
+	if got, _ := db.AuditLog(ctx, AuditFilter{Action: "settings."}); len(got) != 1 || got[0].Target != "PLANS" {
+		t.Errorf("by action = %+v", got)
+	}
+	if got, _ := db.AuditLog(ctx, AuditFilter{Actor: "admin:b@x.y"}); len(got) != 1 || got[0].RemoteIP != "10.0.0.1" {
+		t.Errorf("by actor = %+v", got)
+	}
+	if got, _ := db.AuditLog(ctx, AuditFilter{BeforeID: all[0].ID, Limit: 1}); len(got) != 1 || got[0].ID != all[1].ID {
+		t.Errorf("paging = %+v", got)
 	}
 }

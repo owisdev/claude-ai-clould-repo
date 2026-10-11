@@ -48,6 +48,9 @@ type Entry struct {
 type Store interface {
 	Get(ctx context.Context, key string) (*Entry, error)
 	Set(ctx context.Context, key string, e *Entry, ttl time.Duration) error
+	// Delete removes key; a missing key is not an error. It reports
+	// whether the key was there.
+	Delete(ctx context.Context, key string) (bool, error)
 }
 
 // Options tunes freshness.
@@ -251,6 +254,16 @@ func (c *Cache) refreshInBackground(key string, req search.Request) {
 			c.log.Warn("background refresh failed", "err", err)
 		}
 	}()
+}
+
+// Forget removes the cached answer of one search (title and country), so
+// the next search for it is live. It reports whether one was cached.
+func (c *Cache) Forget(ctx context.Context, req search.Request) (bool, error) {
+	key, ok := c.key(req)
+	if !ok {
+		return false, search.ErrInvalidTitle
+	}
+	return c.store.Delete(ctx, key)
 }
 
 // Close stops new background refreshes and waits for running ones until

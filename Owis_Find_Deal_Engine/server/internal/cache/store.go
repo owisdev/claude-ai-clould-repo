@@ -71,6 +71,18 @@ func (m *MemoryStore) Set(_ context.Context, key string, e *Entry, ttl time.Dura
 	return nil
 }
 
+func (m *MemoryStore) Delete(_ context.Context, key string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	el, ok := m.items[key]
+	if !ok {
+		return false, nil
+	}
+	m.ll.Remove(el)
+	delete(m.items, key)
+	return !m.now().After(el.Value.(*memItem).expires), nil
+}
+
 // Len returns the number of stored entries.
 func (m *MemoryStore) Len() int {
 	m.mu.Lock()
@@ -111,4 +123,12 @@ func (r *RedisStore) Set(ctx context.Context, key string, e *Entry, ttl time.Dur
 		return fmt.Errorf("cache set: %w", err)
 	}
 	return nil
+}
+
+func (r *RedisStore) Delete(ctx context.Context, key string) (bool, error) {
+	n, err := r.rdb.Del(ctx, key).Result()
+	if err != nil {
+		return false, fmt.Errorf("cache delete: %w", err)
+	}
+	return n > 0, nil
 }
