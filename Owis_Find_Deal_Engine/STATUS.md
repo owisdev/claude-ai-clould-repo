@@ -1,7 +1,7 @@
 # Project status and handoff
 
 Last updated: 2026-10-11 · Branch: `claude/awesome-edison-2a2fwh`
-(step 9; steps 7 and 8 are merged into `claude/cloud-vs-local-7xi988`, the
+(step 10; steps 7–9 are merged into `claude/cloud-vs-local-7xi988`, the
 project branch; nothing is merged into `main` yet).
 
 Read first:
@@ -19,6 +19,45 @@ Regenerate the PDFs: `python3 docs/build_flow_and_plan_pdfs.py` and
 
 ## Where we are
 
+**Phase 2, step 10 — admin web app: done (2026-10-11). Phase 2 is
+complete.** Details: server README section "Admin web app", PLAN.md step 10.
+
+- **<http://localhost:3002/admin/>**: React + TypeScript app built into
+  the server image (D1), same origin as the admin API.
+- Sign-in with Firebase email + password; the session ends when the tab
+  closes. A refused account sees why (and can send the email
+  verification).
+- Pages: **Dashboard** (tiles, searches per day cached vs live, estimated
+  cost per day, budget meter, sources per shop, fallbacks, countries, top
+  queries), **Settings** (grouped with help text, secrets write-only, all
+  changes saved together and checked as a whole, change history),
+  **Countries & shops** (overview + JSON editor), **Test search**,
+  **Cache & sources** (server status, forget one search, drop all cached
+  answers, circuit breakers), **Admins**, **Audit log**.
+- Strict Content-Security-Policy; only `@firebase/app` + `@firebase/auth`
+  are used (npm audit: 0 vulnerabilities).
+- **D5 answered: monthly budget $5** (free plans) — now the default of
+  `BUDGET_MONTHLY_USD`, nothing to set.
+- Tested: Go tests, typecheck + build, and a real browser (Chromium,
+  light and dark mode) against the server with a fake Firebase: sign-in,
+  every page, saving a setting, an invalid change refused with the
+  server's message, a test search; no script or CSP errors.
+
+**Owner, to try step 10:**
+
+1. In `.env`: `ADMIN_FIREBASE_API_KEY=<WEB_API_KEY>` (the Web API key you
+   use for test tokens), then `docker compose up -d --build` (the image
+   now also builds the web app; the first build takes a bit longer).
+2. Open <http://localhost:3002/admin/> and sign in with your
+   `ADMIN_EMAIL` account. If it says the email is not verified: click
+   "Send verification email", open the link, sign in again.
+3. Go through the pages. Useful first steps: Settings → add
+   `APIFY_TEMU_RUN_COST_USD` = 0.10, `APIFY_SHEIN_RUN_COST_USD` = 0.033,
+   `APIFY_ALIEXPRESS_RUN_COST_USD` = 0.02 (Add a setting); then a test
+   search, then the Dashboard after 30 s.
+4. Report what is unclear or missing — wording, layout, a setting you
+   cannot find.
+
 **Phase 2, step 9 — usage and cost dashboard: done (2026-10-11).**
 Details: server README section "Usage and cost dashboard", PLAN.md step 9.
 
@@ -29,7 +68,7 @@ Details: server README section "Usage and cost dashboard", PLAN.md step 9.
 - Counted in memory and saved to Postgres every 30 s and at shutdown
   (new tables `usage_daily`, kept 400 days, and `query_daily`, kept 90
   days). Admin test searches are counted too (they cost money).
-- **Monthly budget (D5):** settings `BUDGET_MONTHLY_USD` (0 = none) and
+- **Monthly budget (D5, $5 since step 10):** settings `BUDGET_MONTHLY_USD` (0 = none) and
   `BUDGET_ALERT_PERCENT` (80). At 80 % and at 100 % of the month's
   estimated cost: one `ERROR` log line and one audit entry `budget.alert`
   per level and month; the dashboard shows `ok` / `warning` / `exceeded`.
@@ -47,7 +86,7 @@ Details: server README section "Usage and cost dashboard", PLAN.md step 9.
 1. Set costs and budget (one PATCH or `settings set`):
    `{"changes":{"SERPAPI_SEARCH_COST_USD":"0","APIFY_TEMU_RUN_COST_USD":"0.10","APIFY_SHEIN_RUN_COST_USD":"0.033","APIFY_ALIEXPRESS_RUN_COST_USD":"0.02","BUDGET_MONTHLY_USD":"5"}}`
    (SerpApi free plan = 0; Developer plan ≈ 0.015 per search.)
-   **D5: tell me the monthly budget you want** (5 = the Apify free credit).
+   (D5 answered at step 10: $5 is now the default.)
 2. Run a few searches (repeat one to see a cache hit), wait 30 s, then
    `curl -H "Authorization: Bearer $ADMIN_TOKEN" "localhost:3002/admin/v1/usage?days=7"`.
    Does the estimated cost match the Apify console (Billing → usage)?
@@ -112,10 +151,10 @@ web app, step 10) and set `ADMIN_REQUIRE_2FA=true`.
 4. Optional: set the cost estimates, e.g.
    `{"changes":{"APIFY_TEMU_RUN_COST_USD":"0.10","APIFY_SHEIN_RUN_COST_USD":"0.033","APIFY_ALIEXPRESS_RUN_COST_USD":"0.02"}}`.
 
-**Next: phase 2, step 10 — admin web app** (D1: small React app built
-into the server image under `/admin`): sign-in page, settings forms,
-countries / shops editor, admin list, audit log, test search, usage
-dashboard with charts; later the two-factor enrolment.
+**Next: phase 3, step 11 — API clients and keys** (D4): keys for your own
+apps and AI agents, made in the admin panel (shown once, stored hashed,
+scopes, quotas, revoke / rotate), accepted next to the users' Firebase
+tokens.
 
 **Phase 2, step 7 — database + settings store: done (2026-10-11).**
 
@@ -382,7 +421,7 @@ instant); label scraper prices as approximate in the app.
    CI/CD, monitoring).
 4. **Phase 5 — users** (old phase 2).
 
-**Steps 7, 8 and 9 are done (2026-10-11); next session starts phase 2, step 10 (admin web app).**
+**Phase 2 (steps 7–10) is done (2026-10-11); next session starts phase 3, step 11 (API clients and keys).**
 **Owner decisions D1–D4 (answered 2026-10-11):**
 
 - **D1 admin web app:** small React app built into the server image,
@@ -402,8 +441,7 @@ instant); label scraper prices as approximate in the app.
   `.env`. Partner self-service sign-up and billing later, on the same
   key model.
 
-Open: D5 the monthly budget amount (built at step 9, set with
-`BUDGET_MONTHLY_USD`). Later: D6 hosting and D7 domain
+D5 answered: $5 per month (free plans). Later: D6 hosting and D7 domain
 (step 14), D8 paid Apify / SerpApi plans (before real users).
 
 ## To resume in a new Claude Code session
@@ -412,7 +450,7 @@ Open the repository and say:
 
 > Continue the Owis_Find_Deal_Engine project from
 > `Owis_Find_Deal_Engine/STATUS.md` on branch `claude/cloud-vs-local-7xi988`.
-> Start phase 2, step 10. (Decisions D1–D4 are recorded in STATUS.md.)
+> Start phase 3, step 11. (Decisions D1–D5 are recorded in STATUS.md.)
 
 ## Run it on your PC
 

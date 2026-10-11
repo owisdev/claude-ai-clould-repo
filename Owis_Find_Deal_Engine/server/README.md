@@ -59,7 +59,8 @@ Two kinds ([`internal/config/keys.go`](internal/config/keys.go)):
 
 - **bootstrap** — environment (`.env`) only, fixed while the server runs:
   `PORT`, `DATABASE_URL`, `SETTINGS_ENCRYPTION_KEY`, `SETTINGS_POLL_INTERVAL`,
-  `ADMIN_EMAIL`, `ADMIN_REQUIRE_2FA`, `ADMIN_SESSION_MAX_AGE`, `AUTH_*`, `REDIS_URL`, `SEARXNG_URL`, `*_BASE_URL`,
+  `ADMIN_EMAIL`, `ADMIN_REQUIRE_2FA`, `ADMIN_SESSION_MAX_AGE`,
+  `ADMIN_FIREBASE_API_KEY`, `ADMIN_FIREBASE_AUTH_DOMAIN`, `AUTH_*`, `REDIS_URL`, `SEARXNG_URL`, `*_BASE_URL`,
   `MARKETS_FILE`, `CACHE_MAX_ENTRIES`, `LOG_LEVEL`, `SHUTDOWN_TIMEOUT`;
 - **runtime** — everything about searches: countries and shops
   (`MARKETS`), providers, SerpApi / Apify sources per shop
@@ -112,6 +113,33 @@ and need a restart to change.
 Tables ([`internal/store/migrations`](internal/store/migrations)):
 `settings`, `settings_history`, `admins`, `audit_log`, `usage_daily`,
 `query_daily` (+ `schema_migrations`).
+
+## Admin web app
+
+**<http://localhost:3002/admin/>** (with a database). A small React +
+TypeScript app ([`web/admin`](web/admin)) built into the server image and
+embedded in the binary — one deployment, same origin as the admin API.
+
+- **Sign-in:** Firebase email + password (needs `ADMIN_FIREBASE_API_KEY`,
+  the project's public Web API key). The session lives in the browser tab
+  only. Who may enter is decided by the server (admin list, verified email,
+  sign-in age, two-factor when `ADMIN_REQUIRE_2FA=true`); a refused account
+  sees why, and can send itself the email verification.
+- **Pages:** Dashboard (usage, cost per day, budget, sources per shop,
+  fallbacks, top queries), Settings (grouped, with help, secrets write-only,
+  saved together and checked as a whole, change history), Countries & shops
+  (overview + JSON editor), Test search, Cache & sources (server status,
+  forget / drop cached answers, circuit breakers), Admins, Audit log.
+- **Security:** strict Content-Security-Policy (own files + Firebase sign-in
+  endpoints only), no frames, `no-store` API answers, no third-party
+  scripts; Firebase is used without popups or iframes.
+
+Develop: `cd web/admin && npm ci && npm run dev` (Vite on
+<http://localhost:5173/admin/>, proxies the API to a server on
+localhost:3002). `npm run build` writes the app to
+`internal/adminui/dist` (not committed); `go build` embeds whatever is
+there, and without a build `/admin/` explains how to build it. The Docker
+image always builds it.
 
 ## Admin API
 
@@ -370,6 +398,8 @@ internal/auth               JWT verification + JWKS key cache
 internal/auth/authtest      fake auth provider for tests
 internal/usage              plans, daily quotas, Redis/memory counters
 internal/ratelimit          per-user token bucket
+internal/adminui            serves the admin web app (embedded build) at /admin/
+web/admin                   admin web app source (React + TypeScript, Vite)
 internal/api                router, handlers, middleware; admin.go +
                             admin_handlers.go: the admin API
 internal/search/probe.go    admin test search, provider health
@@ -389,8 +419,10 @@ gofmt -l . && go vet ./... && go test -race ./...
 # store tests need an empty throwaway database (its tables are dropped):
 TEST_DATABASE_URL=postgres://user:pass@127.0.0.1:5432/ofd_test?sslmode=disable go test -race ./internal/store
 go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+cd web/admin && npm ci && npm run build && npm audit --omit=dev
 ```
 
 CI ([`.github/workflows/server.yml`](../../.github/workflows/server.yml))
-runs these on every push touching the server, then validates the compose
-files and builds and smoke-tests the Docker image.
+runs these on every push touching the server (the admin web app in its own
+job: typecheck, build, audit), then validates the compose files and builds
+and smoke-tests the Docker image.

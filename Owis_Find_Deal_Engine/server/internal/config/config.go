@@ -30,6 +30,10 @@ type Config struct {
 	// (ADMIN_REQUIRE_2FA=true) before production.
 	AdminRequire2FA    bool
 	AdminSessionMaxAge time.Duration
+	// Admin web app sign-in (bootstrap): the Firebase project's Web API key
+	// (public) and auth domain (default <project>.firebaseapp.com).
+	AdminFirebaseAPIKey     string
+	AdminFirebaseAuthDomain string
 
 	// Search providers, tried in order until one succeeds.
 	SearchProviders        []string // "searxng", "serpapi"
@@ -65,8 +69,9 @@ type Config struct {
 	// (0 = free plan / unknown), shown by the admin test search.
 	SerpAPISearchCostUSD float64
 
-	// Monthly budget for the estimated cost of sources (0 = none) and the
-	// share of it that raises an alert (usage dashboard, step 9).
+	// Monthly budget for the estimated cost of sources (0 = none; default
+	// $5 = the Apify free credit, owner decision D5) and the share of it
+	// that raises an alert (usage dashboard, step 9).
 	BudgetMonthlyUSD   float64
 	BudgetAlertPercent int
 
@@ -140,6 +145,8 @@ func LoadFrom(lookup Lookup) (Config, error) {
 		AdminEmail:                strings.ToLower(strings.TrimSpace(getenv("ADMIN_EMAIL"))),
 		AdminRequire2FA:           parse(getenv, &errs, "ADMIN_REQUIRE_2FA", false, strconv.ParseBool),
 		AdminSessionMaxAge:        parse(getenv, &errs, "ADMIN_SESSION_MAX_AGE", 12*time.Hour, time.ParseDuration),
+		AdminFirebaseAPIKey:       strings.TrimSpace(getenv("ADMIN_FIREBASE_API_KEY")),
+		AdminFirebaseAuthDomain:   strings.TrimSpace(getenv("ADMIN_FIREBASE_AUTH_DOMAIN")),
 		AuthJWKSURL:               getenv("AUTH_JWKS_URL"),
 		AuthIssuer:                getenv("AUTH_ISSUER"),
 		AuthAudience:              getenv("AUTH_AUDIENCE"),
@@ -164,7 +171,7 @@ func LoadFrom(lookup Lookup) (Config, error) {
 		ApifyRunCostUSD:           map[string]float64{},
 		SerpAPISearchCostUSD:      parse(getenv, &errs, "SERPAPI_SEARCH_COST_USD", 0, parseFloat),
 		CacheGeneration:           parse(getenv, &errs, "CACHE_GENERATION", 0, strconv.Atoi),
-		BudgetMonthlyUSD:          parse(getenv, &errs, "BUDGET_MONTHLY_USD", 0, parseFloat),
+		BudgetMonthlyUSD:          parse(getenv, &errs, "BUDGET_MONTHLY_USD", 5, parseFloat),
 		BudgetAlertPercent:        parse(getenv, &errs, "BUDGET_ALERT_PERCENT", 80, strconv.Atoi),
 		ApifyMaxItems:             parse(getenv, &errs, "APIFY_MAX_ITEMS", 10, strconv.Atoi),
 		ApifyEmptyFallback:        parse(getenv, &errs, "APIFY_EMPTY_FALLBACK", false, strconv.ParseBool),
@@ -202,6 +209,9 @@ func LoadFrom(lookup Lookup) (Config, error) {
 	}
 	if cfg.SettingsPollInterval < time.Second {
 		errs = append(errs, errors.New("SETTINGS_POLL_INTERVAL must be at least 1s"))
+	}
+	if cfg.AdminFirebaseAuthDomain == "" && cfg.AuthAudience != "" {
+		cfg.AdminFirebaseAuthDomain = cfg.AuthAudience + ".firebaseapp.com"
 	}
 	if cfg.AdminSessionMaxAge < 5*time.Minute {
 		errs = append(errs, errors.New("ADMIN_SESSION_MAX_AGE must be at least 5m"))

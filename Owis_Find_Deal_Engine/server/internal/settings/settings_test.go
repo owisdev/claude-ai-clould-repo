@@ -37,7 +37,15 @@ func TestCipher(t *testing.T) {
 	if _, err := other.Decrypt("SERPAPI_KEY", a); !errors.Is(err, ErrDecrypt) {
 		t.Errorf("wrong key: %v", err)
 	}
-	for _, bad := range []string{"", "plain", "v1:!!", "v1:AAAA", a[:len(a)-2] + "AA"} {
+	// Tampered: one character inside the value always changes (the last
+	// ones may only hold padding bits, or already be the replacement).
+	i := len(a) - 6
+	repl := "A"
+	if a[i] == 'A' {
+		repl = "B"
+	}
+	tampered := a[:i] + repl + a[i+1:]
+	for _, bad := range []string{"", "plain", "v1:!!", "v1:AAAA", tampered} {
 		if _, err := c.Decrypt("SERPAPI_KEY", bad); !errors.Is(err, ErrDecrypt) {
 			t.Errorf("Decrypt(%q): %v", bad, err)
 		}
