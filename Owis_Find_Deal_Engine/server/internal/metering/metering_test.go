@@ -193,3 +193,41 @@ func TestWithoutCacheNeverFree(t *testing.T) {
 		t.Errorf("Search not delegated: %v", err)
 	}
 }
+
+type outcomeRecorder struct{ got []string }
+
+func (r *outcomeRecorder) Search(country, title, outcome string) {
+	r.got = append(r.got, country+"|"+title+"|"+outcome)
+}
+
+func TestSearchesAreReported(t *testing.T) {
+	ctx := context.Background()
+	rec := &outcomeRecorder{}
+	f := &fakeSearcher{live: live}
+	m, _ := newService(t, f, "free:1")
+	m.WithRecorder(rec)
+
+	_, _ = m.Search(ctx, alice, req) // live
+	_, _ = m.Search(ctx, alice, req) // quota
+	f.cached = &search.Result{Cached: true, Stale: true}
+	_, _ = m.Search(ctx, alice, req) // stale
+	f.cached = cached
+	_, _ = m.Search(ctx, alice, req) // hit
+
+	f2 := &fakeSearcher{err: search.ErrAllFailed}
+	m2, _ := newService(t, f2, "free:5")
+	m2.WithRecorder(rec)
+	_, _ = m2.Search(ctx, alice, req) // error
+	f2.err = search.ErrInvalidTitle
+	_, _ = m2.Search(ctx, alice, req) // invalid: not reported
+
+	want := []string{"jor|s pen|live", "jor|s pen|quota", "jor|s pen|stale", "jor|s pen|hit", "jor|s pen|error"}
+	if len(rec.got) != len(want) {
+		t.Fatalf("reported %v, want %v", rec.got, want)
+	}
+	for i := range want {
+		if rec.got[i] != want[i] {
+			t.Errorf("report %d = %s, want %s", i, rec.got[i], want[i])
+		}
+	}
+}

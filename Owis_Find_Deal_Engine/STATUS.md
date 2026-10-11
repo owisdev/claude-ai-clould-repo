@@ -1,8 +1,8 @@
 # Project status and handoff
 
 Last updated: 2026-10-11 · Branch: `claude/awesome-edison-2a2fwh`
-(continues `claude/cloud-vs-local-7xi988` = `claude/practical-clarke-limbco`,
-which end at step 7; none is merged into `main` yet).
+(step 9; steps 7 and 8 are merged into `claude/cloud-vs-local-7xi988`, the
+project branch; nothing is merged into `main` yet).
 
 Read first:
 - [docs/current_flow.pdf](docs/current_flow.pdf) — **how the service works
@@ -18,6 +18,39 @@ Regenerate the PDFs: `python3 docs/build_flow_and_plan_pdfs.py` and
 `python3 docs/build_architecture_pdf.py` (needs `reportlab`).
 
 ## Where we are
+
+**Phase 2, step 9 — usage and cost dashboard: done (2026-10-11).**
+Details: server README section "Usage and cost dashboard", PLAN.md step 9.
+
+- `GET /admin/v1/usage?days=30` — per day, country, source and shop:
+  searches (cache hit / stale / live / refused by quota / failed), cache
+  hit rate, source calls with ok / no results / errors, average time,
+  fallbacks and why, **estimated cost per day**, top queries (no user ids).
+- Counted in memory and saved to Postgres every 30 s and at shutdown
+  (new tables `usage_daily`, kept 400 days, and `query_daily`, kept 90
+  days). Admin test searches are counted too (they cost money).
+- **Monthly budget (D5):** settings `BUDGET_MONTHLY_USD` (0 = none) and
+  `BUDGET_ALERT_PERCENT` (80). At 80 % and at 100 % of the month's
+  estimated cost: one `ERROR` log line and one audit entry `budget.alert`
+  per level and month; the dashboard shows `ok` / `warning` / `exceeded`.
+  Searches are **not** blocked (a hard stop can be added if wanted).
+- Costs are estimates from the cost settings of step 8
+  (`SERPAPI_SEARCH_COST_USD`, `APIFY_<SHOP>_RUN_COST_USD`): **set them**,
+  otherwise every cost shows 0.
+- Tested: unit tests (counters, report, budget, store against Postgres 16,
+  admin endpoint) and an end-to-end run: searches through the public API,
+  dashboard after the flush, budget alert logged and audited once per
+  level, counts saved at shutdown.
+
+**Owner, to try step 9** (after step 8 works, see below):
+
+1. Set costs and budget (one PATCH or `settings set`):
+   `{"changes":{"SERPAPI_SEARCH_COST_USD":"0","APIFY_TEMU_RUN_COST_USD":"0.10","APIFY_SHEIN_RUN_COST_USD":"0.033","APIFY_ALIEXPRESS_RUN_COST_USD":"0.02","BUDGET_MONTHLY_USD":"5"}}`
+   (SerpApi free plan = 0; Developer plan ≈ 0.015 per search.)
+   **D5: tell me the monthly budget you want** (5 = the Apify free credit).
+2. Run a few searches (repeat one to see a cache hit), wait 30 s, then
+   `curl -H "Authorization: Bearer $ADMIN_TOKEN" "localhost:3002/admin/v1/usage?days=7"`.
+   Does the estimated cost match the Apify console (Billing → usage)?
 
 **Phase 2, step 8 — admin API: done (2026-10-11).** Details: server
 README section "Admin API", PLAN.md step 8.
@@ -79,10 +112,10 @@ web app, step 10) and set `ADMIN_REQUIRE_2FA=true`.
 4. Optional: set the cost estimates, e.g.
    `{"changes":{"APIFY_TEMU_RUN_COST_USD":"0.10","APIFY_SHEIN_RUN_COST_USD":"0.033","APIFY_ALIEXPRESS_RUN_COST_USD":"0.02"}}`.
 
-**Next: phase 2, step 9 — usage and cost dashboard** (live searches,
-cache hit rate, fallbacks and errors per source, estimated cost per day,
-top queries; D5 monthly budget alert). Then step 10, the admin web app
-(D1), including the sign-in page with two-factor enrolment.
+**Next: phase 2, step 10 — admin web app** (D1: small React app built
+into the server image under `/admin`): sign-in page, settings forms,
+countries / shops editor, admin list, audit log, test search, usage
+dashboard with charts; later the two-factor enrolment.
 
 **Phase 2, step 7 — database + settings store: done (2026-10-11).**
 
@@ -349,7 +382,7 @@ instant); label scraper prices as approximate in the app.
    CI/CD, monitoring).
 4. **Phase 5 — users** (old phase 2).
 
-**Steps 7 and 8 are done (2026-10-11); next session starts phase 2, step 9 (usage and cost dashboard).**
+**Steps 7, 8 and 9 are done (2026-10-11); next session starts phase 2, step 10 (admin web app).**
 **Owner decisions D1–D4 (answered 2026-10-11):**
 
 - **D1 admin web app:** small React app built into the server image,
@@ -369,7 +402,8 @@ instant); label scraper prices as approximate in the app.
   `.env`. Partner self-service sign-up and billing later, on the same
   key model.
 
-Later: D5 monthly budget alert (step 9), D6 hosting and D7 domain
+Open: D5 the monthly budget amount (built at step 9, set with
+`BUDGET_MONTHLY_USD`). Later: D6 hosting and D7 domain
 (step 14), D8 paid Apify / SerpApi plans (before real users).
 
 ## To resume in a new Claude Code session
@@ -377,8 +411,8 @@ Later: D5 monthly budget alert (step 9), D6 hosting and D7 domain
 Open the repository and say:
 
 > Continue the Owis_Find_Deal_Engine project from
-> `Owis_Find_Deal_Engine/STATUS.md` on branch `claude/awesome-edison-2a2fwh`.
-> Start phase 2, step 9. (Decisions D1–D4 are recorded in STATUS.md.)
+> `Owis_Find_Deal_Engine/STATUS.md` on branch `claude/cloud-vs-local-7xi988`.
+> Start phase 2, step 10. (Decisions D1–D4 are recorded in STATUS.md.)
 
 ## Run it on your PC
 
@@ -390,7 +424,7 @@ git. Go is not needed for the Docker way.
 ```sh
 git clone https://github.com/owisdev/claude-ai-clould-repo.git
 cd claude-ai-clould-repo
-git checkout claude/awesome-edison-2a2fwh
+git checkout claude/cloud-vs-local-7xi988
 cd Owis_Find_Deal_Engine/server
 ```
 

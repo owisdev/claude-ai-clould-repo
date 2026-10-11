@@ -8,7 +8,7 @@ import (
 
 func TestRuntimeKeys(t *testing.T) {
 	for _, k := range []string{"SEARCH_PROVIDERS", "SERPAPI_KEY", "APIFY_TEMU_INPUT", "APIFY_SHEIN_MAX_ITEMS",
-		"APIFY_ALIEXPRESS_CURRENCY", "APIFY_MAX_ITEMS", "APIFY_TEMU_RUN_COST_USD", "MARKETS", "CACHE_GENERATION", "SERPAPI_SEARCH_COST_USD", "CACHE_FRESH_TTL", "CORS_ALLOWED_ORIGINS"} {
+		"APIFY_ALIEXPRESS_CURRENCY", "APIFY_MAX_ITEMS", "APIFY_TEMU_RUN_COST_USD", "MARKETS", "CACHE_GENERATION", "SERPAPI_SEARCH_COST_USD", "BUDGET_MONTHLY_USD", "BUDGET_ALERT_PERCENT", "CACHE_FRESH_TTL", "CORS_ALLOWED_ORIGINS"} {
 		if !Runtime(k) {
 			t.Errorf("Runtime(%s) = false", k)
 		}
@@ -79,7 +79,8 @@ func TestLoadFromSettingsBootstrap(t *testing.T) {
 			t.Errorf("%v accepted", bad)
 		}
 	}
-	for _, bad := range []map[string]string{{"ADMIN_SESSION_MAX_AGE": "1m"}, {"ADMIN_REQUIRE_2FA": "maybe"}} {
+	for _, bad := range []map[string]string{{"ADMIN_SESSION_MAX_AGE": "1m"}, {"ADMIN_REQUIRE_2FA": "maybe"},
+		{"BUDGET_MONTHLY_USD": "-1"}, {"BUDGET_ALERT_PERCENT": "0"}, {"BUDGET_ALERT_PERCENT": "101"}} {
 		if err := load(bad); err == nil {
 			t.Errorf("%v accepted", bad)
 		}

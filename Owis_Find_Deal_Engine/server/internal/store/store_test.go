@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // openTest connects to TEST_DATABASE_URL (an empty, throwaway database;
@@ -24,7 +25,7 @@ func openTest(t *testing.T) *DB {
 		t.Fatal(err)
 	}
 	t.Cleanup(db.Close)
-	if _, err := db.pool.Exec(ctx, `DROP TABLE IF EXISTS settings, settings_history, admins, audit_log, schema_migrations`); err != nil {
+	if _, err := db.pool.Exec(ctx, `DROP TABLE IF EXISTS settings, settings_history, admins, audit_log, usage_daily, query_daily, schema_migrations`); err != nil {
 		t.Fatal(err)
 	}
 	return db
@@ -59,8 +60,8 @@ func TestMigrateConcurrentAndIdempotent(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	if total != 2 {
-		t.Fatalf("migrations applied %d times, want 2 (once each)", total)
+	if total != 3 {
+		t.Fatalf("migrations applied %d times, want 3 (once each)", total)
 	}
 }
 
@@ -235,5 +236,59 @@ func TestAuditLog(t *testing.T) {
 	}
 	if got, _ := db.AuditLog(ctx, AuditFilter{BeforeID: all[0].ID, Limit: 1}); len(got) != 1 || got[0].ID != all[1].ID {
 		t.Errorf("paging = %+v", got)
+	}
+}
+
+func TestUsage(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+	if _, err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	d := func(s string) time.Time { v, _ := time.Parse(time.DateOnly, s); return v }
+	add := []UsageRow{
+		{Day: d("2026-10-10"), Kind: "source", K1: "apify", K2: "temu", K3: "ok", Count: 1, CostUSD: 0.1, TotalMS: 40000},
+		{Day: d("2026-10-11"), Kind: "search", K1: "jor", K2: "live", Count: 2},
+	}
+	q := []QueryRow{{Day: d("2026-10-11"), Country: "jor", Query: "usb hub", Searches: 2, Live: 1}}
+	// Two instances flushing the same counters add up.
+	for range 2 {
+		if err := db.AddUsage(ctx, add, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.AddUsage(ctx, nil, []QueryRow{{Day: d("2026-10-11"), Country: "usa", Query: "ssd", Searches: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.UsageRows(ctx, d("2026-10-10"), d("2026-10-11"))
+	if err != nil || len(rows) != 2 || rows[0].Count != 2 || rows[0].CostUSD != 0.2 || rows[0].TotalMS != 80000 || !rows[0].Day.Equal(d("2026-10-10")) {
+		t.Fatalf("UsageRows = %+v, %v", rows, err)
+	}
+	if rows, _ := db.UsageRows(ctx, d("2026-10-11"), d("2026-10-11")); len(rows) != 1 {
+		t.Errorf("one day = %+v", rows)
+	}
+	top, err := db.TopQueries(ctx, d("2026-10-01"), d("2026-10-31"), 10)
+	if err != nil || len(top) != 2 || top[0].Query != "usb hub" || top[0].Searches != 4 || top[0].Live != 2 {
+		t.Fatalf("TopQueries = %+v, %v", top, err)
+	}
+	if c, err := db.UsageCost(ctx, d("2026-10-01"), d("2026-10-31")); err != nil || c < 0.199 || c > 0.201 {
+		t.Errorf("UsageCost = %v, %v", c, err)
+	}
+	if err := db.PruneUsage(ctx, d("2026-10-11"), d("2026-10-12")); err != nil {
+		t.Fatal(err)
+	}
+	if rows, _ := db.UsageRows(ctx, d("2026-01-01"), d("2026-12-31")); len(rows) != 1 {
+		t.Errorf("after prune = %+v", rows)
+	}
+	if top, _ := db.TopQueries(ctx, d("2026-01-01"), d("2026-12-31"), 10); len(top) != 0 {
+		t.Errorf("queries after prune = %+v", top)
+	}
+
+	if ok, err := db.HasAudit(ctx, "budget.alert", "2026-10:80%"); ok || err != nil {
+		t.Fatalf("HasAudit = %v, %v", ok, err)
+	}
+	_ = db.AddAudit(ctx, AuditEntry{Actor: "system", Action: "budget.alert", Target: "2026-10:80%"})
+	if ok, _ := db.HasAudit(ctx, "budget.alert", "2026-10:80%"); !ok {
+		t.Error("HasAudit after AddAudit = false")
 	}
 }
