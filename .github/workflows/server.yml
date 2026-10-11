@@ -71,10 +71,35 @@ jobs:
       - name: Known vulnerabilities
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
+  admin-web:
+    name: admin web app (typecheck, build, audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: Owis_Find_Deal_Engine/server/web/admin
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: Owis_Find_Deal_Engine/server/web/admin/package-lock.json
+
+      - name: Install (lockfile only)
+        run: npm ci --no-fund
+
+      - name: Typecheck and build
+        run: npm run build
+
+      - name: Known vulnerabilities (production dependencies)
+        run: npm audit --omit=dev --audit-level=high
+
   docker:
     name: docker image and compose file
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, admin-web]
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7

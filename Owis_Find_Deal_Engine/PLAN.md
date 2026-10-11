@@ -456,9 +456,17 @@ first, keys made in the panel (partners later).
    `BUDGET_MONTHLY_USD`, `BUDGET_ALERT_PERCENT` → alert (error log + audit
    entry `budget.alert`, once per level and month) and dashboard status.
    No hard stop yet.
-10. **Admin web app** (desktop browser): settings forms with validation,
+10. ✅ **Admin web app** (desktop browser): settings forms with validation,
     dashboard, audit log, API clients (step 11). Built as a static web app
     and served by the same server under `/admin` (same origin, one deploy).
+    *Built 2026-10-11:* React 19 + TypeScript + Vite in `server/web/admin`,
+    built in a Node stage of the Dockerfile and embedded in the Go binary
+    (`internal/adminui`); Firebase email/password sign-in (tab session,
+    `ADMIN_FIREBASE_API_KEY`), strict CSP; pages: dashboard with charts,
+    settings, countries & shops, test search, cache & sources, admins,
+    audit log. Only `@firebase/app` + `@firebase/auth` (no Firestore, npm
+    audit clean). API clients page comes with step 11; the two-factor
+    sign-in screen with step 14.
 
 **Phase 3 — API integration** (other applications and AI agents)
 

@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"owis_find_deal_engine/internal/adminui"
 	"owis_find_deal_engine/internal/api"
 	"owis_find_deal_engine/internal/auth"
 	"owis_find_deal_engine/internal/cache"
@@ -222,6 +223,23 @@ func run() error {
 			SessionMaxAge: cfg.AdminSessionMaxAge,
 			Log:           log,
 		})
+		api := admin
+		ui := adminui.Handler(adminui.Config{
+			FirebaseAPIKey:     cfg.AdminFirebaseAPIKey,
+			FirebaseAuthDomain: cfg.AdminFirebaseAuthDomain,
+			FirebaseProjectID:  cfg.AuthAudience,
+			Require2FA:         cfg.AdminRequire2FA,
+		})
+		admin = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasPrefix(r.URL.Path, "/admin/v1/") {
+				api.ServeHTTP(w, r)
+				return
+			}
+			ui.ServeHTTP(w, r)
+		})
+		if cfg.AdminFirebaseAPIKey == "" {
+			log.Warn("ADMIN_FIREBASE_API_KEY not set: the admin web app (/admin/) cannot sign in")
+		}
 		if !cfg.AdminRequire2FA {
 			log.Warn("two-factor admin login is disabled (ADMIN_REQUIRE_2FA=false); set it to true before production")
 		}
@@ -230,7 +248,7 @@ func run() error {
 	srv := &http.Server{
 		Addr: net.JoinHostPort("", cfg.Port),
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if admin != nil && strings.HasPrefix(r.URL.Path, "/admin/") {
+			if admin != nil && (r.URL.Path == "/admin" || strings.HasPrefix(r.URL.Path, "/admin/")) {
 				admin.ServeHTTP(w, r)
 				return
 			}

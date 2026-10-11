@@ -8,3 +8,5 @@ docker-compose*.yml
 compose*.yml
 /owis_find_deal_engine
 **/*_test.go
+web/admin/node_modules/
+internal/adminui/dist/
