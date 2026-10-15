@@ -39,12 +39,23 @@ func New(rps float64, burst int, idle time.Duration) *Limiter {
 // Allow reports whether a request for key may proceed. If not, it returns
 // how long the caller should wait before retrying.
 func (l *Limiter) Allow(key string) (bool, time.Duration) {
+	return l.allow(key, l.rps, l.burst)
+}
+
+// AllowRate is Allow with a rate of its own for key (e.g. an API client's
+// limit). A changed rate applies at once: the key starts a new, full
+// bucket.
+func (l *Limiter) AllowRate(key string, rps float64, burst int) (bool, time.Duration) {
+	return l.allow(key, rate.Limit(rps), burst)
+}
+
+func (l *Limiter) allow(key string, rps rate.Limit, burst int) (bool, time.Duration) {
 	now := time.Now()
 
 	l.mu.Lock()
 	b, ok := l.buckets[key]
-	if !ok {
-		b = &bucket{limiter: rate.NewLimiter(l.rps, l.burst)}
+	if !ok || b.limiter.Limit() != rps || b.limiter.Burst() != burst {
+		b = &bucket{limiter: rate.NewLimiter(rps, burst)}
 		l.buckets[key] = b
 	}
 	b.lastSeen = now

@@ -208,6 +208,8 @@ func (f *fakeRuntime) Health() []search.ChainHealth {
 	return []search.ChainHealth{{Name: "web", Chain: "searxng", Sources: []search.SourceHealth{{Provider: "searxng", State: "closed"}}}}
 }
 
+func (f *fakeRuntime) Countries() []string { return []string{"jor", "ksa", "usa"} }
+
 func (f *fakeRuntime) Status() RuntimeStatus {
 	return RuntimeStatus{SettingsVersion: 3, MarketsSource: "built-in", MarketsJSON: markets.Default(), CacheEnabled: f.cacheOn, CacheGeneration: 4,
 		BudgetMonthlyUSD: 5, BudgetAlertPercent: 80}
@@ -218,6 +220,7 @@ type adminEnv struct {
 	provider *authtest.Provider
 	store    *fakeAdminStore
 	runtime  *fakeRuntime
+	clients  *fakeClients
 }
 
 func newAdminEnv(t *testing.T) *adminEnv {
@@ -236,12 +239,14 @@ func newAdminEnv(t *testing.T) *adminEnv {
 		{ID: 1, Email: "owner@example.com", CreatedBy: "bootstrap:ADMIN_EMAIL"},
 	}}
 	rt := &fakeRuntime{cacheOn: true}
+	cs := newFakeClients()
 	h := NewAdminRouter(AdminDeps{
 		Store: st, Settings: fakeSettings{st: st}, Runtime: func() AdminRuntime { return rt },
+		Clients: cs, ClientsChanged: func() { cs.changed++ },
 		Verifier: v, Require2FA: true, RequireVerifiedEmail: true, SessionMaxAge: time.Hour, Log: log,
 		ToolLimiter: ratelimit.New(0.001, 2, time.Minute),
 	})
-	return &adminEnv{handler: h, provider: p, store: st, runtime: rt}
+	return &adminEnv{handler: h, provider: p, store: st, runtime: rt, clients: cs}
 }
 
 // token signs in sub with email (verified), a second factor and a recent sign-in.

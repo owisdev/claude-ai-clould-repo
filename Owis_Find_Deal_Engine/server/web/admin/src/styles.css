@@ -133,3 +133,9 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 /* Sign-in */
 .signin { max-width: 380px; margin: 12vh auto; }
 .signin form { display: flex; flex-direction: column; gap: 12px; }
+
+/* Checkbox groups */
+fieldset.checks { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
+fieldset.checks legend { color: var(--text-2); font-size: 13px; padding: 0; margin-bottom: 4px; }
+fieldset.checks label { display: flex; gap: 6px; align-items: center; }
+button.small { padding: 2px 8px; font-size: 12px; }

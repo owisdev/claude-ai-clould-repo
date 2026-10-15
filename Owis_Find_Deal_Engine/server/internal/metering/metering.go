@@ -42,9 +42,9 @@ type Searcher interface {
 
 // Quota consumes, refunds and reports per-user allowance.
 type Quota interface {
-	Take(ctx context.Context, userID, plan string) (usage.Decision, error)
+	Take(ctx context.Context, a usage.Account) (usage.Decision, error)
 	Refund(ctx context.Context, d usage.Decision) error
-	Status(ctx context.Context, userID, plan string) (usage.Decision, error)
+	Status(ctx context.Context, a usage.Account) (usage.Decision, error)
 }
 
 // Outcome is a metered search's result plus the user's allowance after it.
@@ -131,13 +131,13 @@ func (s *Service) search(ctx context.Context, user auth.User, req search.Request
 		out := Outcome{Result: res}
 		// Allowance is informational here; a counter error must not block
 		// a free answer.
-		if d, err := s.quota.Status(ctx, user.ID, user.Plan); err == nil {
+		if d, err := s.quota.Status(ctx, account(user)); err == nil {
 			out.Quota, out.QuotaKnown = d, true
 		}
 		return out, nil
 	}
 
-	d, err := s.quota.Take(ctx, user.ID, user.Plan)
+	d, err := s.quota.Take(ctx, account(user))
 	if err != nil {
 		s.log.ErrorContext(ctx, "quota check failed", "err", err)
 		return Outcome{}, fmt.Errorf("%w: %v", ErrQuotaUnavailable, err)
@@ -157,6 +157,12 @@ func (s *Service) search(ctx context.Context, user auth.User, req search.Request
 	}
 	out.Result = res
 	return out, nil
+}
+
+// account is whose allowance user's searches use: app users by plan, API
+// clients by their own daily limit (each client separately).
+func account(user auth.User) usage.Account {
+	return usage.Account{ID: user.ID, Plan: user.Plan, DailyLimit: user.DailyLimit}
 }
 
 // refund gives a unit back, detached from ctx, which may be cancelled.

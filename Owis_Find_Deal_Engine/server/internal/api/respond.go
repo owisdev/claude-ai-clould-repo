@@ -15,6 +15,7 @@ const maxBodyBytes = 64 << 10
 const (
 	CodeInvalidRequest     = "invalid_request"
 	CodeUnsupportedCountry = "unsupported_country"
+	CodeCountryNotAllowed  = "country_not_allowed" // API key limited to other countries
 	CodeUnauthorized       = "unauthorized"
 	CodeRateLimited        = "rate_limited"
 	CodeQuotaExceeded      = "quota_exceeded"

@@ -1,7 +1,9 @@
-// Package usage enforces per-user daily search quotas by subscription plan.
+// Package usage enforces daily search quotas: per user by subscription
+// plan, per API client by its own limit.
 package usage
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -81,6 +83,20 @@ type Decision struct {
 	key             string
 }
 
+// Account is whose allowance a search uses: an app user (plan from the
+// login token) or an API client (its own daily limit).
+type Account struct {
+	ID   string
+	Plan string // plan name; empty or unknown = the default plan
+	// DailyLimit, when > 0, replaces the plan's limit (API clients). The
+	// plan name is then only a label, and running out never asks for an
+	// upgrade.
+	DailyLimit int64
+}
+
+// APIPlan labels the allowance of API clients.
+const APIPlan = "api"
+
 // Remaining is how many searches are left today.
 func (d Decision) Remaining() int64 { return max(d.Plan.DailyLimit-d.Used, 0) }
 
@@ -103,14 +119,24 @@ func (q *Quota) window(userID string) (key string, reset time.Time) {
 	return "usage:" + userID + ":" + now.Format("20060102"), reset
 }
 
-// Status reports the user's allowance without consuming any (used for
+// plan returns the account's plan and whether running out of it means
+// "upgrade" (402) rather than "wait until tomorrow" (429).
+func (q *Quota) plan(a Account) (Plan, bool) {
+	if a.DailyLimit > 0 {
+		return Plan{Name: cmp.Or(a.Plan, APIPlan), DailyLimit: a.DailyLimit}, false
+	}
+	p := q.plans.Resolve(a.Plan)
+	return p, q.plans.IsDefault(p)
+}
+
+// Status reports the account's allowance without consuming any (used for
 // answers served from cache, which are free).
-func (q *Quota) Status(ctx context.Context, userID, planName string) (Decision, error) {
-	if userID == "" {
+func (q *Quota) Status(ctx context.Context, a Account) (Decision, error) {
+	if a.ID == "" {
 		return Decision{}, errors.New("usage: empty user id")
 	}
-	key, reset := q.window(userID)
-	plan := q.plans.Resolve(planName)
+	key, reset := q.window(a.ID)
+	plan, upgrade := q.plan(a)
 	n, err := q.store.Get(ctx, key)
 	if err != nil {
 		return Decision{}, fmt.Errorf("usage: %w", err)
@@ -121,18 +147,19 @@ func (q *Quota) Status(ctx context.Context, userID, planName string) (Decision, 
 		Plan:            plan,
 		Used:            used,
 		Reset:           reset,
-		UpgradeRequired: used >= plan.DailyLimit && q.plans.IsDefault(plan),
+		UpgradeRequired: used >= plan.DailyLimit && upgrade,
 	}, nil
 }
 
-// Take consumes one search for userID if the plan allows it. Increment
-// first, then compare: atomic, so concurrent requests cannot overshoot.
-func (q *Quota) Take(ctx context.Context, userID, planName string) (Decision, error) {
-	if userID == "" {
+// Take consumes one search of the account if its plan allows it.
+// Increment first, then compare: atomic, so concurrent requests cannot
+// overshoot.
+func (q *Quota) Take(ctx context.Context, a Account) (Decision, error) {
+	if a.ID == "" {
 		return Decision{}, errors.New("usage: empty user id")
 	}
-	key, reset := q.window(userID)
-	plan := q.plans.Resolve(planName)
+	key, reset := q.window(a.ID)
+	plan, upgrade := q.plan(a)
 
 	d := Decision{Plan: plan, Reset: reset, key: key}
 	n, err := q.store.Incr(ctx, d.key, 48*time.Hour)
@@ -144,7 +171,7 @@ func (q *Quota) Take(ctx context.Context, userID, planName string) (Decision, er
 		// headroom checks or skew usage stats.
 		_ = q.store.Decr(ctx, d.key)
 		d.Used = plan.DailyLimit
-		d.UpgradeRequired = q.plans.IsDefault(plan)
+		d.UpgradeRequired = upgrade
 		return d, nil
 	}
 	d.Allowed = true

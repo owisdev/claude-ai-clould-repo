@@ -1,8 +1,8 @@
 # Project status and handoff
 
-Last updated: 2026-10-11 · Branch: `claude/awesome-edison-2a2fwh`
-(step 10; steps 7–9 are merged into `claude/cloud-vs-local-7xi988`, the
-project branch; nothing is merged into `main` yet).
+Last updated: 2026-10-15 · Branch: `claude/trusting-sagan-a1wxir`
+(step 11, built on `claude/cloud-vs-local-7xi988`, the project branch,
+which has steps 7–10; nothing is merged into `main` yet).
 
 Read first:
 - [docs/current_flow.pdf](docs/current_flow.pdf) — **how the service works
@@ -18,6 +18,54 @@ Regenerate the PDFs: `python3 docs/build_flow_and_plan_pdfs.py` and
 `python3 docs/build_architecture_pdf.py` (needs `reportlab`).
 
 ## Where we are
+
+**Phase 3, step 11 — API clients and keys: done (2026-10-15).** Details:
+server README section "API clients and keys", PLAN.md step 11.
+
+- Keys for **your own servers and AI agents** (D4), made in the admin
+  panel: new page **API clients** (<http://localhost:3002/admin/#/clients>)
+  or `POST /admin/v1/clients`. Settings per client: name, owner, scopes
+  (`search`, `countries`), live searches per day (default 100), requests
+  per second + burst (1/s, 5), allowed countries, allowed addresses
+  (IP / CIDR), expiry.
+- The key (`ofd_live_…`, 49 characters) is **shown once** with a copy
+  button and a `curl` example; the database keeps only its SHA-256 hash
+  and the first characters. Never in logs or the audit log.
+- `POST /api/v1/search` accepts the user's Firebase token **or** an API
+  key (`Authorization: Bearer ofd_live_…`). Each client has its own daily
+  counter and burst limit, separate from users; cached answers stay free;
+  used up → `429` (`X-Plan: api`). Wrong country → `403
+  country_not_allowed`; missing scope or address not allowed → `403`.
+- **New key** (rotate): the old key keeps working for a grace period you
+  choose (default 24 h, 0 = stop at once); *Stop now* ends it early.
+  **Revoke** stops a client and all its keys at once. Last use of each key
+  is shown. Every change is in the audit log (`clients.*`).
+- Command line for emergencies: `clients list`, `clients revoke ID`.
+- New tables `api_clients`, `api_keys` (created automatically at start).
+- Tested: unit tests (key format and check, cache, expiry, rotation, scope,
+  address, country, own quota and rate limit, admin endpoints), store tests
+  against Postgres 16, the race detector, an end-to-end run of the binary
+  with Postgres and a fake Firebase (create → search → quota 429 → wrong
+  country 403 → rotate → revoke → user token still works; no key in the
+  log), and the web page in Chromium (light and dark: create, copy, edit,
+  new key, stop old key, revoke, invalid input refused with the server's
+  message). Not run here: `govulncheck` (its database is not reachable
+  from this environment; CI runs it). No new Go or npm dependencies.
+
+**Owner, to try step 11:**
+
+1. `docker compose up -d --build` (nothing to add to `.env`).
+2. Admin panel → **API clients** → name e.g. `test agent`, tick `jor`,
+   *Create client and key* → copy the key.
+3. Search with it (Git Bash; PowerShell: `curl.exe`):
+   `curl -i -X POST localhost:3002/api/v1/search -H "Authorization: Bearer ofd_live_…" -H "Content-Type: application/json" -d '{"title":"usb c hub","country":"jor"}'`
+   → `200`, `X-Plan: api`. The same with `"country":"usa"` → `403
+   country_not_allowed`.
+4. *New key* with 1 hour → both keys work; *Stop now* on the old one →
+   it answers `401 API key expired`. *Revoke* → `401 API key revoked`.
+5. Audit log page: `clients.create`, `clients.rotate`, … (no keys in it).
+6. Report: wording, missing fields, the defaults (100 searches per day,
+   1/s) — are they right for your agents?
 
 **Phase 2, step 10 — admin web app: done (2026-10-11). Phase 2 is
 complete.** Details: server README section "Admin web app", PLAN.md step 10.
@@ -181,10 +229,10 @@ that admin entry).
 4. Optional: set the cost estimates, e.g.
    `{"changes":{"APIFY_TEMU_RUN_COST_USD":"0.10","APIFY_SHEIN_RUN_COST_USD":"0.033","APIFY_ALIEXPRESS_RUN_COST_USD":"0.02"}}`.
 
-**Next: phase 3, step 11 — API clients and keys** (D4): keys for your own
-apps and AI agents, made in the admin panel (shown once, stored hashed,
-scopes, quotas, revoke / rotate), accepted next to the users' Firebase
-tokens.
+**Next: phase 3, step 12 — integration endpoints:** asynchronous search
+for slow live searches (`POST /api/v1/searches` → `202` + id,
+`GET /api/v1/searches/{id}`, optional signed webhook), per-client usage
+counters on the dashboard (base for billing partners later).
 
 **Phase 2, step 7 — database + settings store: done (2026-10-11).**
 
@@ -451,7 +499,7 @@ instant); label scraper prices as approximate in the app.
    CI/CD, monitoring).
 4. **Phase 5 — users** (old phase 2).
 
-**Phase 2 (steps 7–10) is done (2026-10-11); next session starts phase 3, step 11 (API clients and keys).**
+**Phase 2 (steps 7–10) is done (2026-10-11); phase 3, step 11 (API clients and keys) is done (2026-10-15); next session starts step 12 (integration endpoints).**
 **Owner decisions D1–D4 (answered 2026-10-11):**
 
 - **D1 admin web app:** small React app built into the server image,
@@ -480,7 +528,10 @@ Open the repository and say:
 
 > Continue the Owis_Find_Deal_Engine project from
 > `Owis_Find_Deal_Engine/STATUS.md` on branch `claude/cloud-vs-local-7xi988`.
-> Start phase 3, step 11. (Decisions D1–D5 are recorded in STATUS.md.)
+> Start phase 3, step 12. (Decisions D1–D5 are recorded in STATUS.md.)
+
+(Step 11 is on `claude/trusting-sagan-a1wxir` until it is merged into
+`claude/cloud-vs-local-7xi988`; until then, name that branch instead.)
 
 ## Run it on your PC
 

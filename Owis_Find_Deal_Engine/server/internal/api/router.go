@@ -6,15 +6,18 @@ import (
 	"net/http"
 	"time"
 
+	"owis_find_deal_engine/internal/apikeys"
 	"owis_find_deal_engine/internal/markets"
 	"owis_find_deal_engine/internal/ratelimit"
 )
 
 // Deps are the router's dependencies.
 type Deps struct {
-	Catalog     *markets.Catalog
-	Searcher    MeteredSearcher
-	Verifier    TokenVerifier
+	Catalog  *markets.Catalog
+	Searcher MeteredSearcher
+	Verifier TokenVerifier
+	// Keys checks API keys; nil = only app users' login tokens.
+	Keys        KeyAuthenticator
 	Limiter     *ratelimit.Limiter
 	CORSOrigins []string
 	// WriteTimeout bounds writing each response (0 = none). It is set per
@@ -27,8 +30,9 @@ type Deps struct {
 //
 //	GET  /api/v1/health     public
 //	GET  /api/v1/countries  public
-//	POST /api/v1/search     user JWT -> burst rate limit -> metered search
-//	                        (cached answers free, live searches counted)
+//	POST /api/v1/search     user JWT or API key (scope "search") -> burst
+//	                        rate limit -> metered search (cached answers
+//	                        free, live searches counted per user / client)
 func NewRouter(d Deps) http.Handler {
 	h := &handlers{catalog: d.Catalog, searcher: d.Searcher}
 
@@ -36,7 +40,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/v1/health", h.health)
 	mux.HandleFunc("GET /api/v1/countries", h.countries)
 	mux.Handle("POST /api/v1/search", chain(http.HandlerFunc(h.search),
-		requireUser(d.Verifier, d.Log),
+		requireCaller(d.Verifier, d.Keys, apikeys.ScopeSearch, d.Log),
 		rateLimit(d.Limiter),
 	))
 

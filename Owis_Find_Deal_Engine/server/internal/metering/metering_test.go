@@ -59,7 +59,7 @@ func newService(t *testing.T, s Searcher, plans string) (*Service, *usage.Quota)
 
 func remaining(t *testing.T, q *usage.Quota, user auth.User) int64 {
 	t.Helper()
-	d, err := q.Status(context.Background(), user.ID, user.Plan)
+	d, err := q.Status(context.Background(), usage.Account{ID: user.ID, Plan: user.Plan})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,11 +151,11 @@ func TestFailedOrCachedLiveSearchIsRefunded(t *testing.T) {
 
 type brokenQuota struct{}
 
-func (brokenQuota) Take(context.Context, string, string) (usage.Decision, error) {
+func (brokenQuota) Take(context.Context, usage.Account) (usage.Decision, error) {
 	return usage.Decision{}, errors.New("redis down")
 }
 func (brokenQuota) Refund(context.Context, usage.Decision) error { return nil }
-func (brokenQuota) Status(context.Context, string, string) (usage.Decision, error) {
+func (brokenQuota) Status(context.Context, usage.Account) (usage.Decision, error) {
 	return usage.Decision{}, errors.New("redis down")
 }
 

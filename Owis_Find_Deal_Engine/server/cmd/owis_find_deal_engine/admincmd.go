@@ -11,10 +11,12 @@ import (
 	"os"
 	"os/signal"
 	"slices"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
 
+	"owis_find_deal_engine/internal/apikeys"
 	"owis_find_deal_engine/internal/config"
 	"owis_find_deal_engine/internal/settings"
 	"owis_find_deal_engine/internal/store"
@@ -37,6 +39,9 @@ container: docker compose exec server /owis_find_deal_engine settings list):
   admins unlink EMAIL               forget the login linked to EMAIL (the
                                     account was deleted and created again);
                                     the next sign-in links it again
+  clients list                      API clients and their keys (prefixes only)
+  clients revoke ID                 stop an API client and all its keys at once
+                                    (new clients and keys: admin web app)
   audit [ACTION-PREFIX]             latest admin actions, newest first
 
 The admin API (/admin/v1) does the same with a login; this command line
@@ -101,6 +106,14 @@ func adminCommand(args []string, stdin io.Reader, stdout, stderr io.Writer) int 
 			break
 		}
 		err = cmd.changeAdmin(ctx, args[1], args[2])
+	case "clients list":
+		err = cmd.clients(ctx)
+	case "clients revoke":
+		if len(args) != 3 {
+			err = errUsage
+			break
+		}
+		err = cmd.revokeClient(ctx, args[2])
 	case "audit":
 		prefix := ""
 		if len(args) > 1 {
@@ -294,6 +307,62 @@ func (c adminCmd) changeAdmin(ctx context.Context, action, email string) error {
 		return fmt.Errorf("done, but the audit log write failed: %w", err)
 	}
 	fmt.Fprintf(c.out, "%s: %s\n", action, email)
+	return nil
+}
+
+func (c adminCmd) clients(ctx context.Context) error {
+	list, err := c.db.Clients(ctx)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	tw := tabwriter.NewWriter(c.out, 0, 4, 2, ' ', 0)
+	fmt.Fprintf(tw, "ID\tNAME\tOWNER\tSTATUS\tSCOPES\tQUOTA/DAY\tUSABLE KEYS\tLAST USED (UTC)\n")
+	for _, cl := range list {
+		status := "active"
+		switch {
+		case cl.RevokedAt != nil:
+			status = "revoked"
+		case cl.ExpiresAt != nil && !now.Before(*cl.ExpiresAt):
+			status = "expired"
+		}
+		var keys []string
+		var last time.Time
+		for _, k := range cl.Keys {
+			if cl.RevokedAt == nil && k.RevokedAt == nil && (k.ExpiresAt == nil || now.Before(*k.ExpiresAt)) {
+				keys = append(keys, k.Prefix+"…")
+			}
+			if k.LastUsedAt != nil && k.LastUsedAt.After(last) {
+				last = *k.LastUsedAt
+			}
+		}
+		used := "never"
+		if !last.IsZero() {
+			used = last.UTC().Format(time.DateTime)
+		}
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n", cl.ID, oneLine(cl.Name), oneLine(cl.Owner), status,
+			strings.Join(cl.Scopes, ","), cl.DailyQuota, strings.Join(keys, " "), used)
+	}
+	return tw.Flush()
+}
+
+func (c adminCmd) revokeClient(ctx context.Context, arg string) error {
+	id, err := strconv.ParseInt(strings.TrimPrefix(arg, "client:"), 10, 64)
+	if err != nil || id <= 0 {
+		return fmt.Errorf("%q is not a client id (see clients list)", arg)
+	}
+	cl, err := c.db.Client(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := c.db.RevokeClient(ctx, id, "cli"); err != nil {
+		return err
+	}
+	if err := c.db.AddAudit(ctx, store.AuditEntry{Actor: "cli", Action: "clients.revoke",
+		Target: apikeys.ClientUserID(id) + " " + cl.Name}); err != nil {
+		return fmt.Errorf("done, but the audit log write failed: %w", err)
+	}
+	fmt.Fprintf(c.out, "revoked: client %d (%s); servers stop accepting its keys within %s\n", id, cl.Name, apikeys.CacheTTL)
 	return nil
 }
 

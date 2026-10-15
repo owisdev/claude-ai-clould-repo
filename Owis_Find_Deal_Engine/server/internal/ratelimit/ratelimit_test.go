@@ -53,3 +53,23 @@ func TestCleanupRemovesIdle(t *testing.T) {
 	cancel()
 	<-done
 }
+
+func TestAllowRatePerKey(t *testing.T) {
+	l := New(1000, 1000, time.Minute)
+	for i := range 2 {
+		if ok, _ := l.AllowRate("client:1", 0.001, 2); !ok {
+			t.Fatalf("request %d refused within the key's burst", i)
+		}
+	}
+	if ok, wait := l.AllowRate("client:1", 0.001, 2); ok || wait <= 0 {
+		t.Errorf("third request: ok=%v wait=%v, want refused", ok, wait)
+	}
+	// A changed limit applies at once.
+	if ok, wait := l.AllowRate("client:1", 1000, 1000); !ok {
+		t.Errorf("raised rate not applied (wait %v)", wait)
+	}
+	// Other keys keep the default.
+	if ok, _ := l.Allow("user:a"); !ok {
+		t.Error("default key refused")
+	}
+}

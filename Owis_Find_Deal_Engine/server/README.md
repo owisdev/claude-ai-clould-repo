@@ -3,7 +3,8 @@
 Go service that searches the marketplaces delivering to a country and
 returns one merged list of products. Users sign in through an auth provider
 (Google, Apple, Facebook via Firebase/Supabase/Clerk/Auth0) and call the API
-with the provider's JWT.
+with the provider's JWT. Own servers and AI agents call the same API with
+an **API key** made in the admin panel (see "API clients and keys").
 
 ## Request flow
 
@@ -18,6 +19,15 @@ app ──POST /api/v1/search, Authorization: Bearer <JWT>──► server
         5. daily allowance by plan (Redis) → 402 free plan used up
                                              429 paid plan used up
         6. live search; failed searches are not counted
+
+agent / server ──POST /api/v1/search, Authorization: Bearer ofd_live_…──► server
+        1. key looked up by its SHA-256 hash (cached 10 s); unknown,
+           revoked or expired                → 401 unauthorized
+        2. allowed address, scope "search"  → 403 forbidden
+        3. allowed country                  → 403 country_not_allowed
+        4. the client's own burst limit     → 429 rate_limited
+        5. as 4.–6. above, with the client's own daily quota
+           (used up → 429 quota_exceeded, never 402)
 ```
 
 ## Run
@@ -100,6 +110,8 @@ $S settings history [KEY]
 $S admins list
 $S admins add|disable|enable|unlink EMAIL
 $S audit [ACTION-PREFIX]                          # latest admin actions
+$S clients list                                   # API clients, key prefixes, last use
+$S clients revoke ID                              # stop a client and all its keys
 ```
 
 Git Bash on Windows rewrites arguments starting with `/` into Windows
@@ -129,7 +141,9 @@ embedded in the binary — one deployment, same origin as the admin API.
   fallbacks, top queries), Settings (grouped, with help, secrets write-only,
   saved together and checked as a whole, change history), Countries & shops
   (overview + JSON editor), Test search, Cache & sources (server status,
-  forget / drop cached answers, circuit breakers), Admins, Audit log.
+  forget / drop cached answers, circuit breakers), API clients (create,
+  change, new key with grace period, revoke; the key is shown once with a
+  copy button and a `curl` example), Admins, Audit log.
 - **Security:** strict Content-Security-Policy (own files + Firebase sign-in
   endpoints only), no frames, `no-store` API answers, no third-party
   scripts; Firebase is used without popups or iframes.
@@ -189,6 +203,11 @@ never secret values). Answers carry `Cache-Control: no-store`.
 | `POST /admin/v1/tools/cache/bump` | raises `CACHE_GENERATION`: every cached answer becomes a miss |
 | `GET /admin/v1/tools/providers` | circuit breaker per source: `closed`, `open` (skipped until …), `half_open` |
 | `GET /admin/v1/usage?days=30&top=20` | usage and cost dashboard (see below) |
+| `GET /admin/v1/clients`, `POST /admin/v1/clients` | API clients; create one — the answer holds its key, **shown once** (see "API clients and keys") |
+| `GET` / `PATCH /admin/v1/clients/{id}` | one client; change its settings (fields left out stay) |
+| `POST /admin/v1/clients/{id}/rotate` | `{"grace": "24h"}` — new key (shown once); the old keys keep working until then (`0s` = stop now, at most `720h`) |
+| `POST /admin/v1/clients/{id}/revoke` | the client and all its keys stop at once (final) |
+| `POST /admin/v1/clients/{id}/keys/{key}/revoke` | one key stops at once (e.g. an old key before its grace period ends) |
 
 Changes apply within `SETTINGS_POLL_INTERVAL` on every instance. Errors
 have the usual shape; extra codes: `forbidden`, `second_factor_required`,
@@ -229,6 +248,54 @@ curl -X PATCH -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: applicat
 curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
      -d '{"title":"usb hub","country":"jor","markets":["temu"]}' localhost:3002/admin/v1/tools/test-search
 ```
+
+## API clients and keys
+
+For **own servers and AI agents** (owner decision D4). The mobile / web
+app keeps using the user's login token: a key inside an app could be
+extracted. Partners with self-service sign-up and billing come later on
+the same model.
+
+- **Made in the admin panel** (page *API clients*, or
+  `POST /admin/v1/clients`): name, owner, scopes, live searches per day,
+  requests per second + burst, allowed countries, allowed addresses
+  (IPs / CIDRs), expiry. Defaults: scopes `search` + `countries`, 100
+  live searches per day, 1/s with bursts of 5, every country, any address,
+  no expiry.
+- **The key** looks like `ofd_live_` + 40 random characters (200 bits).
+  It is shown **once**; the database keeps only its SHA-256 hash and the
+  first 8 characters (`ofd_live_abcd1234…`) to recognise it. Never in logs
+  or the audit log.
+- **Use:** `Authorization: Bearer ofd_live_…` on `POST /api/v1/search`
+  (scope `search`). The `countries` scope is for the agent tools of step
+  13; `GET /api/v1/countries` stays public.
+- **Metering:** each client has its own daily counter (`client:<id>`),
+  separate from app users and other clients. Cached answers are free, as
+  for users; a used-up quota answers `429 quota_exceeded` (`X-Plan: api`).
+- **Rotate:** a new key; the old one keeps working for the grace period
+  (default 24 h), then stops — time to deploy the new key. *Stop now* ends
+  an old key early. **Revoke** stops the client and all its keys at once.
+- A change is seen at once by the server that made it and within 10 s by
+  other instances (keys are cached that long). When each key was last
+  used is saved every minute.
+- Without a database, keys are refused (`401`); user tokens work as before.
+- Command line (for emergencies, e.g. a leaked key while no admin can sign
+  in): `clients list`, `clients revoke ID`.
+- Audit log actions: `clients.create`, `clients.change`, `clients.rotate`,
+  `clients.revoke`, `clients.key_revoke`.
+
+```sh
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+     -d '{"name":"price agent","owner":"me","daily_quota":200,"countries":["jor","ksa"]}' \
+     localhost:3002/admin/v1/clients            # → {"client": {...}, "key": "ofd_live_…"}
+
+curl -H "Authorization: Bearer ofd_live_…" -H 'Content-Type: application/json' \
+     -d '{"title":"usb c hub","country":"jor"}' localhost:3002/api/v1/search
+```
+
+Behind a reverse proxy (step 14) the allowed-address check sees the
+proxy's address until the proxy's client header is trusted; leave the
+list empty until then.
 
 ## Search providers
 
@@ -365,10 +432,12 @@ Errors always look like `{"error": {"code": "...", "message": "..."}}`:
 | Status | code | meaning |
 |---|---|---|
 | 400 | `invalid_request`, `unsupported_country` | bad input |
-| 401 | `unauthorized` | missing, invalid or expired JWT |
+| 401 | `unauthorized` | missing, invalid or expired JWT; unknown, revoked or expired API key |
+| 403 | `forbidden` | API key: lacks the scope, or not allowed from this address |
+| 403 | `country_not_allowed` | API key limited to other countries |
 | 402 | `payment_required` | free daily searches used up — show upgrade |
 | 429 | `rate_limited` | too fast; see `Retry-After` |
-| 429 | `quota_exceeded` | paid plan's daily searches used up |
+| 429 | `quota_exceeded` | paid plan's (or API client's) daily searches used up |
 | 502 | `upstream_error` | all marketplaces failed |
 | 503 | `service_unavailable` | usage store unreachable (fails closed) |
 | 500 | `internal_error` | bug |
@@ -390,7 +459,7 @@ internal/config             settings (environment or database), validation
 internal/settings           settings store: encryption, validated changes,
                             import from .env, change watcher
 internal/store              Postgres: migrations, settings, history, admins,
-                            audit log
+                            audit log, API clients and keys
 internal/markets            countries -> marketplaces catalog
 internal/search             search service: worker pool, merge, ordering
 internal/search/fallback.go provider chain + circuit breaker
@@ -401,12 +470,15 @@ internal/providers/serpapi  SerpApi: Google Shopping / web (paid fallback)
 internal/providers/apify    Apify store scrapers, per marketplace (optional)
 internal/auth               JWT verification + JWKS key cache
 internal/auth/authtest      fake auth provider for tests
+internal/apikeys            API keys: format, hashing, cached check, last
+                            use, client settings validation
 internal/usage              plans, daily quotas, Redis/memory counters
-internal/ratelimit          per-user token bucket
+internal/ratelimit          token bucket per user / API client
 internal/adminui            serves the admin web app (embedded build) at /admin/
 web/admin                   admin web app source (React + TypeScript, Vite)
 internal/api                router, handlers, middleware; admin.go +
-                            admin_handlers.go: the admin API
+                            admin_handlers.go: the admin API;
+                            admin_clients.go: API clients
 internal/search/probe.go    admin test search, provider health
 internal/search/instrument.go  reports source calls and fallbacks
 internal/stats              usage counters (flushed to Postgres), dashboard

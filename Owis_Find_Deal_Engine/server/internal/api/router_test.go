@@ -62,6 +62,7 @@ type envOpts struct {
 	burst    int
 	plans    string
 	quota    metering.Quota
+	keys     KeyAuthenticator
 }
 
 func newEnv(t *testing.T, o envOpts) *testEnv {
@@ -105,6 +106,7 @@ func newEnv(t *testing.T, o envOpts) *testEnv {
 			Catalog:     cat,
 			Searcher:    metering.New(o.searcher, o.quota, log),
 			Verifier:    verifier,
+			Keys:        o.keys,
 			Limiter:     ratelimit.New(0.001, o.burst, time.Minute),
 			CORSOrigins: []string{"https://app.example"},
 			Log:         log,
@@ -293,11 +295,11 @@ func TestBurstRateLimit(t *testing.T) {
 
 type brokenQuota struct{}
 
-func (brokenQuota) Take(context.Context, string, string) (usage.Decision, error) {
+func (brokenQuota) Take(context.Context, usage.Account) (usage.Decision, error) {
 	return usage.Decision{}, errors.New("redis down")
 }
 func (brokenQuota) Refund(context.Context, usage.Decision) error { return nil }
-func (brokenQuota) Status(context.Context, string, string) (usage.Decision, error) {
+func (brokenQuota) Status(context.Context, usage.Account) (usage.Decision, error) {
 	return usage.Decision{}, errors.New("redis down")
 }
 
