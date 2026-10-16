@@ -1,0 +1,12 @@
+# Go build output
+/owis_find_deal_engine
+*.exe
+
+# Local secrets
+.env
+
+# Admin web app: dependencies and build output (built in Docker / CI;
+# embedded from internal/adminui/dist)
+web/admin/node_modules/
+internal/adminui/dist/*
+!internal/adminui/dist/.gitkeep
