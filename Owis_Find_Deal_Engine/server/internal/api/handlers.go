@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"owis_find_deal_engine/internal/apikeys"
 	"owis_find_deal_engine/internal/auth"
 	"owis_find_deal_engine/internal/markets"
 	"owis_find_deal_engine/internal/metering"
@@ -47,6 +48,10 @@ func (h *handlers) search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user, _ := auth.UserFrom(r.Context())
+	if c, ok := clientFrom(r.Context()); ok && !apikeys.AllowedCountry(c, body.Country) {
+		writeError(w, http.StatusForbidden, CodeCountryNotAllowed, "this API key may not search in country "+strconv.Quote(body.Country))
+		return
+	}
 
 	out, err := h.searcher.Search(r.Context(), user,
 		search.Request{Title: body.Title, Country: body.Country, Refresh: body.Refresh})

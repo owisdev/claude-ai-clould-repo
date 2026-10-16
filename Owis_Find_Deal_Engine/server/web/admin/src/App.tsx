@@ -9,6 +9,7 @@ import { Markets } from "./pages/Markets";
 import { TestSearch } from "./pages/TestSearch";
 import { Tools } from "./pages/Tools";
 import { Admins } from "./pages/Admins";
+import { Clients } from "./pages/Clients";
 import { Audit } from "./pages/Audit";
 
 const PAGES = [
@@ -17,6 +18,7 @@ const PAGES = [
   { path: "markets", title: "Countries & shops", el: () => <Markets /> },
   { path: "test-search", title: "Test search", el: () => <TestSearch /> },
   { path: "tools", title: "Cache & sources", el: () => <Tools /> },
+  { path: "clients", title: "API clients", el: () => <Clients /> },
   { path: "admins", title: "Admins", el: () => <Admins /> },
   { path: "audit", title: "Audit log", el: () => <Audit /> },
 ];

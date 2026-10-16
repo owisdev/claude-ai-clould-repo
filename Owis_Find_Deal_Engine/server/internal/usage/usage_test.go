@@ -43,28 +43,28 @@ func TestQuota(t *testing.T) {
 			ctx := context.Background()
 
 			for i := int64(1); i <= 2; i++ {
-				d, err := q.Take(ctx, "alice", "")
+				d, err := q.Take(ctx, Account{ID: "alice"})
 				if err != nil || !d.Allowed || d.Used != i || d.Remaining() != 2-i {
 					t.Fatalf("take %d: %+v, %v", i, d, err)
 				}
 			}
-			d, _ := q.Take(ctx, "alice", "")
+			d, _ := q.Take(ctx, Account{ID: "alice"})
 			if d.Allowed || !d.UpgradeRequired || d.Remaining() != 0 {
 				t.Errorf("free over quota: %+v", d)
 			}
 
 			// A paid plan over its quota gets 429, not 402.
 			for i := 0; i < 3; i++ {
-				_, _ = q.Take(ctx, "bob", "pro")
+				_, _ = q.Take(ctx, Account{ID: "bob", Plan: "pro"})
 			}
-			if d, _ := q.Take(ctx, "bob", "pro"); d.Allowed || d.UpgradeRequired {
+			if d, _ := q.Take(ctx, Account{ID: "bob", Plan: "pro"}); d.Allowed || d.UpgradeRequired {
 				t.Errorf("pro over quota: %+v", d)
 			}
 
 			// Refund gives the search back.
-			d, _ = q.Take(ctx, "carol", "")
+			d, _ = q.Take(ctx, Account{ID: "carol"})
 			_ = q.Refund(ctx, d)
-			d, _ = q.Take(ctx, "carol", "")
+			d, _ = q.Take(ctx, Account{ID: "carol"})
 			if d.Used != 1 {
 				t.Errorf("after refund used = %d, want 1", d.Used)
 			}
@@ -79,14 +79,14 @@ func TestQuotaStatusDoesNotConsume(t *testing.T) {
 			q := NewQuota(store, plans)
 			ctx := context.Background()
 			for i := 0; i < 3; i++ {
-				d, err := q.Status(ctx, "frank", "")
+				d, err := q.Status(ctx, Account{ID: "frank"})
 				if err != nil || !d.Allowed || d.Remaining() != 2 {
 					t.Fatalf("status %d = %+v, %v", i, d, err)
 				}
 			}
-			_, _ = q.Take(ctx, "frank", "")
-			_, _ = q.Take(ctx, "frank", "")
-			d, _ := q.Status(ctx, "frank", "")
+			_, _ = q.Take(ctx, Account{ID: "frank"})
+			_, _ = q.Take(ctx, Account{ID: "frank"})
+			d, _ := q.Status(ctx, Account{ID: "frank"})
 			if d.Allowed || d.Remaining() != 0 || !d.UpgradeRequired {
 				t.Errorf("exhausted status = %+v", d)
 			}
@@ -106,7 +106,7 @@ func TestQuotaConcurrentNeverOvershoots(t *testing.T) {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					if d, err := q.Take(context.Background(), "dave", ""); err == nil && d.Allowed {
+					if d, err := q.Take(context.Background(), Account{ID: "dave"}); err == nil && d.Allowed {
 						mu.Lock()
 						allowed++
 						mu.Unlock()
@@ -127,15 +127,15 @@ func TestQuotaResetsDaily(t *testing.T) {
 	day := time.Date(2026, 10, 2, 23, 0, 0, 0, time.UTC)
 	q.now = func() time.Time { return day }
 
-	d, _ := q.Take(context.Background(), "erin", "")
+	d, _ := q.Take(context.Background(), Account{ID: "erin"})
 	if !d.Reset.Equal(time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC)) {
 		t.Errorf("reset = %v", d.Reset)
 	}
-	if d, _ := q.Take(context.Background(), "erin", ""); d.Allowed {
+	if d, _ := q.Take(context.Background(), Account{ID: "erin"}); d.Allowed {
 		t.Fatal("second search on day 1 allowed")
 	}
 	day = day.Add(2 * time.Hour)
-	if d, _ := q.Take(context.Background(), "erin", ""); !d.Allowed {
+	if d, _ := q.Take(context.Background(), Account{ID: "erin"}); !d.Allowed {
 		t.Error("first search on day 2 denied")
 	}
 }
@@ -159,5 +159,31 @@ func TestMemoryStoreCleanup(t *testing.T) {
 			t.Fatal("expired entry not removed")
 		}
 		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+func TestQuotaClientLimit(t *testing.T) {
+	plans, _ := ParsePlans("free:1", "free")
+	q := NewQuota(NewMemoryStore(), plans)
+	ctx := context.Background()
+	client := Account{ID: "client:7", DailyLimit: 2}
+	for i := range 2 {
+		if d, _ := q.Take(ctx, client); !d.Allowed || d.Plan.Name != APIPlan || d.Plan.DailyLimit != 2 {
+			t.Fatalf("take %d = %+v", i, d)
+		}
+	}
+	d, _ := q.Take(ctx, client)
+	if d.Allowed || d.UpgradeRequired {
+		t.Errorf("client over its limit = %+v, want refused without upgrade (429)", d)
+	}
+	if d, _ := q.Status(ctx, client); d.Remaining() != 0 || d.UpgradeRequired {
+		t.Errorf("status = %+v", d)
+	}
+	// Separate from users and other clients.
+	if d, _ := q.Take(ctx, Account{ID: "client:8", DailyLimit: 2}); !d.Allowed {
+		t.Error("another client shares the counter")
+	}
+	if d, _ := q.Take(ctx, Account{ID: "alice"}); !d.Allowed || d.Plan.Name != "free" {
+		t.Errorf("user = %+v", d)
 	}
 }

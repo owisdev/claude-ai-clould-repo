@@ -25,7 +25,7 @@ func openTest(t *testing.T) *DB {
 		t.Fatal(err)
 	}
 	t.Cleanup(db.Close)
-	if _, err := db.pool.Exec(ctx, `DROP TABLE IF EXISTS settings, settings_history, admins, audit_log, usage_daily, query_daily, schema_migrations`); err != nil {
+	if _, err := db.pool.Exec(ctx, `DROP TABLE IF EXISTS settings, settings_history, admins, audit_log, usage_daily, query_daily, api_keys, api_clients, schema_migrations`); err != nil {
 		t.Fatal(err)
 	}
 	return db
@@ -60,8 +60,8 @@ func TestMigrateConcurrentAndIdempotent(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	if total != 3 {
-		t.Fatalf("migrations applied %d times, want 3 (once each)", total)
+	if total != 4 {
+		t.Fatalf("migrations applied %d times, want 4 (once each)", total)
 	}
 }
 
@@ -290,5 +290,95 @@ func TestUsage(t *testing.T) {
 	_ = db.AddAudit(ctx, AuditEntry{Actor: "system", Action: "budget.alert", Target: "2026-10:80%"})
 	if ok, _ := db.HasAudit(ctx, "budget.alert", "2026-10:80%"); !ok {
 		t.Error("HasAudit after AddAudit = false")
+	}
+}
+
+func TestAPIClients(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+	if _, err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	hash := func(b byte) []byte { h := make([]byte, 32); h[0] = b; return h }
+	exp := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Microsecond)
+	c, err := db.CreateClient(ctx, Client{Name: "agent", Owner: "me", Scopes: []string{"search"}, DailyQuota: 50,
+		RateRPS: 0.5, RateBurst: 3, Countries: []string{"jor"}, ExpiresAt: &exp},
+		NewKey{Prefix: "ofd_live_aaaa", Hash: hash(1)}, "admin:a@example.com")
+	if err != nil || c.ID == 0 || len(c.Keys) != 1 || c.Keys[0].Prefix != "ofd_live_aaaa" || c.IPAllow == nil {
+		t.Fatalf("CreateClient = %+v, %v", c, err)
+	}
+	if _, err := db.CreateClient(ctx, Client{Name: "dup", Scopes: []string{"search"}, DailyQuota: 1, RateRPS: 1, RateBurst: 1},
+		NewKey{Prefix: "x", Hash: hash(1)}, "a"); err == nil {
+		t.Error("duplicate key hash accepted")
+	}
+
+	got, k, err := db.ClientByKeyHash(ctx, hash(1))
+	if err != nil || got.ID != c.ID || got.Countries[0] != "jor" || !got.ExpiresAt.Equal(exp) || k.ID != c.Keys[0].ID {
+		t.Fatalf("ClientByKeyHash = %+v %+v %v", got, k, err)
+	}
+	if _, _, err := db.ClientByKeyHash(ctx, hash(9)); !errors.Is(err, ErrKeyNotFound) {
+		t.Errorf("unknown hash: %v", err)
+	}
+
+	c.DailyQuota, c.IPAllow, c.ExpiresAt = 99, []string{"10.0.0.0/8"}, nil
+	if u, err := db.UpdateClient(ctx, c, "admin:b"); err != nil || u.DailyQuota != 99 || u.IPAllow[0] != "10.0.0.0/8" || u.ExpiresAt != nil || u.UpdatedBy != "admin:b" {
+		t.Fatalf("UpdateClient = %+v, %v", u, err)
+	}
+
+	// Rotate: the old key gets the grace end, the new one none.
+	grace := time.Now().Add(time.Hour).UTC().Truncate(time.Microsecond)
+	nk, err := db.RotateKey(ctx, c.ID, NewKey{Prefix: "ofd_live_bbbb", Hash: hash(2)}, grace, "admin:a")
+	if err != nil || nk.ExpiresAt != nil {
+		t.Fatalf("RotateKey = %+v, %v", nk, err)
+	}
+	if _, old, _ := db.ClientByKeyHash(ctx, hash(1)); old.ExpiresAt == nil || !old.ExpiresAt.Equal(grace) {
+		t.Errorf("old key after rotation = %+v", old)
+	}
+	// A second rotation with a longer grace does not extend the old key.
+	if _, err := db.RotateKey(ctx, c.ID, NewKey{Prefix: "ofd_live_cccc", Hash: hash(3)}, grace.Add(time.Hour), "admin:a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, old, _ := db.ClientByKeyHash(ctx, hash(1)); !old.ExpiresAt.Equal(grace) {
+		t.Errorf("grace extended: %v", old.ExpiresAt)
+	}
+
+	if err := db.RevokeKey(ctx, c.ID, nk.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RevokeKey(ctx, c.ID+1, nk.ID); !errors.Is(err, ErrKeyNotFound) {
+		t.Errorf("key of another client: %v", err)
+	}
+
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	if err := db.TouchKeys(ctx, map[int64]time.Time{nk.ID: at}); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.TouchKeys(ctx, map[int64]time.Time{nk.ID: at.Add(-time.Hour)}) // older: ignored
+
+	list, err := db.Clients(ctx)
+	if err != nil || len(list) != 1 || len(list[0].Keys) != 3 {
+		t.Fatalf("Clients = %+v, %v", list, err)
+	}
+	if k := list[0].Keys[1]; k.ID != nk.ID || k.RevokedAt == nil || k.LastUsedAt == nil || !k.LastUsedAt.Equal(at) {
+		t.Errorf("revoked, touched key = %+v", k)
+	}
+
+	if err := db.RevokeClient(ctx, c.ID, "admin:a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RevokeClient(ctx, c.ID, "admin:a"); !errors.Is(err, ErrClientRevoked) {
+		t.Errorf("second revoke: %v", err)
+	}
+	if _, err := db.UpdateClient(ctx, c, "x"); !errors.Is(err, ErrClientRevoked) {
+		t.Errorf("update of a revoked client: %v", err)
+	}
+	if _, err := db.RotateKey(ctx, c.ID, NewKey{Prefix: "x", Hash: hash(4)}, grace, "x"); !errors.Is(err, ErrClientRevoked) {
+		t.Errorf("rotate of a revoked client: %v", err)
+	}
+	if _, err := db.Client(ctx, 999); !errors.Is(err, ErrClientNotFound) {
+		t.Errorf("unknown client: %v", err)
+	}
+	if one, err := db.Client(ctx, c.ID); err != nil || one.RevokedAt == nil || one.RevokedBy != "admin:a" || len(one.Keys) != 3 {
+		t.Errorf("Client = %+v, %v", one, err)
 	}
 }

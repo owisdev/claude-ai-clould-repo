@@ -19,6 +19,7 @@ import (
 
 	"owis_find_deal_engine/internal/adminui"
 	"owis_find_deal_engine/internal/api"
+	"owis_find_deal_engine/internal/apikeys"
 	"owis_find_deal_engine/internal/auth"
 	"owis_find_deal_engine/internal/cache"
 	"owis_find_deal_engine/internal/config"
@@ -46,7 +47,7 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
 		os.Exit(healthcheck())
 	}
-	if len(os.Args) > 1 && (os.Args[1] == "settings" || os.Args[1] == "admins" || os.Args[1] == "audit") {
+	if len(os.Args) > 1 && (os.Args[1] == "settings" || os.Args[1] == "admins" || os.Args[1] == "clients" || os.Args[1] == "audit") {
 		os.Exit(adminCommand(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 	}
 	if err := run(); err != nil {
@@ -151,6 +152,11 @@ func run() error {
 			statsDone.Wait()
 		}()
 		statsDone.Go(func() { sh.stats.Run(statsCtx, db, stats.FlushInterval, log) })
+
+		// API keys of API clients; when each key was last used is saved
+		// every minute and at shutdown.
+		sh.keys = apikeys.NewAuthenticator(db, log)
+		statsDone.Go(func() { sh.keys.Run(statsCtx, time.Minute) })
 	}
 	if cfg.RedisURL != "" {
 		opts, err := redis.ParseURL(cfg.RedisURL)
@@ -215,12 +221,14 @@ func run() error {
 	var admin http.Handler
 	if db != nil {
 		admin = api.NewAdminRouter(api.AdminDeps{
-			Store:         db,
-			Settings:      mgr,
-			Runtime:       func() api.AdminRuntime { return adminRuntime{a: current.Load(), poll: cfg.SettingsPollInterval} },
-			Verifier:      verifier,
-			Require2FA:    cfg.AdminRequire2FA,
-			SessionMaxAge: cfg.AdminSessionMaxAge,
+			Store:          db,
+			Settings:       mgr,
+			Clients:        db,
+			ClientsChanged: sh.keys.Forget,
+			Runtime:        func() api.AdminRuntime { return adminRuntime{a: current.Load(), poll: cfg.SettingsPollInterval} },
+			Verifier:       verifier,
+			Require2FA:     cfg.AdminRequire2FA,
+			SessionMaxAge:  cfg.AdminSessionMaxAge,
 
 			RequireVerifiedEmail: cfg.AdminRequireVerifiedEmail,
 			Log:                  log,
@@ -347,7 +355,8 @@ func connectSettings(ctx context.Context) (*store.DB, *settings.Manager, error) 
 
 // shared are the parts that stay when the runtime settings change.
 type shared struct {
-	stats      *stats.Recorder // usage counters; nil without a database
+	stats      *stats.Recorder        // usage counters; nil without a database
+	keys       *apikeys.Authenticator // API keys; nil without a database
 	log        *slog.Logger
 	verifier   *auth.Verifier
 	usageStore usage.Store
@@ -422,6 +431,7 @@ func buildApp(ctx context.Context, cfg config.Config, settingsVersion int64, sh 
 		Catalog:      catalog,
 		Searcher:     metering.New(cacheOrLive, usage.NewQuota(sh.usageStore, plans), log).WithRecorder(sh.searchRecorder()),
 		Verifier:     sh.verifier,
+		Keys:         sh.keyAuthenticator(),
 		Limiter:      limiter,
 		CORSOrigins:  cfg.CORSOrigins,
 		WriteTimeout: cfg.SearchTimeout + 10*time.Second,
@@ -449,6 +459,14 @@ func (r adminRuntime) ForgetCached(ctx context.Context, req search.Request) (boo
 }
 
 func (r adminRuntime) Health() []search.ChainHealth { return r.a.searcher.Health() }
+
+func (r adminRuntime) Countries() []string {
+	var codes []string
+	for _, c := range r.a.cfg.Catalog.Countries() {
+		codes = append(codes, c.Code)
+	}
+	return codes
+}
 
 func (r adminRuntime) Status() api.RuntimeStatus {
 	c := r.a.cfg
@@ -502,6 +520,14 @@ func (sh shared) recorder() search.Recorder {
 		return nil
 	}
 	return sh.stats
+}
+
+// keyAuthenticator returns the API key check (nil = keys not accepted).
+func (sh shared) keyAuthenticator() api.KeyAuthenticator {
+	if sh.keys == nil {
+		return nil
+	}
+	return sh.keys
 }
 
 // searchRecorder returns the usage counters as a metering.SearchRecorder.

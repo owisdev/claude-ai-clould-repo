@@ -204,3 +204,44 @@ export interface UsageReport {
     status: "none" | "ok" | "warning" | "exceeded";
   };
 }
+
+export interface ApiKeyInfo {
+  id: number;
+  prefix: string;
+  status: "active" | "grace" | "expired" | "revoked";
+  created_at: string;
+  created_by: string;
+  expires_at?: string;
+  revoked_at?: string;
+  last_used_at: string | null;
+}
+
+export interface ApiClient {
+  id: number;
+  name: string;
+  owner: string;
+  status: "active" | "expired" | "revoked";
+  scopes: string[];
+  daily_quota: number;
+  rate_limit_rps: number;
+  rate_limit_burst: number;
+  countries: string[];
+  ip_allow: string[];
+  expires_at: string | null;
+  created_at: string;
+  created_by: string;
+  updated_at: string;
+  updated_by: string;
+  revoked_at?: string;
+  revoked_by?: string;
+  last_used_at: string | null;
+  keys: ApiKeyInfo[];
+}
+
+/** Answer of creating a client or rotating its key: the key is shown once. */
+export interface NewKeyAnswer {
+  client: ApiClient;
+  key: string;
+  old_keys_until?: string;
+  note: string;
+}

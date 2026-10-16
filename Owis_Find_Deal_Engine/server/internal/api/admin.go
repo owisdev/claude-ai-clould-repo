@@ -61,6 +61,8 @@ type AdminRuntime interface {
 	ForgetCached(ctx context.Context, req search.Request) (bool, error)
 	Health() []search.ChainHealth
 	Status() RuntimeStatus
+	// Countries are the codes of the countries searches can use.
+	Countries() []string
 }
 
 // RuntimeStatus describes the settings the server runs with.
@@ -81,8 +83,12 @@ type RuntimeStatus struct {
 type AdminDeps struct {
 	Store    AdminStore
 	Settings SettingsChanger
-	Runtime  func() AdminRuntime
-	Verifier TokenVerifier
+	Clients  ClientStore
+	// ClientsChanged is called after an API client changed (drops the
+	// key cache of this server); nil = nothing to do.
+	ClientsChanged func()
+	Runtime        func() AdminRuntime
+	Verifier       TokenVerifier
 	// Require2FA refuses admins who signed in without a second factor.
 	Require2FA bool
 	// RequireVerifiedEmail links a login to the admin entry with its email
@@ -125,6 +131,13 @@ const adminWriteTimeout = 330 * time.Second
 //	POST   /admin/v1/tools/cache/bump        every cached answer becomes a miss
 //	GET    /admin/v1/tools/providers         circuit breaker state per source
 //	GET    /admin/v1/usage                   usage and cost dashboard: ?days=30&top=20
+//	GET    /admin/v1/clients                 API clients and their keys (prefixes only)
+//	POST   /admin/v1/clients                 new client; the answer holds its key, shown once
+//	GET    /admin/v1/clients/{id}
+//	PATCH  /admin/v1/clients/{id}            change its settings
+//	POST   /admin/v1/clients/{id}/rotate     new key; old keys valid for {"grace": "24h"}
+//	POST   /admin/v1/clients/{id}/revoke     client and all keys stop at once
+//	POST   /admin/v1/clients/{id}/keys/{key}/revoke   one key stops at once
 func NewAdminRouter(d AdminDeps) http.Handler {
 	if d.IPLimiter == nil {
 		d.IPLimiter = ratelimit.New(10, 40, 10*time.Minute)
@@ -158,6 +171,13 @@ func NewAdminRouter(d AdminDeps) http.Handler {
 	mux.HandleFunc("POST /admin/v1/tools/cache/bump", h.bumpCache)
 	mux.HandleFunc("GET /admin/v1/tools/providers", h.providers)
 	mux.HandleFunc("GET /admin/v1/usage", h.usage)
+	mux.HandleFunc("GET /admin/v1/clients", h.listClients)
+	mux.HandleFunc("POST /admin/v1/clients", h.createClient)
+	mux.HandleFunc("GET /admin/v1/clients/{id}", h.getClient)
+	mux.HandleFunc("PATCH /admin/v1/clients/{id}", h.changeClient)
+	mux.HandleFunc("POST /admin/v1/clients/{id}/rotate", h.rotateClientKey)
+	mux.HandleFunc("POST /admin/v1/clients/{id}/revoke", h.revokeClient)
+	mux.HandleFunc("POST /admin/v1/clients/{id}/keys/{key}/revoke", h.revokeClientKey)
 	mux.HandleFunc("/admin/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "no such admin endpoint")
 	})

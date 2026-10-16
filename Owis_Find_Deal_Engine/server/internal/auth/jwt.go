@@ -30,6 +30,10 @@ type User struct {
 	// AuthTime is when the user last signed in (the "auth_time" claim);
 	// tokens are refreshed hourly, the sign-in stays. Zero if absent.
 	AuthTime time.Time
+
+	// DailyLimit is set for API clients (ID "client:<id>"): their own
+	// daily search allowance instead of a plan's. 0 for app users.
+	DailyLimit int64
 }
 
 // KeySource returns the public key for a key ID.

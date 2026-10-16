@@ -465,18 +465,32 @@ first, keys made in the panel (partners later).
     `ADMIN_FIREBASE_API_KEY`), strict CSP; pages: dashboard with charts,
     settings, countries & shops, test search, cache & sources, admins,
     audit log. Only `@firebase/app` + `@firebase/auth` (no Firestore, npm
-    audit clean). API clients page comes with step 11; the two-factor
-    sign-in screen with step 14.
+    audit clean). API clients page added with step 11; the two-factor
+    sign-in screen comes with step 14.
 
 **Phase 3 — API integration** (other applications and AI agents)
 
-11. **API clients and keys.** Created in the admin panel: name, owner,
+11. ✅ **API clients and keys.** Created in the admin panel: name, owner,
     scopes (`search`, `countries`), daily quota, rate limit, allowed
     countries, optional IP allow-list, expiry. The key is shown **once**
     (`ofd_live_<random>`); only its SHA-256 hash and a short prefix are
     stored; revoke and rotate (old key valid for a grace period). Calls:
     `Authorization: Bearer ofd_live_...`. App users keep their JWT; the
     middleware accepts either and meters each separately.
+    *Built 2026-10-15:* tables `api_clients` and `api_keys` (migration
+    0004); keys `ofd_live_` + 40 base32 characters (200 bits), stored as
+    SHA-256 + 8-character prefix; package `internal/apikeys` checks keys
+    with a 10 s cache (dropped at once on the instance where an admin
+    changes a client) and saves each key's last use every minute; the
+    public search accepts a JWT or a key (scope `search`, allowed address,
+    allowed country → `403 country_not_allowed`); each client has its own
+    burst limit and daily counter `client:<id>` (`X-Plan: api`, used up →
+    429, never 402); login tokens with a `client:` subject are refused so
+    counters never mix. Admin API `/admin/v1/clients` (create, change,
+    rotate with grace 0–720 h, revoke a client or one key; all audited, the
+    key never), admin web page *API clients*, command line `clients list`
+    / `clients revoke ID`. Per-client usage on the dashboard comes with
+    step 12.
 12. **Integration endpoints:** the same `/api/v1/search` and `/countries`,
     plus an **asynchronous search** for slow live searches (25–50 s):
     `POST /api/v1/searches` → `202` + id, `GET /api/v1/searches/{id}`,
