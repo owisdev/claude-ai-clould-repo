@@ -5,6 +5,11 @@ Last updated: 2026-10-15 · Branch: `claude/trusting-sagan-a1wxir`
 which has steps 7–10; nothing is merged into `main` yet).
 
 Read first:
+- [docs/service_guide.pdf](docs/service_guide.pdf) — **complete guide of the
+  service as it is now** (16 Oct 2026, after step 11): architecture, Docker,
+  request flow, cache, API clients, cost measurement, code map, how to run /
+  use / test locally (git + docker commands), remaining work and
+  recommendations.
 - [docs/current_flow.pdf](docs/current_flow.pdf) — **how the service works
   today** (7 Oct 2026): sources per shop, request flow, 48 h cache, costs,
   configuration, known limits, test results.
@@ -14,7 +19,8 @@ Read first:
 - [docs/architecture.pdf](docs/architecture.pdf) — the original full
   architecture (predates the dedicated sources per shop).
 
-Regenerate the PDFs: `python3 docs/build_flow_and_plan_pdfs.py` and
+Regenerate the PDFs: `python3 docs/build_service_guide_pdf.py`,
+`python3 docs/build_flow_and_plan_pdfs.py` and
 `python3 docs/build_architecture_pdf.py` (needs `reportlab`).
 
 ## Where we are
