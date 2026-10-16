@@ -1,8 +1,7 @@
 # Project status and handoff
 
-Last updated: 2026-10-15 · Branch: `claude/trusting-sagan-a1wxir`
-(step 11, built on `claude/cloud-vs-local-7xi988`, the project branch,
-which has steps 7–10; nothing is merged into `main` yet).
+Last updated: 2026-10-16 · Project branch: `claude/cloud-vs-local-7xi988`
+(steps 7–11 merged; step 11 via PR #6; nothing is merged into `main` yet).
 
 Read first:
 - [docs/current_flow.pdf](docs/current_flow.pdf) — **how the service works
@@ -50,7 +49,20 @@ server README section "API clients and keys", PLAN.md step 11.
   log), and the web page in Chromium (light and dark: create, copy, edit,
   new key, stop old key, revoke, invalid input refused with the server's
   message). Not run here: `govulncheck` (its database is not reachable
-  from this environment; CI runs it). No new Go or npm dependencies.
+  from this environment; CI runs it; CI on PR #6 was green). No new Go or
+  npm dependencies.
+- **Owner test on the Docker stack (2026-10-16, Windows, Git Bash), steps
+  1–3 below:** key created in the admin panel (limit 2 per day, `jor`
+  only); first search `usb c hub` / `jor` → `200`, `X-Cache: MISS`,
+  `X-Plan: api`, remaining 1, all 4 shops `ok`, 44 s; same search again →
+  `200`, `X-Cache: HIT`, 0 ms, remaining still 1 (free); `usa` → `403
+  country_not_allowed`; made-up key → `401 invalid API key`. ✅
+  **Still to test by the owner** (free, use the cached `usb c hub`
+  search): new key with 1 h grace (both keys work) → *Stop now* on the old
+  key (`401 API key expired`) → *Revoke* (`401 API key revoked`); a client
+  without the `search` scope (`403`); audit log entries `clients.*`;
+  "last used" and `clients list`. Optional (one live search): daily limit
+  → `429 quota_exceeded`.
 
 **Owner, to try step 11:**
 
@@ -529,9 +541,6 @@ Open the repository and say:
 > Continue the Owis_Find_Deal_Engine project from
 > `Owis_Find_Deal_Engine/STATUS.md` on branch `claude/cloud-vs-local-7xi988`.
 > Start phase 3, step 12. (Decisions D1–D5 are recorded in STATUS.md.)
-
-(Step 11 is on `claude/trusting-sagan-a1wxir` until it is merged into
-`claude/cloud-vs-local-7xi988`; until then, name that branch instead.)
 
 ## Run it on your PC
 
