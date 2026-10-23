@@ -23,6 +23,7 @@ import (
 	"owis_find_deal_engine/internal/search"
 	"owis_find_deal_engine/internal/settings"
 	"owis_find_deal_engine/internal/store"
+	"owis_find_deal_engine/internal/webhook"
 )
 
 // fakeAdminStore is an in-memory store.DB for the admin API.
@@ -143,6 +144,8 @@ func (f *fakeAdminStore) UsageRows(_ context.Context, from, to time.Time) ([]sto
 		{Day: to, Kind: "search", K1: "jor", K2: "hit", Count: 3},
 		{Day: to, Kind: "search", K1: "jor", K2: "live", Count: 1},
 		{Day: to, Kind: "source", K1: "apify", K2: "temu", K3: "ok", Count: 1, CostUSD: 0.1, TotalMS: 30000},
+		{Day: to, Kind: "client", K1: "client:1", K2: "jor", K3: "live", Count: 1},
+		{Day: to, Kind: "client", K1: "client:1", K2: "jor", K3: "hit", Count: 2},
 	}, nil
 }
 
@@ -221,6 +224,7 @@ type adminEnv struct {
 	store    *fakeAdminStore
 	runtime  *fakeRuntime
 	clients  *fakeClients
+	secrets  *webhook.Secrets
 }
 
 func newAdminEnv(t *testing.T) *adminEnv {
@@ -240,13 +244,18 @@ func newAdminEnv(t *testing.T) *adminEnv {
 	}}
 	rt := &fakeRuntime{cacheOn: true}
 	cs := newFakeClients()
+	secrets, err := webhook.NewSecrets(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
 	h := NewAdminRouter(AdminDeps{
-		Store: st, Settings: fakeSettings{st: st}, Runtime: func() AdminRuntime { return rt },
+		WebhookSecrets: secrets,
+		Store:          st, Settings: fakeSettings{st: st}, Runtime: func() AdminRuntime { return rt },
 		Clients: cs, ClientsChanged: func() { cs.changed++ },
 		Verifier: v, Require2FA: true, RequireVerifiedEmail: true, SessionMaxAge: time.Hour, Log: log,
 		ToolLimiter: ratelimit.New(0.001, 2, time.Minute),
 	})
-	return &adminEnv{handler: h, provider: p, store: st, runtime: rt, clients: cs}
+	return &adminEnv{handler: h, provider: p, store: st, runtime: rt, clients: cs, secrets: secrets}
 }
 
 // token signs in sub with email (verified), a second factor and a recent sign-in.
@@ -568,6 +577,7 @@ func verifierFor(t *testing.T, p *authtest.Provider) *auth.Verifier {
 func TestAdminUsage(t *testing.T) {
 	e := newAdminEnv(t)
 	tok := e.token(t, "uid-1", "owner@example.com", nil)
+	e.do(t, "POST", "/admin/v1/clients", tok, `{"name":"price bot"}`)
 	rec, out := e.do(t, "GET", "/admin/v1/usage?days=7", tok, "")
 	if rec.Code != 200 {
 		t.Fatalf("usage = %d %s", rec.Code, rec.Body)
@@ -580,6 +590,14 @@ func TestAdminUsage(t *testing.T) {
 	budget := rep["budget"].(map[string]any)
 	if budget["status"] != "warning" || budget["percent"] != 90.0 || budget["limit_usd"] != 5.0 {
 		t.Errorf("budget = %v", budget)
+	}
+	clients := rep["clients"].([]any)
+	if len(clients) != 1 {
+		t.Fatalf("clients = %v", rep["clients"])
+	}
+	c := clients[0].(map[string]any)
+	if c["name"] != "price bot" || c["client_id"] != 1.0 || c["searches"] != 3.0 || c["live"] != 1.0 || c["cost_usd_estimate"] != 0.1 {
+		t.Errorf("client row = %v", c)
 	}
 	if len(rep["top_queries"].([]any)) != 1 || out["note"] == "" {
 		t.Errorf("top queries / note = %v", out)

@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,7 +21,22 @@ type Report struct {
 	Sources    []SourceRow   `json:"sources"`
 	Fallbacks  []FallbackRow `json:"fallbacks"`
 	TopQueries []QueryView   `json:"top_queries"`
-	Budget     Budget        `json:"budget"`
+	// Clients are the searches of each API client (step 12).
+	Clients []ClientRow `json:"clients"`
+	Budget  Budget      `json:"budget"`
+}
+
+// ClientRow are the searches of one API client in the range.
+type ClientRow struct {
+	Client   string `json:"client"` // client:<id>
+	ClientID int64  `json:"client_id"`
+	Name     string `json:"name"` // filled by the admin API
+	SearchCounts
+	// CostUSD estimates the client's share of the source cost: its live
+	// searches × the average cost of a live search in the range.
+	CostUSD float64 `json:"cost_usd_estimate"`
+	// LastDay is the last day with a search (2006-01-02).
+	LastDay string `json:"last_day"`
 }
 
 // SearchCounts counts the searches of users.
@@ -131,13 +147,15 @@ func MonthStart(t time.Time) time.Time {
 // BuildReport turns stored counters into the dashboard for from..to.
 func BuildReport(from, to time.Time, rows []store.UsageRow, queries []store.QueryRow, budget Budget) Report {
 	rep := Report{From: from.Format(time.DateOnly), To: to.Format(time.DateOnly), Budget: budget,
-		Days: []DayTotals{}, Countries: []CountryRow{}, Sources: []SourceRow{}, Fallbacks: []FallbackRow{}, TopQueries: []QueryView{}}
+		Days: []DayTotals{}, Countries: []CountryRow{}, Sources: []SourceRow{}, Fallbacks: []FallbackRow{}, TopQueries: []QueryView{},
+		Clients: []ClientRow{}}
 
 	days := map[string]*Totals{}
 	countries := map[string]*SearchCounts{}
 	sources := map[[2]string]*SourceRow{}
 	fallbacks := map[[4]string]*FallbackRow{}
 	sourceMS := map[[2]string]int64{}
+	clients := map[string]*ClientRow{}
 	for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
 		days[d.Format(time.DateOnly)] = &Totals{}
 	}
@@ -178,6 +196,17 @@ func BuildReport(from, to time.Time, rows []store.UsageRow, queries []store.Quer
 				s.NoResults += r.Count
 			default:
 				s.Errors += r.Count
+			}
+		case KindClient:
+			c := clients[r.K1]
+			if c == nil {
+				id, _ := strconv.ParseInt(strings.TrimPrefix(r.K1, "client:"), 10, 64)
+				c = &ClientRow{Client: r.K1, ClientID: id}
+				clients[r.K1] = c
+			}
+			c.add(r.K3, r.Count)
+			if d := r.Day.Format(time.DateOnly); d > c.LastDay {
+				c.LastDay = d
 			}
 		case KindFallback:
 			for _, t := range []*Totals{&rep.Totals, day} {
@@ -223,6 +252,18 @@ func BuildReport(from, to time.Time, rows []store.UsageRow, queries []store.Quer
 	}
 	slices.SortFunc(rep.Fallbacks, func(a, b FallbackRow) int {
 		return cmp.Or(cmp.Compare(b.Count, a.Count), cmp.Compare(a.Chain, b.Chain), cmp.Compare(a.From, b.From), cmp.Compare(a.Reason, b.Reason))
+	})
+	var perLive float64
+	if rep.Totals.Live > 0 {
+		perLive = rep.Totals.CostUSD / float64(rep.Totals.Live)
+	}
+	for _, c := range clients {
+		c.finish()
+		c.CostUSD = round(float64(c.Live)*perLive, 4)
+		rep.Clients = append(rep.Clients, *c)
+	}
+	slices.SortFunc(rep.Clients, func(a, b ClientRow) int {
+		return cmp.Or(cmp.Compare(b.Searches, a.Searches), cmp.Compare(a.ClientID, b.ClientID))
 	})
 	for _, q := range queries {
 		rep.TopQueries = append(rep.TopQueries, QueryView{Country: q.Country, Query: q.Query, Searches: q.Searches, Live: q.Live})

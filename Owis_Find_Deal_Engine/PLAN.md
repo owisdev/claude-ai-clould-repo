@@ -296,10 +296,10 @@ All paths under `/api/v1`. Errors: `{"error": {"code", "message"}}`.
 |---|---|---|---|
 | GET  | `/health` | – | ✅ |
 | GET  | `/countries` | – | ✅ |
-| POST | `/searches`, GET `/searches/{id}` (async) | API key or JWT | step 12 |
+| POST | `/searches`, GET `/searches/{id}` (async, optional signed webhook) | API key or JWT | ✅ step 12 |
 | POST | `/mcp` (MCP tools for AI agents) | API key | step 13 |
 | * | `/admin/v1/...` (settings, clients, usage, audit) | JWT + admin role | steps 8–11 |
-| POST | `/search` `{"title","country"}` | JWT + quota | ✅ |
+| POST | `/search` `{"title","country"}` | JWT or API key + quota | ✅ |
 | GET/PATCH | `/me` | JWT | step 15 |
 | GET/POST | `/cart`, PATCH/DELETE `/cart/{id}` | JWT | step 17 |
 | POST | `/clicks` | JWT | step 18 |
@@ -491,11 +491,27 @@ first, keys made in the panel (partners later).
     key never), admin web page *API clients*, command line `clients list`
     / `clients revoke ID`. Per-client usage on the dashboard comes with
     step 12.
-12. **Integration endpoints:** the same `/api/v1/search` and `/countries`,
+12. ✅ **Integration endpoints:** the same `/api/v1/search` and `/countries`,
     plus an **asynchronous search** for slow live searches (25–50 s):
     `POST /api/v1/searches` → `202` + id, `GET /api/v1/searches/{id}`,
     optional signed webhook (HMAC) when done. Per-client usage counters
     (base for billing partners later).
+    *Built 2026-10-23:* package `internal/jobs` (job `srch_` + 128 random
+    bits, kept 1 h in Redis or memory; runner with at most 10 running jobs
+    per caller and 200 per server; a job whose server stopped shows as
+    `503 job_lost` after its deadline); same metering as the sync search,
+    with a pre-check so bad input and a used-up allowance are refused
+    before a job starts; a cached answer comes back already `done` in the
+    `202`. Webhooks for API clients only (package `internal/webhook`):
+    `X-OFD-Signature: t=<unix>,v1=<hex HMAC-SHA256("<t>.<body>")>`, event
+    and delivery headers, 3 attempts (5 s, 30 s), no redirects, https to
+    public addresses only (checked again at dial time; development switch
+    `WEBHOOK_ALLOW_PRIVATE`). Signing secret per client from the admin
+    panel, shown once, derived from `SETTINGS_ENCRYPTION_KEY` + a random
+    salt (migration 0005: `api_clients.webhook_salt`, prefix, time).
+    Per-client counters: `usage_daily` kind `client` (client, country,
+    outcome), dashboard table *API clients* with an estimated cost (live
+    searches × average cost of a live search).
 13. **AI agents:** an **MCP server** endpoint (`/mcp`, Streamable HTTP)
     with tools `search_products` and `list_countries`, authenticated with
     the same API keys; **OpenAPI 3.1** spec + docs page for developers.

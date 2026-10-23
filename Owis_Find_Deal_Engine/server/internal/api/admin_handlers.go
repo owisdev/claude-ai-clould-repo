@@ -447,11 +447,26 @@ func (h *adminHandlers) usage(w http.ResponseWriter, r *http.Request) {
 	}
 	st := h.d.Runtime().Status()
 	rep := stats.BuildReport(from, to, rows, queries, stats.NewBudget(month, spent, st.BudgetMonthlyUSD, st.BudgetAlertPercent))
+	if len(rep.Clients) > 0 && h.d.Clients != nil {
+		// Names are a nicety: without them the ids still identify the clients.
+		if list, err := h.d.Clients.Clients(ctx); err == nil {
+			names := make(map[int64]string, len(list))
+			for _, c := range list {
+				names[c.ID] = c.Name
+			}
+			for i := range rep.Clients {
+				rep.Clients[i].Name = names[rep.Clients[i].ClientID]
+			}
+		} else {
+			h.d.Log.WarnContext(ctx, "reading API client names failed", "err", err)
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"report": rep,
 		"note": "Counts are saved by each server every " + stats.FlushInterval.String() +
 			" (UTC days). Costs are estimates from SERPAPI_SEARCH_COST_USD and APIFY_<SHOP>_RUN_COST_USD; " +
-			"check the Apify and SerpApi consoles for the bill.",
+			"check the Apify and SerpApi consoles for the bill. " +
+			"An API client's cost is its live searches × the average cost of a live search in these days.",
 	})
 }
 

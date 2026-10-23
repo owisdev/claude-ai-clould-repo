@@ -159,6 +159,49 @@ export function Dashboard() {
             </Card>
           </div>
 
+          <Card title="API clients">
+            {r.clients.length === 0 ? (
+              <p className="muted">No searches with API keys in these days.</p>
+            ) : (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Client</th>
+                      <th className="num">Searches</th>
+                      <th className="num">Cached</th>
+                      <th className="num">Live</th>
+                      <th className="num">Refused</th>
+                      <th className="num">Failed</th>
+                      <th className="num">Est. cost</th>
+                      <th>Last search</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {r.clients.map((c) => (
+                      <tr key={c.client}>
+                        <td>
+                          {c.name || <span className="muted">(deleted)</span>} <span className="muted small">#{c.client_id}</span>
+                        </td>
+                        <td className="num">{fmtInt(c.searches)}</td>
+                        <td className="num">{fmtInt(c.cache_hits + c.cache_stale)}</td>
+                        <td className="num">{fmtInt(c.live)}</td>
+                        <td className="num">{fmtInt(c.quota_refused)}</td>
+                        <td className="num">{fmtInt(c.errors)}</td>
+                        <td className="num">{fmtUSD(c.cost_usd_estimate)}</td>
+                        <td>{c.last_day}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <p className="muted small" style={{ marginBottom: 0 }}>
+              Searches made with each client's API key (sync and asynchronous). Cached answers are free; the estimated cost is
+              the client's live searches × the average cost of a live search in these days.
+            </p>
+          </Card>
+
           <Card title="Top queries">
             <table>
               <thead>

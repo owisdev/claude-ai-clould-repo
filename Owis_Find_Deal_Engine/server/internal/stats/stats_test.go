@@ -39,14 +39,15 @@ func TestRecorderFlush(t *testing.T) {
 	now := time.Date(2026, 10, 11, 23, 59, 0, 0, time.UTC)
 	r.now = func() time.Time { return now }
 
-	r.Search("JOR", "  USB  Hub ", "live")
-	r.Search("jor", "usb hub", "hit")
-	r.Search("jor", "usb hub", "quota") // counted, not a top query
+	r.Search("", "JOR", "  USB  Hub ", "live")
+	r.Search("", "jor", "usb hub", "hit")
+	r.Search("", "jor", "usb hub", "quota") // counted, not a top query
+	r.Search("client:7", "jor", "usb hub", "hit")
 	r.SourceCall("apify", map[string]string{"temu": "ok"}, 40*time.Second, 0.10)
 	r.SourceCall("searxng", map[string]string{"amazon": "error", "ebay": "error"}, 2*time.Second, 0.02)
 	r.Fallback("searxng>serpapi", "searxng", "serpapi", "error")
 	now = now.Add(2 * time.Minute) // next UTC day
-	r.Search("jor", "usb hub", "live")
+	r.Search("", "jor", "usb hub", "live")
 
 	sink := &memSink{fail: true}
 	if err := r.Flush(context.Background(), sink); err == nil {
@@ -60,11 +61,17 @@ func TestRecorderFlush(t *testing.T) {
 	for _, u := range sink.usage {
 		got[u.Day.Format(time.DateOnly)+"|"+u.Kind+"|"+u.K1+"|"+u.K2+"|"+u.K3] = u
 	}
-	if len(got) != 8 {
+	if len(got) != 9 {
 		t.Fatalf("rows = %+v", got)
 	}
 	if u := got["2026-10-11|search|jor|live|"]; u.Count != 1 {
 		t.Errorf("live search = %+v", u)
+	}
+	if u := got["2026-10-11|search|jor|hit|"]; u.Count != 2 {
+		t.Errorf("hits (user + client) = %+v", u)
+	}
+	if u := got["2026-10-11|client|client:7|jor|hit"]; u.Count != 1 {
+		t.Errorf("client = %+v", u)
 	}
 	if u := got["2026-10-12|search|jor|live|"]; u.Count != 1 {
 		t.Errorf("next day = %+v", u)
@@ -82,7 +89,7 @@ func TestRecorderFlush(t *testing.T) {
 	for _, q := range sink.queries {
 		queries[q.Day.Format(time.DateOnly)+"|"+q.Query] = q
 	}
-	if q := queries["2026-10-11|usb hub"]; len(queries) != 2 || q.Searches != 2 || q.Live != 1 || q.Country != "jor" {
+	if q := queries["2026-10-11|usb hub"]; len(queries) != 2 || q.Searches != 3 || q.Live != 1 || q.Country != "jor" {
 		t.Errorf("queries = %+v", queries)
 	}
 	// Flushed: nothing left.
@@ -104,6 +111,10 @@ func TestBuildReport(t *testing.T) {
 		{Day: day("2026-10-11"), Kind: KindSource, K1: "apify", K2: "temu", K3: "error", Count: 2, CostUSD: 0.2, TotalMS: 120000},
 		{Day: day("2026-10-11"), Kind: KindSource, K1: "serpapi-amazon", K2: "amazon", K3: "ok", Count: 3, CostUSD: 0.045, TotalMS: 9000},
 		{Day: day("2026-10-11"), Kind: KindFallback, K1: "apify>searxng", K2: "apify", K3: "searxng:error", Count: 2},
+		{Day: day("2026-10-10"), Kind: KindClient, K1: "client:3", K2: "jor", K3: "live", Count: 1},
+		{Day: day("2026-10-11"), Kind: KindClient, K1: "client:3", K2: "usa", K3: "hit", Count: 1},
+		{Day: day("2026-10-11"), Kind: KindClient, K1: "client:3", K2: "usa", K3: "quota", Count: 1},
+		{Day: day("2026-10-10"), Kind: KindClient, K1: "client:12", K2: "jor", K3: "live", Count: 2},
 	}
 	queries := []store.QueryRow{{Country: "jor", Query: "usb hub", Searches: 8, Live: 2}}
 	b := NewBudget(day("2026-10-01"), 0.445, 5, 80)
@@ -128,6 +139,15 @@ func TestBuildReport(t *testing.T) {
 	}
 	if f := rep.Fallbacks; len(f) != 1 || f[0].To != "searxng" || f[0].Reason != "error" || f[0].Count != 2 {
 		t.Errorf("fallbacks = %+v", f)
+	}
+	// 0.445 cost / 3 live searches = 0.14833 per live search.
+	if c := rep.Clients; len(c) != 2 || c[0].ClientID != 3 || c[0].Searches != 3 || c[0].Live != 1 || c[0].Quota != 1 ||
+		c[0].HitRate != 0.5 || c[0].CostUSD != 0.1483 || c[0].LastDay != "2026-10-11" ||
+		c[1].ClientID != 12 || c[1].CostUSD != 0.2967 || c[1].LastDay != "2026-10-10" {
+		t.Errorf("clients = %+v", c)
+	}
+	if tot.Searches != 11 {
+		t.Error("client rows must not change the totals")
 	}
 	if len(rep.TopQueries) != 1 || rep.TopQueries[0].Searches != 8 || rep.Budget.Status != BudgetOK {
 		t.Errorf("queries / budget = %+v %+v", rep.TopQueries, rep.Budget)

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -60,8 +61,8 @@ func TestMigrateConcurrentAndIdempotent(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	if total != 4 {
-		t.Fatalf("migrations applied %d times, want 4 (once each)", total)
+	if total != 5 {
+		t.Fatalf("migrations applied %d times, want 5 (once each)", total)
 	}
 }
 
@@ -363,8 +364,31 @@ func TestAPIClients(t *testing.T) {
 		t.Errorf("revoked, touched key = %+v", k)
 	}
 
+	// Webhook secret: none at first, then a salt with its prefix.
+	if c.WebhookSalt != nil || c.WebhookSecretPrefix != "" || c.WebhookSecretAt != nil {
+		t.Errorf("new client has a webhook secret: %+v", c)
+	}
+	salt := hash(7)
+	w, err := db.SetWebhookSalt(ctx, c.ID, salt, "whsec_abcdefgh", "admin:w")
+	if err != nil || !bytes.Equal(w.WebhookSalt, salt) || w.WebhookSecretPrefix != "whsec_abcdefgh" || w.WebhookSecretAt == nil ||
+		w.UpdatedBy != "admin:w" || len(w.Keys) != 3 {
+		t.Fatalf("SetWebhookSalt = %+v, %v", w, err)
+	}
+	if got, _, _ := db.ClientByKeyHash(ctx, hash(3)); !bytes.Equal(got.WebhookSalt, salt) {
+		t.Errorf("key lookup without the salt: %+v", got)
+	}
+	if _, err := db.SetWebhookSalt(ctx, c.ID, []byte("short"), "x", "a"); err == nil {
+		t.Error("a salt that is not 32 bytes was accepted")
+	}
+	if _, err := db.SetWebhookSalt(ctx, 999, salt, "x", "a"); !errors.Is(err, ErrClientNotFound) {
+		t.Errorf("unknown client: %v", err)
+	}
+
 	if err := db.RevokeClient(ctx, c.ID, "admin:a"); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := db.SetWebhookSalt(ctx, c.ID, salt, "x", "a"); !errors.Is(err, ErrClientRevoked) {
+		t.Errorf("webhook secret of a revoked client: %v", err)
 	}
 	if err := db.RevokeClient(ctx, c.ID, "admin:a"); !errors.Is(err, ErrClientRevoked) {
 		t.Errorf("second revoke: %v", err)

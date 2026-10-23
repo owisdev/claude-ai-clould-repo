@@ -65,9 +65,10 @@ const (
 )
 
 // SearchRecorder receives every metered search (usage dashboard). Searches
-// with invalid input are not reported.
+// with invalid input are not reported. client is the API client's user id
+// (client:<id>), empty for app users.
 type SearchRecorder interface {
-	Search(country, title, outcome string)
+	Search(client, country, title, outcome string)
 }
 
 // Service meters searches. Safe for concurrent use.
@@ -102,9 +103,40 @@ func (s *Service) Search(ctx context.Context, user auth.User, req search.Request
 		case errors.Is(err, context.Canceled):
 			return out, err // client went away: not a search
 		}
-		s.rec.Search(req.Country, req.Title, outcome)
+		client := ""
+		if user.Plan == usage.APIPlan {
+			client = user.ID
+		}
+		s.rec.Search(client, req.Country, req.Title, outcome)
 	}
 	return out, err
+}
+
+// Check tells, without a live search and without using the allowance,
+// whether Search would be refused for the allowance right now: nil when
+// the answer is cached (free) or allowance is left, *QuotaError when it is
+// used up, ErrQuotaUnavailable when the counters are down. cached reports
+// a cached answer. The asynchronous search uses it to refuse at once
+// rather than in the job; Search still decides (another search may use
+// the last unit meanwhile).
+func (s *Service) Check(ctx context.Context, user auth.User, req search.Request) (out Outcome, cached bool, err error) {
+	if user.ID == "" {
+		return Outcome{}, false, errors.New("metering: unauthenticated search")
+	}
+	_, cached = s.searcher.Lookup(ctx, req)
+	d, err := s.quota.Status(ctx, account(user))
+	if err != nil {
+		if cached {
+			return Outcome{}, true, nil // free answer: the counters do not matter
+		}
+		s.log.ErrorContext(ctx, "quota check failed", "err", err)
+		return Outcome{}, false, fmt.Errorf("%w: %v", ErrQuotaUnavailable, err)
+	}
+	out = Outcome{Quota: d, QuotaKnown: true}
+	if !cached && !d.Allowed {
+		return out, false, &QuotaError{Decision: d}
+	}
+	return out, cached, nil
 }
 
 // New returns a metering Service.

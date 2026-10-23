@@ -35,6 +35,12 @@ type Client struct {
 	RevokedAt  *time.Time
 	RevokedBy  string
 
+	// Webhook signing secret (step 12): the random salt it is derived
+	// from (nil = none yet), its first characters and when it was made.
+	WebhookSalt         []byte
+	WebhookSecretPrefix string
+	WebhookSecretAt     *time.Time
+
 	Keys []APIKey // filled by Clients and Client, newest first
 }
 
@@ -57,7 +63,8 @@ type NewKey struct {
 }
 
 const clientCols = `c.id, c.name, c.owner, c.scopes, c.daily_quota, c.rate_rps, c.rate_burst, c.countries, c.ip_allow,
-	c.expires_at, c.created_at, c.created_by, c.updated_at, c.updated_by, c.revoked_at, c.revoked_by`
+	c.expires_at, c.created_at, c.created_by, c.updated_at, c.updated_by, c.revoked_at, c.revoked_by,
+	c.webhook_salt, c.webhook_secret_prefix, c.webhook_secret_at`
 
 const keyCols = "k.id, k.client_id, k.prefix, k.created_at, k.created_by, k.expires_at, k.revoked_at, k.last_used_at"
 
@@ -65,7 +72,7 @@ func scanClient(row pgx.Row, extra ...any) (Client, error) {
 	var c Client
 	err := row.Scan(append([]any{&c.ID, &c.Name, &c.Owner, &c.Scopes, &c.DailyQuota, &c.RateRPS, &c.RateBurst,
 		&c.Countries, &c.IPAllow, &c.ExpiresAt, &c.CreatedAt, &c.CreatedBy, &c.UpdatedAt, &c.UpdatedBy,
-		&c.RevokedAt, &c.RevokedBy}, extra...)...)
+		&c.RevokedAt, &c.RevokedBy, &c.WebhookSalt, &c.WebhookSecretPrefix, &c.WebhookSecretAt}, extra...)...)
 	return c, err
 }
 
@@ -208,6 +215,22 @@ func (db *DB) RotateKey(ctx context.Context, clientID int64, key NewKey, graceUn
 		return err
 	})
 	return k, err
+}
+
+// SetWebhookSalt gives a client that is not revoked a new webhook signing
+// secret (its salt and shown prefix); the old secret stops at once.
+func (db *DB) SetWebhookSalt(ctx context.Context, id int64, salt []byte, prefix, by string) (Client, error) {
+	out, err := scanClient(db.pool.QueryRow(ctx, `UPDATE api_clients AS c SET
+		webhook_salt = $2, webhook_secret_prefix = $3, webhook_secret_at = now(), updated_at = now(), updated_by = $4
+		WHERE c.id = $1 AND c.revoked_at IS NULL RETURNING `+clientCols, id, salt, prefix, by))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Client{}, db.clientState(ctx, id)
+	}
+	if err != nil {
+		return Client{}, err
+	}
+	out.Keys, err = db.keys(ctx, id)
+	return out, err
 }
 
 // RevokeClient stops the client and all its keys at once. Revoking is

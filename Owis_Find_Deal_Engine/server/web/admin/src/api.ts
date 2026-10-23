@@ -195,6 +195,13 @@ export interface UsageReport {
   }[];
   fallbacks: { chain: string; from: string; to: string; reason: string; count: number }[];
   top_queries: { country: string; query: string; searches: number; live: number }[];
+  clients: (SearchCounts & {
+    client: string;
+    client_id: number;
+    name: string;
+    cost_usd_estimate: number;
+    last_day: string;
+  })[];
   budget: {
     month: string;
     limit_usd: number;
@@ -236,6 +243,16 @@ export interface ApiClient {
   revoked_by?: string;
   last_used_at: string | null;
   keys: ApiKeyInfo[];
+  /** First characters of the webhook signing secret; "" = none yet. */
+  webhook_secret_prefix: string;
+  webhook_secret_at: string | null;
+}
+
+/** Answer of making a webhook signing secret: shown once. */
+export interface WebhookSecretAnswer {
+  client: ApiClient;
+  webhook_secret: string;
+  note: string;
 }
 
 /** Answer of creating a client or rotating its key: the key is shown once. */

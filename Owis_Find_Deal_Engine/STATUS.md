@@ -1,14 +1,16 @@
 # Project status and handoff
 
-Last updated: 2026-10-16 · Project branch: `claude/cloud-vs-local-7xi988`
-(steps 7–11 merged; step 11 via PR #6; nothing is merged into `main` yet).
+Last updated: 2026-10-23 · Project branch: `claude/cloud-vs-local-7xi988`
+(steps 7–11 merged; step 12 on `claude/nice-hopper-uo01wj`, to merge into
+the project branch; nothing is merged into `main` yet).
 
 Read first:
 - [docs/service_guide.pdf](docs/service_guide.pdf) — **complete guide of the
   service as it is now** (16 Oct 2026, after step 11): architecture, Docker,
   request flow, cache, API clients, cost measurement, code map, how to run /
   use / test locally (git + docker commands), remaining work and
-  recommendations.
+  recommendations. Step 12 (async search, webhooks, per-client usage) is
+  not in it yet: see below and the server README.
 - [docs/current_flow.pdf](docs/current_flow.pdf) — **how the service works
   today** (7 Oct 2026): sources per shop, request flow, 48 h cache, costs,
   configuration, known limits, test results.
@@ -23,6 +25,71 @@ Regenerate the PDFs: `python3 docs/build_service_guide_pdf.py`,
 `python3 docs/build_architecture_pdf.py` (needs `reportlab`).
 
 ## Where we are
+
+**Phase 3, step 12 — integration endpoints: done (2026-10-23).** Details:
+server README section "Asynchronous search and webhooks", PLAN.md step 12.
+
+- **Asynchronous search** for slow live searches:
+  `POST /api/v1/searches` (same body as `/search`) → `202` + job id
+  (`srch_…`) and `Location`; `GET /api/v1/searches/{id}` → `running`,
+  `done` (with the result) or `failed` (with the error `/search` would
+  have given). Works with an API key **or** the user's login token.
+  Bad input, used-up allowance (`402` / `429`), wrong country or scope are
+  refused at once; a cached answer is already `done` in the `202`.
+  Metering as before: cached free, a live search counts once.
+- Only the caller sees its job (others `404`); finished jobs kept 1 hour
+  (Redis); at most 10 running per caller (`429 too_many_jobs`); polling
+  has its own limit (5/s) and does not use up the search limit.
+- **Signed webhook** (API keys only): add `"webhook_url":"https://…"`; when
+  done the job is POSTed there with `X-OFD-Signature: t=…,v1=<HMAC-SHA256>`,
+  `X-OFD-Event: search.completed|search.failed`, `X-OFD-Delivery: <job id>`;
+  3 attempts (now, 5 s, 30 s). The job shows `webhook.status`
+  (`delivered` / `failed`). Only https to public addresses (the server
+  cannot be made to call Redis, Postgres, etc.); for a receiver on your
+  PC: `WEBHOOK_ALLOW_PRIVATE=true` in `.env` (development only).
+- **Webhook secret per client**: admin panel → API clients → *Webhook
+  secret* (shown once, `whsec_…`; a new one replaces the old at once;
+  audit `clients.webhook_secret`, never the secret). It is not stored:
+  derived from `SETTINGS_ENCRYPTION_KEY` + a random salt (new columns on
+  `api_clients`, migration 0005, applied automatically).
+- **Per-client usage on the dashboard**: new table *API clients* —
+  searches, cached, live, refused, failed, estimated cost (live searches ×
+  average cost of a live search), last day. Also in
+  `GET /admin/v1/usage` (`clients`). Base for billing partners later.
+- Tested: unit tests (job store in memory + Redis, runner limits /
+  shutdown / panic, signing and checking, retries, no redirects,
+  internal addresses refused also through a host name, metering pre-check,
+  per-client counters and report, admin endpoint, the whole async API with
+  and without webhook), store tests against Postgres 16, the race
+  detector, and an end-to-end run of the binary with Postgres, a fake
+  Firebase and a slow fake search (user job → poll → done; cached job done
+  at once; another user `404`; client without secret `400`; secret made →
+  webhook delivered and its signature checked; wrong country `403`;
+  dashboard row with the client's name after 30 s; secret and key never in
+  the log or audit log). Admin web app: typecheck + build; **not clicked
+  through in a browser this time** (please check the two new parts).
+  No new Go or npm dependencies. Not run here: `govulncheck` (CI runs it).
+
+**Owner, to try step 12** (free: use a search that is already cached,
+e.g. `usb c hub` / `jor`, or one live search):
+
+1. `docker compose up -d --build` (nothing to add to `.env`).
+2. Async with your key from step 11 (Git Bash; PowerShell: `curl.exe`):
+   `curl -i -X POST localhost:3002/api/v1/searches -H "Authorization: Bearer ofd_live_…" -H "Content-Type: application/json" -d '{"title":"usb c hub","country":"jor"}'`
+   → `202`, `Location: /api/v1/searches/srch_…`. Then
+   `curl localhost:3002/api/v1/searches/srch_… -H "Authorization: Bearer ofd_live_…"`
+   → `"status":"done"` with the results (a new search: `running` for
+   ~30–50 s first).
+3. Webhook: admin panel → **API clients** → *Webhook secret* → copy it.
+   Open <https://webhook.site> (free, gives you an https URL), then the
+   same POST with `"webhook_url":"https://webhook.site/<your id>"` in the
+   body. webhook.site shows the call with `X-Ofd-Signature`; the job shows
+   `"webhook":{"status":"delivered"}`.
+4. Dashboard → new table **API clients** (after ~30 s): your client with
+   its searches.
+5. Report: is polling every 5 s fine for your agents? Is one webhook
+   secret per client enough, or do you want a fixed webhook URL per client
+   (set in the admin panel instead of per request)?
 
 **Phase 3, step 11 — API clients and keys: done (2026-10-15).** Details:
 server README section "API clients and keys", PLAN.md step 11.
@@ -247,10 +314,10 @@ that admin entry).
 4. Optional: set the cost estimates, e.g.
    `{"changes":{"APIFY_TEMU_RUN_COST_USD":"0.10","APIFY_SHEIN_RUN_COST_USD":"0.033","APIFY_ALIEXPRESS_RUN_COST_USD":"0.02"}}`.
 
-**Next: phase 3, step 12 — integration endpoints:** asynchronous search
-for slow live searches (`POST /api/v1/searches` → `202` + id,
-`GET /api/v1/searches/{id}`, optional signed webhook), per-client usage
-counters on the dashboard (base for billing partners later).
+**Next: phase 3, step 13 — AI agents:** an MCP server endpoint (`/mcp`,
+Streamable HTTP) with tools `search_products` and `list_countries`, the
+same API keys (scope `countries` for the list); OpenAPI 3.1 spec + docs
+page for developers (including the asynchronous search and webhooks).
 
 **Phase 2, step 7 — database + settings store: done (2026-10-11).**
 
@@ -517,7 +584,7 @@ instant); label scraper prices as approximate in the app.
    CI/CD, monitoring).
 4. **Phase 5 — users** (old phase 2).
 
-**Phase 2 (steps 7–10) is done (2026-10-11); phase 3, step 11 (API clients and keys) is done (2026-10-15); next session starts step 12 (integration endpoints).**
+**Phase 2 (steps 7–10) is done (2026-10-11); phase 3, step 11 (API clients and keys) is done (2026-10-15), step 12 (integration endpoints) is done (2026-10-23); next session starts step 13 (AI agents: MCP + OpenAPI).**
 **Owner decisions D1–D4 (answered 2026-10-11):**
 
 - **D1 admin web app:** small React app built into the server image,
@@ -546,7 +613,7 @@ Open the repository and say:
 
 > Continue the Owis_Find_Deal_Engine project from
 > `Owis_Find_Deal_Engine/STATUS.md` on branch `claude/cloud-vs-local-7xi988`.
-> Start phase 3, step 12. (Decisions D1–D5 are recorded in STATUS.md.)
+> Start phase 3, step 13. (Decisions D1–D5 are recorded in STATUS.md.)
 
 ## Run it on your PC
 

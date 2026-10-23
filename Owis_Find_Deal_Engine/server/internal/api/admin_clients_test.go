@@ -114,6 +114,21 @@ func (f *fakeClients) RevokeKey(_ context.Context, clientID, keyID int64) error 
 	return store.ErrKeyNotFound
 }
 
+func (f *fakeClients) SetWebhookSalt(_ context.Context, id int64, salt []byte, prefix, by string) (store.Client, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if id < 1 || int(id) > len(f.clients) {
+		return store.Client{}, store.ErrClientNotFound
+	}
+	c := &f.clients[id-1]
+	if c.RevokedAt != nil {
+		return store.Client{}, store.ErrClientRevoked
+	}
+	now := time.Now()
+	c.WebhookSalt, c.WebhookSecretPrefix, c.WebhookSecretAt, c.UpdatedBy = salt, prefix, &now, by
+	return *c, nil
+}
+
 func (f *fakeClients) ClientByKeyHash(_ context.Context, hash []byte) (store.Client, store.APIKey, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
