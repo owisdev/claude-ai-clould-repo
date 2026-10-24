@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { api, get, post, type ApiClient, type ApiKeyInfo, type Country, type NewKeyAnswer, type WebhookSecretAnswer } from "../api";
 import { Badge, Card, ErrorBox, errorText, fmtInt, fmtTime, useLoad } from "../ui";
 
@@ -340,72 +340,88 @@ export function Clients() {
   );
 }
 
+/** Brings a shown-once box into view and selects its value, wherever the page was scrolled. */
+function useReveal(id: string, value: string) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    (document.getElementById(id) as HTMLInputElement | null)?.select();
+  }, [id, value]);
+  return ref;
+}
+
 function NewKeyBox({ answer, onClose }: { answer: NewKeyAnswer; onClose: () => void }) {
   const [copied, setCopied] = useState<"" | "yes" | "no">("");
+  const ref = useReveal("new-key", answer.key);
   const curl = `curl -X POST ${location.origin}/api/v1/search -H "Authorization: Bearer ${answer.key}" -H "Content-Type: application/json" -d '{"title":"usb c hub","country":"${answer.client.countries[0] ?? "jor"}"}'`;
   return (
-    <Card title={`Key for "${answer.client.name}" — copy it now, it is shown only once`}>
-      <div className="row">
-        <input id="new-key" readOnly value={answer.key} className="mono" style={{ flex: 1, minWidth: 280 }} onFocus={(e) => e.target.select()} aria-label="API key" />
-        <button
-          className="primary"
-          onClick={() =>
-            (navigator.clipboard?.writeText(answer.key) ?? Promise.reject()).then(
-              () => setCopied("yes"),
-              () => {
-                setCopied("no");
-                (document.getElementById("new-key") as HTMLInputElement | null)?.select();
-              },
-            )
-          }
-        >
-          {copied === "yes" ? "Copied" : "Copy"}
-        </button>
-        <button onClick={onClose}>I have saved it</button>
-      </div>
-      {copied === "no" && <p className="notice">The browser did not allow copying: the key is selected, press Ctrl+C (⌘C).</p>}
-      {answer.old_keys_until && <p className="notice">The previous key keeps working until {fmtTime(answer.old_keys_until)}.</p>}
-      <p className="muted small">Try it:</p>
-      <pre className="mono small" style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", margin: 0 }}>
-        {curl}
-      </pre>
-    </Card>
+    <div ref={ref} style={{ scrollMarginTop: 16 }}>
+      <Card title={`Key for "${answer.client.name}" — copy it now, it is shown only once`}>
+        <div className="row">
+          <input id="new-key" readOnly value={answer.key} className="mono" style={{ flex: 1, minWidth: 280 }} onFocus={(e) => e.target.select()} aria-label="API key" />
+          <button
+            className="primary"
+            onClick={() =>
+              (navigator.clipboard?.writeText(answer.key) ?? Promise.reject()).then(
+                () => setCopied("yes"),
+                () => {
+                  setCopied("no");
+                  (document.getElementById("new-key") as HTMLInputElement | null)?.select();
+                },
+              )
+            }
+          >
+            {copied === "yes" ? "Copied" : "Copy"}
+          </button>
+          <button onClick={onClose}>I have saved it</button>
+        </div>
+        {copied === "no" && <p className="notice">The browser did not allow copying: the key is selected, press Ctrl+C (⌘C).</p>}
+        {answer.old_keys_until && <p className="notice">The previous key keeps working until {fmtTime(answer.old_keys_until)}.</p>}
+        <p className="muted small">Try it:</p>
+        <pre className="mono small" style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", margin: 0 }}>
+          {curl}
+        </pre>
+      </Card>
+    </div>
   );
 }
 
 function NewSecretBox({ answer, onClose }: { answer: WebhookSecretAnswer; onClose: () => void }) {
   const [copied, setCopied] = useState<"" | "yes" | "no">("");
+  const ref = useReveal("new-secret", answer.webhook_secret);
   const country = answer.client.countries[0] ?? "jor";
   const curl = `curl -X POST ${location.origin}/api/v1/searches -H "Authorization: Bearer ofd_live_…" -H "Content-Type: application/json" -d '{"title":"usb c hub","country":"${country}","webhook_url":"https://your-server.example/hooks/search"}'`;
   return (
-    <Card title={`Webhook secret for "${answer.client.name}" — copy it now, it is shown only once`}>
-      <div className="row">
-        <input id="new-secret" readOnly value={answer.webhook_secret} className="mono" style={{ flex: 1, minWidth: 280 }} onFocus={(e) => e.target.select()} aria-label="Webhook secret" />
-        <button
-          className="primary"
-          onClick={() =>
-            (navigator.clipboard?.writeText(answer.webhook_secret) ?? Promise.reject()).then(
-              () => setCopied("yes"),
-              () => {
-                setCopied("no");
-                (document.getElementById("new-secret") as HTMLInputElement | null)?.select();
-              },
-            )
-          }
-        >
-          {copied === "yes" ? "Copied" : "Copy"}
-        </button>
-        <button onClick={onClose}>I have saved it</button>
-      </div>
-      {copied === "no" && <p className="notice">The browser did not allow copying: the secret is selected, press Ctrl+C (⌘C).</p>}
-      <p className="muted small">
-        Each webhook carries <code>X-OFD-Signature: t=…,v1=…</code>: HMAC-SHA256 of <code>&lt;t&gt;.&lt;raw body&gt;</code> with this
-        secret. The receiver recomputes it, compares in constant time and refuses timestamps older than 5 minutes. Start a search
-        with a webhook:
-      </p>
-      <pre className="mono small" style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", margin: 0 }}>
-        {curl}
-      </pre>
-    </Card>
+    <div ref={ref} style={{ scrollMarginTop: 16 }}>
+      <Card title={`Webhook secret for "${answer.client.name}" — copy it now, it is shown only once`}>
+        <div className="row">
+          <input id="new-secret" readOnly value={answer.webhook_secret} className="mono" style={{ flex: 1, minWidth: 280 }} onFocus={(e) => e.target.select()} aria-label="Webhook secret" />
+          <button
+            className="primary"
+            onClick={() =>
+              (navigator.clipboard?.writeText(answer.webhook_secret) ?? Promise.reject()).then(
+                () => setCopied("yes"),
+                () => {
+                  setCopied("no");
+                  (document.getElementById("new-secret") as HTMLInputElement | null)?.select();
+                },
+              )
+            }
+          >
+            {copied === "yes" ? "Copied" : "Copy"}
+          </button>
+          <button onClick={onClose}>I have saved it</button>
+        </div>
+        {copied === "no" && <p className="notice">The browser did not allow copying: the secret is selected, press Ctrl+C (⌘C).</p>}
+        <p className="muted small">
+          Each webhook carries <code>X-OFD-Signature: t=…,v1=…</code>: HMAC-SHA256 of <code>&lt;t&gt;.&lt;raw body&gt;</code> with this
+          secret. The receiver recomputes it, compares in constant time and refuses timestamps older than 5 minutes. Start a search
+          with a webhook:
+        </p>
+        <pre className="mono small" style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", margin: 0 }}>
+          {curl}
+        </pre>
+      </Card>
+    </div>
   );
 }
