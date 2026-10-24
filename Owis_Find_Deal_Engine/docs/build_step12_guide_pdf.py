@@ -121,7 +121,7 @@ def cover():
     s.append(P("What it does, and how to test it on your Docker stack step by step with the commands", "subtitle"))
     s.append(T([
         ["Step", "Phase 3, step 12: asynchronous search, signed webhooks, usage per API client"],
-        ["Status", "Done 2026-10-23, merged into the project branch (PR #9)"],
+        ["Status", "Done 2026-10-23, merged into the project branch (PR #9, #10); tested by the owner 2026-10-24"],
         ["Branch", f"<font name='Mono'>{BRANCH}</font>, folder <font name='Mono'>Owis_Find_Deal_Engine/server</font>"],
         ["New endpoints", "<font name='Mono'>POST /api/v1/searches</font> · <font name='Mono'>GET /api/v1/searches/{id}</font> · "
                           "<font name='Mono'>POST /admin/v1/clients/{id}/webhook-secret</font>"],
@@ -130,6 +130,10 @@ def cover():
         ["Date", DATE],
     ], [80, W - 80], header=False, first_col_bold=True))
     s.append(Spacer(1, 14))
+    s.append(P("Updated after the owner's test on the Docker stack (24 Oct 2026): steps 0–13, 15 and 16 passed. "
+               "Corrections from that session are in steps 1, 2, 6–11, 13, 15 and 16, and in the tips on the "
+               "first page of Part 2.", "small"))
+    s.append(Spacer(1, 6))
     s.append(callout("<b>How to read this guide.</b> Part 1 explains what step 12 does. Part 2 is the test: "
                      "steps 0–17 with the commands to type (Git Bash on Windows) and what you should see. "
                      "Only step 3 and the optional step 17 run a live search (about $0.16 Apify + 1 SerpApi "
@@ -236,6 +240,21 @@ def part2():
     s.append(P("The commands are for <b>Git Bash</b> on Windows. In PowerShell, type <font name='Mono'>curl.exe</font> "
                "instead of <font name='Mono'>curl</font> and put the JSON body in single quotes. Replace every "
                "<font name='Mono'>&lt;…&gt;</font> with your own value."))
+    s.append(callout("<b>Git Bash tips (from the owner test, 24 Oct 2026).</b><br/>"
+                     "• Run every command in the <font name='Mono'>Owis_Find_Deal_Engine/server</font> folder: "
+                     "<font name='Mono'>docker compose</font> and <font name='Mono'>.env</font> only work there "
+                     "(otherwise: <i>no configuration file provided</i>).<br/>"
+                     "• <font name='Mono'>export NAME=value</font> with <b>no spaces</b> around <font name='Mono'>=</font> "
+                     "(otherwise: <i>not a valid identifier</i>).<br/>"
+                     "• Variables live in one window only. Check them with <font name='Mono'>echo \"${KEY:0:12}\"</font>; "
+                     "an empty line means: export it again.<br/>"
+                     "• Login tokens expire after <b>1 hour</b> (<i>invalid or expired token</i>); "
+                     "<i>missing bearer token</i> means the variable is empty.<br/>"
+                     "• Copy job ids (<font name='Mono'>srch_…</font>) from the answer by hand into "
+                     "<font name='Mono'>export ID=…</font>.<br/>"
+                     "• Never paste a long JSON answer into the terminal to save it: lines over ~4,000 characters "
+                     "are cut. Save answers with <font name='Mono'>curl … &gt; file</font> instead."))
+    s.append(Spacer(1, 6))
     s.append(callout("<b>Cost:</b> step 3 runs one live search (about $0.16 Apify plus one SerpApi search). After "
                      "that, the same search is cached for 48 h and every other step is free, except the optional "
                      "step 17.", fill=ORANGE, edge=ORANGE_D))
@@ -258,17 +277,32 @@ curl -s -X POST "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPa
   -H "Content-Type: application/json" \\
   -d '{"email":"<admin email>","password":"<password>","returnSecureToken":true}'
 export ADMIN_TOKEN=<idToken from the answer>
-"""), "<b>User token</b> (a normal app user, for example test1@example.com):", ("code", """
-curl -s -X POST "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=<WEB_API_KEY>" \\
+"""), "Copy the long <font name='Mono'>\"idToken\"</font> value (without the quotes) after "
+      "<font name='Mono'>ADMIN_TOKEN=</font>, then check: <font name='Mono'>echo \"${ADMIN_TOKEN:0:20}\"</font> prints "
+      "<font name='Mono'>eyJhbGciOiJSUzI1NiIs</font>.",
+              "<b>User token</b> (a normal app user). The email must exist as a user in <b>your</b> Firebase "
+              "project; if sign-in answers <font name='Mono'>EMAIL_NOT_FOUND</font> or "
+              "<font name='Mono'>INVALID_LOGIN_CREDENTIALS</font>, create the user once with "
+              "<font name='Mono'>accounts:signUp</font> (same body):", ("code", """
+curl -s -X POST "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=<WEB_API_KEY>" \\
   -H "Content-Type: application/json" \\
   -d '{"email":"test1@example.com","password":"Test-pass-123","returnSecureToken":true}'
 export TOKEN=<idToken>
-"""), "Both tokens are valid for 1 hour. Repeat this step if you later get "
-      "<font name='Mono'>401 invalid or expired token</font>.")
+"""), "Next time use <font name='Mono'>accounts:signInWithPassword</font> for it. Quicker: any Firebase login "
+      "also works as a normal app user, so <font name='Mono'>export TOKEN=$ADMIN_TOKEN</font> is fine for this test.",
+              "Both tokens are valid for 1 hour. Repeat this step if you later get "
+              "<font name='Mono'>401 invalid or expired token</font>.")
 
     s += step("Step 2 — Make a test client for step 12",
-              "Your step-11 client only allows 2 searches per day, so make a new one. Use the admin panel "
-              "(<b>API clients</b> → name <font name='Mono'>step12 agent</font>, tick jor, 20 per day) or:",
+              "An <b>API client</b> is the record that owns an API key (<font name='Mono'>ofd_live_…</font>) and its "
+              "settings: live searches per day, countries, and later its webhook secret. Your step-11 client allows "
+              "only 2 live searches per day, so make a fresh one for these tests.",
+              "<b>Admin panel:</b> <b>API clients</b> → box <b>New client</b> at the top: Name "
+              "<font name='Mono'>step12 agent</font>, Live searches per day <font name='Mono'>20</font>, tick "
+              "<b>jor</b>, leave the rest → <b>Create client and key</b>. The box <i>Key for \"step12 agent\" — copy it "
+              "now</i> appears at the top of the page: <b>Copy</b>, then <b>I have saved it</b>. The client id is "
+              "the grey <b>#number</b> under its name in the Clients table. (Do not use <b>Edit</b> on an old "
+              "client for this: editing makes no new key.) <b>Or by command:</b>",
               ("code", """
 curl -s -X POST localhost:3002/admin/v1/clients \\
   -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \\
@@ -278,7 +312,8 @@ curl -s -X POST localhost:3002/admin/v1/clients \\
               ("code", """
 export KEY=ofd_live_<...>
 export CID=<N>          # the client id from the answer
-"""))
+"""), "Missed the key? It cannot be shown again (only its hash is stored): click <b>New key</b> on the client, "
+      "enter <b>0</b> hours, and copy the key from the box at the top of the page.")
 
     s += step("Step 3 — A slow live search, started asynchronously (costs one live search)", ("code", """
 curl -i -X POST localhost:3002/api/v1/searches \\
@@ -321,7 +356,7 @@ curl -i -X POST localhost:3002/api/v1/searches \\
 # title too short -> 400 invalid_request
 curl -s -X POST localhost:3002/api/v1/searches -H "Authorization: Bearer $KEY" \\
   -H "Content-Type: application/json" -d '{"title":"x","country":"jor"}'
-# unknown country -> 400 unsupported_country
+# made-up country -> 403 country_not_allowed (this key may search jor only)
 curl -s -X POST localhost:3002/api/v1/searches -H "Authorization: Bearer $KEY" \\
   -H "Content-Type: application/json" -d '{"title":"usb c hub","country":"xyz"}'
 # country not allowed for this key -> 403 country_not_allowed
@@ -334,7 +369,12 @@ curl -s -X POST localhost:3002/api/v1/searches \\
 curl -s -X POST localhost:3002/api/v1/searches -H "Authorization: Bearer $KEY" \\
   -H "Content-Type: application/json" -d '{"title":"usb c hub","country":"jor","x":1}'
 """), OK + "each answers right away with <font name='Mono'>{\"error\":{\"code\":\"…\",\"message\":\"…\"}}</font> "
-           "and the code shown in the comment.")
+           "and the code shown in the comment (put <font name='Mono'>; echo</font> after each command to get one "
+           "answer per line).",
+              "A key limited to some countries answers <font name='Mono'>country_not_allowed</font> for every other "
+              "code, real or made-up: that check comes first, as on POST /api/v1/search. "
+              "<font name='Mono'>400 unsupported_country</font> comes only with a key that allows every country, "
+              "or with a user token.")
 
     s += step("Step 7 — Nobody else can read the job", ("code", """
 # the user token reading the key's job -> 404
@@ -342,22 +382,28 @@ curl -s localhost:3002/api/v1/searches/$ID -H "Authorization: Bearer $TOKEN"
 # a made-up id -> 404
 curl -s localhost:3002/api/v1/searches/srch_aaaaaaaaaaaaaaaaaaaaaaaaaa \\
   -H "Authorization: Bearer $KEY"
-"""), OK + "both answer 404 not_found (\"no search job with this id…\").")
+"""), OK + "both answer 404 not_found (\"no search job with this id…\").",
+              "Jobs are kept 1 hour after they finish. To be sure the first 404 is the owner check and not an "
+              "expired job, read the same job with <font name='Mono'>$KEY</font>: it must still show it. If it has "
+              "expired, start a new (cached, free) search with the key, export its id and repeat.")
 
     s += step("Step 8 — The job survives a server restart (stored in Redis)", ("code", """
 docker compose restart server
 sleep 15
 curl -s localhost:3002/api/v1/searches/$ID -H "Authorization: Bearer $KEY" | head -c 300
 """), OK + "the job from step 3 is still there with \"status\":\"done\", as long as you are within 1 hour of "
-           "when it finished.")
+           "when it finished.",
+              "A plain-text <font name='Mono'>404 page not found</font> (not JSON) means "
+              "<font name='Mono'>$ID</font> is empty: check <font name='Mono'>echo \"id: $ID\"</font> and export it again.")
 
     s += step("Step 9 — Webhook without a secret is refused",
               "Go to <b>https://webhook.site</b>, which gives you a free https URL such as "
-              "<font name='Mono'>https://webhook.site/1234-…</font>.", ("code", """
-export HOOK=https://webhook.site/<your id>
+              "<font name='Mono'>https://webhook.site/1234-…</font> (\"Your unique URL\"). Keep the tab open and put "
+              "your URL into the body:", ("code", """
 curl -s -X POST localhost:3002/api/v1/searches \\
   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
-  -d "{\\"title\\":\\"usb c hub\\",\\"country\\":\\"jor\\",\\"webhook_url\\":\\"$HOOK\\"}"
+  -d '{"title":"usb c hub","country":"jor","webhook_url":"https://webhook.site/<your id>"}'; echo
+export HOOK=https://webhook.site/<your id>      # used by step 12
 """), OK + "400 with \"code\":\"webhook_not_configured\".")
 
     s += step("Step 10 — Make the webhook secret",
@@ -368,35 +414,50 @@ curl -s -X POST localhost:3002/admin/v1/clients/$CID/webhook-secret \\
 """), OK + "201 with <font name='Mono'>\"webhook_secret\":\"whsec_…\"</font>. The client list now shows "
            "<font name='Mono'>whsec_xxxxxxxx…</font> in the <b>Webhook</b> column.", ("code", """
 export SECRET=whsec_<...>
-"""), "The server may take up to 10 s to see the new secret, so wait about 10 s before step 11.")
+"""), "The server may take up to 10 s to see the new secret, so wait about 10 s before step 11. "
+      "<font name='Mono'>invalid or expired token</font>: the admin token is older than 1 hour, get a new one "
+      "(step 1) or use the button in the admin panel, which needs no token.")
 
     s += step("Step 11 — Webhook delivered and signed (free, uses the cached search)", ("code", """
 curl -s -X POST localhost:3002/api/v1/searches \\
   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
-  -d "{\\"title\\":\\"usb c hub\\",\\"country\\":\\"jor\\",\\"webhook_url\\":\\"$HOOK\\"}"
-"""), OK + "202 with \"status\":\"done\" and "
-           "<font name='Mono'>\"webhook\":{\"url\":\"…\",\"status\":\"pending\",\"attempts\":0}</font>.",
-              OK + "within a few seconds webhook.site shows a <b>POST</b> with the headers "
+  -d '{"title":"usb c hub","country":"jor","webhook_url":"https://webhook.site/<your id>"}' | head -c 120; echo
+"""), OK + "<font name='Mono'>{\"id\":\"srch_…\",\"status\":\"done\",…</font> (cached, so done at once). "
+           "Copy the id: <font name='Mono'>export ID2=srch_…</font>",
+              OK + "within a few seconds webhook.site lists a new <b>POST</b> on the left. Click it: the "
+                   "<b>Headers</b> table (next to or below <i>Request Details</i>; header names in lower case) shows "
                    "<font name='Mono'>x-ofd-event: search.completed</font>, <font name='Mono'>x-ofd-delivery: srch_…</font> "
-                   "and <font name='Mono'>x-ofd-signature: t=…,v1=…</font>. The body is the job JSON with the results.",
-              "Read the job again:", ("code", """
-export ID2=<srch_... from the answer above>
+                   "(the same id) and <font name='Mono'>x-ofd-signature: t=…,v1=…</font>; <b>Raw Content</b> is the job "
+                   "JSON. Can't find it? Ctrl+F for <font name='Mono'>ofd</font>.",
+              "What the service recorded:", ("code", """
 curl -s localhost:3002/api/v1/searches/$ID2 -H "Authorization: Bearer $KEY" \\
   | grep -o '"webhook":{[^}]*}'
-"""), OK + "<font name='Mono'>\"webhook\":{…\"status\":\"delivered\",\"attempts\":1,\"http_status\":200}</font>",
-              "<b>Check the signature.</b> Save this as <font name='Mono'>verify.py</font>:", ("code", """
+"""), OK + "<font name='Mono'>\"webhook\":{…\"status\":\"delivered\",\"attempts\":1,\"http_status\":200}</font> "
+           "(still <font name='Mono'>pending</font>? wait 5 s and repeat).",
+              "<b>Check the signature.</b> Create <font name='Mono'>verify.py</font> (paste the whole block):", ("code", """
+cat > verify.py <<'EOF'
 import hashlib, hmac, sys, time
-secret, header, body_file = sys.argv[1], sys.argv[2], sys.argv[3]
-body = open(body_file, "rb").read()
+secret, header, body_file = sys.argv[1], sys.argv[2].strip(), sys.argv[3]
+body = open(body_file, "rb").read().rstrip(b"\\r\\n")
 parts = dict(p.split("=", 1) for p in header.split(","))
 want = hmac.new(secret.encode(), parts["t"].encode() + b"." + body, hashlib.sha256).hexdigest()
 print("signature OK" if hmac.compare_digest(want, parts["v1"]) else "BAD signature")
 print("age:", int(time.time()) - int(parts["t"]), "s")
-"""), "In webhook.site, copy the <b>raw content</b> into <font name='Mono'>body.json</font> exactly as shown, and "
-      "copy the x-ofd-signature value. Then run:", ("code", """
+EOF
+"""), "The webhook body is exactly the job as GET returns it, without its <font name='Mono'>\"webhook\":{…}</font> "
+      "part (that delivery state did not exist yet when it was sent). Rebuild it byte for byte from the server "
+      "(do <b>not</b> paste webhook.site's Raw Content into the terminal: the line is ~8,000 characters and gets "
+      "cut, which gives BAD signature). Copy the x-ofd-signature value from webhook.site (without a leading tab):",
+              ("code", """
+curl -s localhost:3002/api/v1/searches/$ID2 -H "Authorization: Bearer $KEY" \\
+  | sed 's/,"webhook":{[^}]*}//' > body.json
+wc -c body.json                                  # about 7,700 bytes
 python verify.py "$SECRET" "t=...,v1=..." body.json
-"""), OK + "<font name='Mono'>signature OK</font>. If you change one character in body.json and run it again, it "
-           "prints <font name='Mono'>BAD signature</font>.")
+sed -i 's/"status":"done"/"status":"dona"/' body.json    # change one character
+python verify.py "$SECRET" "t=...,v1=..." body.json
+"""), OK + "first <font name='Mono'>signature OK</font>, then <font name='Mono'>BAD signature</font> after the change. "
+           "(<font name='Mono'>py</font> instead of <font name='Mono'>python</font> if that is not found. The age "
+           "printed is seconds since sending; a real receiver refuses more than 5 minutes.)")
 
     s += step("Step 12 — Unsafe webhook URLs are refused (free)", ("code", """
 for U in http://example.com/hook https://127.0.0.1/hook \\
@@ -415,13 +476,22 @@ curl -s -X POST localhost:3002/api/v1/searches -H "Authorization: Bearer $TOKEN"
         "the user-token request gets \"webhook_url is only for API keys\".",
     ])
 
-    s += step("Step 13 — A new secret replaces the old one (free)")
-    s += numbered([
-        "Click <b>Webhook secret</b> again (confirm the dialog) and copy the new secret.",
-        "Run step 11 again.",
-        "Run verify.py on the new call with the <b>old</b> secret: " + OK + "<font name='Mono'>BAD signature</font>.",
-        "Run it with the <b>new</b> secret: " + OK + "<font name='Mono'>signature OK</font>.",
-    ])
+    s += step("Step 13 — A new secret replaces the old one (free)",
+              "Keep the old secret, make a new one (or click <b>Webhook secret</b> again in the admin panel):",
+              ("code", """
+export OLD_SECRET=$SECRET
+curl -s -X POST localhost:3002/admin/v1/clients/$CID/webhook-secret \\
+  -H "Authorization: Bearer $ADMIN_TOKEN" | grep -o '"webhook_secret":"[^"]*"'; echo
+export SECRET=whsec_<the new secret>
+"""), "Wait 10 s, run the first command of step 11 again, export the new id as "
+      "<font name='Mono'>ID3</font> and copy the <b>new</b> x-ofd-signature from webhook.site (the newest POST; "
+      "its x-ofd-delivery is <font name='Mono'>$ID3</font>):", ("code", """
+curl -s localhost:3002/api/v1/searches/$ID3 -H "Authorization: Bearer $KEY" \\
+  | sed 's/,"webhook":{[^}]*}//' > body3.json
+python verify.py "$OLD_SECRET" "<new signature>" body3.json
+python verify.py "$SECRET"     "<new signature>" body3.json
+"""), OK + "first <font name='Mono'>BAD signature</font> (the old secret no longer signs), then "
+           "<font name='Mono'>signature OK</font>.")
 
     s += step("Step 14 (optional) — Receiver on your PC: failures and retries (free)",
               "This step uses a receiver script that checks every webhook it receives.")
@@ -467,17 +537,23 @@ HTTPServer(("0.0.0.0", 9000), H).serve_forever()
 
     s += step("Step 15 — Dashboard per client (free)",
               "Wait about 30 s, because the counts are saved every 30 s. Then:", [
-                  "<b>Admin panel → Dashboard → API clients table:</b> step12 agent shows searches ≥ 5, live 1, "
-                  "cached ≥ 4, plus an estimated cost and today's date.",
+                  "<b>Admin panel → Dashboard → API clients table:</b> step12 agent shows live 1 and the cached "
+                  "searches, plus an estimated cost and today's date. <b>Searches</b> counts only searches that ran "
+                  "(live or cached); requests refused before a job starts (steps 6, 9, 12) are not counted.",
                   "Or with a command:",
               ], ("code", """
 curl -s "localhost:3002/admin/v1/usage?days=1" -H "Authorization: Bearer $ADMIN_TOKEN" \\
   | grep -o '"clients":\\[[^]]*\\]'
-"""), OK + "a row with \"name\":\"step12 agent\", \"live\":1, \"cost_usd_estimate\":….")
+"""), OK + "a row with \"name\":\"step12 agent\", \"live\":1, \"cost_usd_estimate\":….",
+              "<font name='Mono'>cost_usd_estimate</font> is 0 until the cost settings are set (admin panel → "
+              "Settings): <font name='Mono'>APIFY_ALIEXPRESS_RUN_COST_USD</font> 0.02, "
+              "<font name='Mono'>APIFY_TEMU_RUN_COST_USD</font> 0.10, <font name='Mono'>APIFY_SHEIN_RUN_COST_USD</font> "
+              "0.033, <font name='Mono'>SERPAPI_SEARCH_COST_USD</font> (0 on the free plan). They count from then on.")
 
     s += step("Step 16 — Audit log and logs never contain the secret (free)", ("code", """
 curl -s "localhost:3002/admin/v1/audit?action=clients.webhook_secret" \\
   -H "Authorization: Bearer $ADMIN_TOKEN"
+cd <repo>/Owis_Find_Deal_Engine/server         # docker compose works only here
 docker compose logs server | grep -c "whsec_"      # must be 0
 docker compose logs server | grep -c "ofd_live_"   # must be 0
 """), OK + "the audit entries show only <font name='Mono'>\"prefix\":\"whsec_xxxxxxxx\"</font> (and \"replaced\" "

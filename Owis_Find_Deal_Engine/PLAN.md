@@ -512,6 +512,8 @@ first, keys made in the panel (partners later).
     Per-client counters: `usage_daily` kind `client` (client, country,
     outcome), dashboard table *API clients* with an estimated cost (live
     searches × average cost of a live search).
+    *Tested by the owner 2026-10-24* on the Docker stack (guide steps
+    0–13, 15, 16 passed; [docs/step12_guide.pdf](docs/step12_guide.pdf)).
 13. **AI agents:** an **MCP server** endpoint (`/mcp`, Streamable HTTP)
     with tools `search_products` and `list_countries`, authenticated with
     the same API keys; **OpenAPI 3.1** spec + docs page for developers.

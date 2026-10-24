@@ -1,10 +1,14 @@
 # Project status and handoff
 
-Last updated: 2026-10-23 · Project branch: `claude/cloud-vs-local-7xi988`
-(steps 7–11 merged; step 12 on `claude/nice-hopper-uo01wj`, to merge into
-the project branch; nothing is merged into `main` yet).
+Last updated: 2026-10-24 · Project branch: `claude/cloud-vs-local-7xi988`
+(steps 7–12 merged: step 12 via PR #9, fixes PR #10, guide PR #11;
+nothing is merged into `main` yet).
 
 Read first:
+- [docs/step12_guide.pdf](docs/step12_guide.pdf) — **step 12**: what the
+  asynchronous search, signed webhooks and per-client usage do, and the
+  test steps 0–17 with the Git Bash commands (updated after the owner's
+  test, 24 Oct 2026).
 - [docs/service_guide.pdf](docs/service_guide.pdf) — **complete guide of the
   service as it is now** (16 Oct 2026, after step 11): architecture, Docker,
   request flow, cache, API clients, cost measurement, code map, how to run /
@@ -66,12 +70,51 @@ server README section "Asynchronous search and webhooks", PLAN.md step 12.
   at once; another user `404`; client without secret `400`; secret made →
   webhook delivered and its signature checked; wrong country `403`;
   dashboard row with the client's name after 30 s; secret and key never in
-  the log or audit log). Admin web app: typecheck + build; **not clicked
-  through in a browser this time** (please check the two new parts).
-  No new Go or npm dependencies. Not run here: `govulncheck` (CI runs it).
+  the log or audit log). Admin web app: typecheck + build, then checked in
+  Chromium on 2026-10-24 (see the fix below). No new Go or npm
+  dependencies. Not run here: `govulncheck` (CI runs it).
+- **Owner test on the Docker stack (2026-10-24, Windows, Git Bash),
+  guide steps 0–13, 15, 16: all passed. ✅** New client `step12 agent`
+  (#4, 20 per day, `jor`). Live async search `usb c hub` / `jor` → `202`
+  at once, `running` → `done` after 30 s (AliExpress, Temu, SHEIN 5 each),
+  quota 20 → 19 once; same search again → `done` in the `202`, cached,
+  free; user token → `202`, `X-Plan: free`; bad title / other country /
+  unknown field / no token refused at once; another caller and a made-up
+  id → `404`; job still there after `docker compose restart server`;
+  webhook refused without a secret (`webhook_not_configured`), secret
+  made → webhook delivered to webhook.site on the first attempt
+  (`http_status 200`), signature checked with `verify.py` (`signature
+  OK`; one changed character → `BAD signature`); http / internal webhook
+  URLs and a webhook with a user token refused; a new secret → the old
+  one gives `BAD signature`, the new one `OK`; dashboard row *step12
+  agent* (1 live, 3 cached); audit entry shows only the secret's prefix;
+  `whsec_` and `ofd_live_` never in the server log.
+- **Found and fixed during the test:** the box with a new key (or webhook
+  secret) could appear out of view when the page was scrolled down, so it
+  looked as if no key was made → it now scrolls into view and selects the
+  key (PR #10). Guide corrections from the test (Git Bash tips, Firebase
+  test user, country check order, rebuilding the signed body with `GET` +
+  `sed` because the terminal cuts long pasted lines, …): PR #11.
+- **Not tested yet (optional):** guide step 14 (receiver on your PC:
+  failed delivery, retries; needs `WEBHOOK_ALLOW_PRIVATE=true`) and step
+  17 (daily limit refused before a job starts; one live search).
+- **Open points seen during the test (not step 12):**
+  - Amazon answered `no_results` for `usb c hub` / `jor` (the admin test
+    search too, 49 ms: SerpApi's own saved answer). Next check, in the
+    `server` folder (uses 1 SerpApi search):
+    `SK=$(grep '^SERPAPI_KEY=' .env | cut -d= -f2- | tr -d '\r"'); curl -s "https://serpapi.com/search.json?engine=amazon&k=usb+c+hub&amazon_domain=amazon.com&no_cache=true&api_key=$SK" | head -c 600`
+    — an `"error"` (allowance used up, bad key), no `organic_results`, or
+    products our relevance filter dropped. The SerpApi dashboard shows the
+    searches left this month.
+  - `cost_usd_estimate` is 0: set `APIFY_ALIEXPRESS_RUN_COST_USD` 0.02,
+    `APIFY_TEMU_RUN_COST_USD` 0.10, `APIFY_SHEIN_RUN_COST_USD` 0.033 in
+    Settings so the dashboard estimates costs.
+  - Extra clients from the test (#3 "step12 agent" and others): revoke
+    what you do not need.
 
-**Owner, to try step 12** (free: use a search that is already cached,
-e.g. `usb c hub` / `jor`, or one live search):
+**Owner, to try step 12** (done 2026-10-24, see above; the full steps are
+in [docs/step12_guide.pdf](docs/step12_guide.pdf). Short version, free with
+a cached search, e.g. `usb c hub` / `jor`, or one live search):
 
 1. `docker compose up -d --build` (nothing to add to `.env`).
 2. Async with your key from step 11 (Git Bash; PowerShell: `curl.exe`):
