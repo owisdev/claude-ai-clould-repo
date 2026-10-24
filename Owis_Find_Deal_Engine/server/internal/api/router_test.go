@@ -16,6 +16,7 @@ import (
 
 	"owis_find_deal_engine/internal/auth"
 	"owis_find_deal_engine/internal/auth/authtest"
+	"owis_find_deal_engine/internal/jobs"
 	"owis_find_deal_engine/internal/markets"
 	"owis_find_deal_engine/internal/metering"
 	"owis_find_deal_engine/internal/ratelimit"
@@ -55,6 +56,7 @@ type testEnv struct {
 	handler  http.Handler
 	provider *authtest.Provider
 	store    *usage.MemoryStore
+	jobs     *jobs.Runner
 }
 
 type envOpts struct {
@@ -63,6 +65,7 @@ type envOpts struct {
 	plans    string
 	quota    metering.Quota
 	keys     KeyAuthenticator
+	webhooks Webhooks
 }
 
 func newEnv(t *testing.T, o envOpts) *testEnv {
@@ -101,8 +104,14 @@ func newEnv(t *testing.T, o envOpts) *testEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
+	runner := jobs.NewRunner(jobs.NewMemoryStore(), log)
+	t.Cleanup(func() { runner.Close(context.Background()) })
 	return &testEnv{
+		jobs: runner,
 		handler: NewRouter(Deps{
+			Jobs:        runner,
+			JobTimeout:  5 * time.Second,
+			Webhooks:    o.webhooks,
 			Catalog:     cat,
 			Searcher:    metering.New(o.searcher, o.quota, log),
 			Verifier:    verifier,

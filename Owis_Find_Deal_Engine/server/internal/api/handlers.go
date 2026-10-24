@@ -3,12 +3,14 @@ package api
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
 
 	"owis_find_deal_engine/internal/apikeys"
 	"owis_find_deal_engine/internal/auth"
+	"owis_find_deal_engine/internal/jobs"
 	"owis_find_deal_engine/internal/markets"
 	"owis_find_deal_engine/internal/metering"
 	"owis_find_deal_engine/internal/search"
@@ -21,8 +23,12 @@ type MeteredSearcher interface {
 }
 
 type handlers struct {
-	catalog  *markets.Catalog
-	searcher MeteredSearcher
+	catalog    *markets.Catalog
+	searcher   MeteredSearcher
+	jobs       *jobs.Runner
+	jobTimeout time.Duration
+	webhooks   Webhooks
+	log        *slog.Logger
 }
 
 func (h *handlers) health(w http.ResponseWriter, _ *http.Request) {
@@ -59,29 +65,49 @@ func (h *handlers) search(w http.ResponseWriter, r *http.Request) {
 		setQuotaHeaders(w, out.Quota)
 	}
 
-	var quotaErr *metering.QuotaError
-	switch {
-	case err == nil:
+	if err == nil {
 		w.Header().Set("X-Cache", cacheStatus(out.Result))
 		writeJSON(w, http.StatusOK, out.Result)
+		return
+	}
+	if errors.Is(err, context.Canceled) {
+		return // client went away; nothing to write
+	}
+	e := searchError(err)
+	if e.retryAfter > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(e.retryAfter))
+	}
+	writeError(w, e.status, e.code, e.msg)
+}
+
+// apiError is an error answer of the public API.
+type apiError struct {
+	status     int
+	code, msg  string
+	retryAfter int // seconds; 0 = no Retry-After
+}
+
+// searchError maps a failed metered search to its answer (the same for
+// POST /api/v1/search and the jobs of POST /api/v1/searches).
+func searchError(err error) apiError {
+	var quotaErr *metering.QuotaError
+	switch {
 	case errors.As(err, &quotaErr) && quotaErr.UpgradeRequired():
-		writeError(w, http.StatusPaymentRequired, CodePaymentRequired,
-			"free daily searches used up; upgrade your plan to continue")
+		return apiError{status: http.StatusPaymentRequired, code: CodePaymentRequired,
+			msg: "free daily searches used up; upgrade your plan to continue"}
 	case errors.As(err, &quotaErr):
-		w.Header().Set("Retry-After", strconv.Itoa(max(int(time.Until(quotaErr.Decision.Reset).Seconds()), 1)))
-		writeError(w, http.StatusTooManyRequests, CodeQuotaExceeded, "daily search limit reached")
+		return apiError{status: http.StatusTooManyRequests, code: CodeQuotaExceeded, msg: "daily search limit reached",
+			retryAfter: max(int(time.Until(quotaErr.Decision.Reset).Seconds()), 1)}
 	case errors.Is(err, metering.ErrQuotaUnavailable):
-		writeError(w, http.StatusServiceUnavailable, CodeUnavailable, "service temporarily unavailable, please retry")
+		return apiError{status: http.StatusServiceUnavailable, code: CodeUnavailable, msg: "service temporarily unavailable, please retry"}
 	case errors.Is(err, search.ErrInvalidTitle):
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error())
+		return apiError{status: http.StatusBadRequest, code: CodeInvalidRequest, msg: err.Error()}
 	case errors.Is(err, search.ErrUnknownCountry):
-		writeError(w, http.StatusBadRequest, CodeUnsupportedCountry, "country must be one of the codes from GET /api/v1/countries")
+		return apiError{status: http.StatusBadRequest, code: CodeUnsupportedCountry, msg: "country must be one of the codes from GET /api/v1/countries"}
 	case errors.Is(err, search.ErrAllFailed):
-		writeError(w, http.StatusBadGateway, CodeUpstream, "search is temporarily unavailable, please retry")
-	case errors.Is(err, context.Canceled):
-		// Client went away; nothing to write.
+		return apiError{status: http.StatusBadGateway, code: CodeUpstream, msg: "search is temporarily unavailable, please retry"}
 	default:
-		writeError(w, http.StatusInternalServerError, CodeInternal, "internal server error")
+		return apiError{status: http.StatusInternalServerError, code: CodeInternal, msg: "internal server error"}
 	}
 }
 

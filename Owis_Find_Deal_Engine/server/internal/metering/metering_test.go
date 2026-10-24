@@ -196,8 +196,8 @@ func TestWithoutCacheNeverFree(t *testing.T) {
 
 type outcomeRecorder struct{ got []string }
 
-func (r *outcomeRecorder) Search(country, title, outcome string) {
-	r.got = append(r.got, country+"|"+title+"|"+outcome)
+func (r *outcomeRecorder) Search(client, country, title, outcome string) {
+	r.got = append(r.got, client+"|"+country+"|"+title+"|"+outcome)
 }
 
 func TestSearchesAreReported(t *testing.T) {
@@ -220,8 +220,12 @@ func TestSearchesAreReported(t *testing.T) {
 	_, _ = m2.Search(ctx, alice, req) // error
 	f2.err = search.ErrInvalidTitle
 	_, _ = m2.Search(ctx, alice, req) // invalid: not reported
+	f2.err = nil
+	f2.live = live
+	_, _ = m2.Search(ctx, auth.User{ID: "client:4", Plan: usage.APIPlan, DailyLimit: 9}, req) // API client
 
-	want := []string{"jor|s pen|live", "jor|s pen|quota", "jor|s pen|stale", "jor|s pen|hit", "jor|s pen|error"}
+	want := []string{"|jor|s pen|live", "|jor|s pen|quota", "|jor|s pen|stale", "|jor|s pen|hit", "|jor|s pen|error",
+		"client:4|jor|s pen|live"}
 	if len(rec.got) != len(want) {
 		t.Fatalf("reported %v, want %v", rec.got, want)
 	}
@@ -229,5 +233,31 @@ func TestSearchesAreReported(t *testing.T) {
 		if rec.got[i] != want[i] {
 			t.Errorf("report %d = %s, want %s", i, rec.got[i], want[i])
 		}
+	}
+}
+
+func TestCheck(t *testing.T) {
+	ctx := context.Background()
+	f := &fakeSearcher{live: live}
+	m, q := newService(t, f, "free:1")
+
+	out, isCached, err := m.Check(ctx, alice, req)
+	if err != nil || isCached || !out.QuotaKnown || out.Quota.Remaining() != 1 {
+		t.Fatalf("fresh: %+v %v %v", out, isCached, err)
+	}
+	if remaining(t, q, alice) != 1 || f.liveCalls.Load() != 0 {
+		t.Fatal("Check used the allowance or searched")
+	}
+	_, _ = m.Search(ctx, alice, req) // uses the last unit
+	var qe *QuotaError
+	if _, _, err := m.Check(ctx, alice, req); !errors.As(err, &qe) || !qe.UpgradeRequired() {
+		t.Fatalf("used up: %v", err)
+	}
+	f.cached = cached
+	if _, isCached, err := m.Check(ctx, alice, req); err != nil || !isCached {
+		t.Fatalf("cached answers stay free: %v %v", isCached, err)
+	}
+	if _, _, err := m.Check(ctx, auth.User{}, req); err == nil {
+		t.Fatal("unauthenticated check accepted")
 	}
 }

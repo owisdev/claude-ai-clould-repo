@@ -24,19 +24,9 @@ type Cipher struct {
 // NewCipher takes a 32-byte key as 64 hex characters or base64
 // (`openssl rand -hex 32` or `openssl rand -base64 32`).
 func NewCipher(key string) (*Cipher, error) {
-	key = strings.TrimSpace(key)
-	raw, err := hex.DecodeString(key)
-	if err != nil || len(raw) != 32 {
-		raw = nil
-		for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding} {
-			if b, err := enc.DecodeString(key); err == nil && len(b) == 32 {
-				raw = b
-				break
-			}
-		}
-	}
-	if raw == nil {
-		return nil, errors.New("SETTINGS_ENCRYPTION_KEY must be 32 bytes as 64 hex characters or base64 (openssl rand -hex 32)")
+	raw, err := ParseKey(key)
+	if err != nil {
+		return nil, err
 	}
 	block, err := aes.NewCipher(raw)
 	if err != nil {
@@ -47,6 +37,22 @@ func NewCipher(key string) (*Cipher, error) {
 		return nil, err
 	}
 	return &Cipher{aead: aead}, nil
+}
+
+// ParseKey decodes SETTINGS_ENCRYPTION_KEY: 32 bytes as 64 hex characters
+// or base64.
+func ParseKey(key string) ([]byte, error) {
+	key = strings.TrimSpace(key)
+	raw, err := hex.DecodeString(key)
+	if err == nil && len(raw) == 32 {
+		return raw, nil
+	}
+	for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding} {
+		if b, err := enc.DecodeString(key); err == nil && len(b) == 32 {
+			return b, nil
+		}
+	}
+	return nil, errors.New("SETTINGS_ENCRYPTION_KEY must be 32 bytes as 64 hex characters or base64 (openssl rand -hex 32)")
 }
 
 // Encrypt seals the value of setting key.

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { api, get, post, type ApiClient, type ApiKeyInfo, type Country, type NewKeyAnswer } from "../api";
+import { api, get, post, type ApiClient, type ApiKeyInfo, type Country, type NewKeyAnswer, type WebhookSecretAnswer } from "../api";
 import { Badge, Card, ErrorBox, errorText, fmtInt, fmtTime, useLoad } from "../ui";
 
 // Form state; numbers stay strings while typing.
@@ -64,6 +64,7 @@ export function Clients() {
   const [editing, setEditing] = useState<ApiClient | null>(null);
   const [form, setForm] = useState<Form>(emptyForm);
   const [newKey, setNewKey] = useState<NewKeyAnswer | null>(null);
+  const [newSecret, setNewSecret] = useState<WebhookSecretAnswer | null>(null);
   const [showRevoked, setShowRevoked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -115,6 +116,14 @@ export function Clients() {
     void act(async () => setNewKey(await post<NewKeyAnswer>(`/admin/v1/clients/${c.id}/rotate`, { grace: `${n}h` })));
   }
 
+  function webhookSecret(c: ApiClient) {
+    const replace = c.webhook_secret_prefix
+      ? ` The current secret (${c.webhook_secret_prefix}…) stops signing at once: update the receiver right after.`
+      : "";
+    if (!confirm(`New webhook signing secret for "${c.name}"?${replace}`)) return;
+    void act(async () => setNewSecret(await post<WebhookSecretAnswer>(`/admin/v1/clients/${c.id}/webhook-secret`)));
+  }
+
   function revoke(c: ApiClient) {
     if (!confirm(`Revoke "${c.name}"? All its keys stop working at once. This cannot be undone.`)) return;
     void act(() => post(`/admin/v1/clients/${c.id}/revoke`));
@@ -143,6 +152,7 @@ export function Clients() {
       </p>
 
       {newKey && <NewKeyBox answer={newKey} onClose={() => setNewKey(null)} />}
+      {newSecret && <NewSecretBox answer={newSecret} onClose={() => setNewSecret(null)} />}
 
       <Card
         title={editing ? `Change "${editing.name}"` : "New client"}
@@ -245,6 +255,7 @@ export function Clients() {
                   <th>Access</th>
                   <th className="num">Limits</th>
                   <th>Keys</th>
+                  <th>Webhook</th>
                   <th>Last used</th>
                   <th />
                 </tr>
@@ -289,6 +300,16 @@ export function Clients() {
                           </div>
                         ))}
                     </td>
+                    <td className="small">
+                      {c.webhook_secret_prefix ? (
+                        <>
+                          <code>{c.webhook_secret_prefix}…</code>
+                          <div className="muted">since {fmtTime(c.webhook_secret_at ?? undefined)}</div>
+                        </>
+                      ) : (
+                        <span className="muted">no secret</span>
+                      )}
+                    </td>
                     <td className="small">{c.last_used_at ? fmtTime(c.last_used_at) : <span className="muted">never</span>}</td>
                     <td className="num" style={{ whiteSpace: "nowrap" }}>
                       {c.status !== "revoked" && (
@@ -298,6 +319,9 @@ export function Clients() {
                           </button>{" "}
                           <button onClick={() => rotate(c)} disabled={busy}>
                             New key
+                          </button>{" "}
+                          <button onClick={() => webhookSecret(c)} disabled={busy} title="Signing secret for the webhooks of asynchronous searches">
+                            Webhook secret
                           </button>{" "}
                           <button className="danger" onClick={() => revoke(c)} disabled={busy}>
                             Revoke
@@ -342,6 +366,43 @@ function NewKeyBox({ answer, onClose }: { answer: NewKeyAnswer; onClose: () => v
       {copied === "no" && <p className="notice">The browser did not allow copying: the key is selected, press Ctrl+C (⌘C).</p>}
       {answer.old_keys_until && <p className="notice">The previous key keeps working until {fmtTime(answer.old_keys_until)}.</p>}
       <p className="muted small">Try it:</p>
+      <pre className="mono small" style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", margin: 0 }}>
+        {curl}
+      </pre>
+    </Card>
+  );
+}
+
+function NewSecretBox({ answer, onClose }: { answer: WebhookSecretAnswer; onClose: () => void }) {
+  const [copied, setCopied] = useState<"" | "yes" | "no">("");
+  const country = answer.client.countries[0] ?? "jor";
+  const curl = `curl -X POST ${location.origin}/api/v1/searches -H "Authorization: Bearer ofd_live_…" -H "Content-Type: application/json" -d '{"title":"usb c hub","country":"${country}","webhook_url":"https://your-server.example/hooks/search"}'`;
+  return (
+    <Card title={`Webhook secret for "${answer.client.name}" — copy it now, it is shown only once`}>
+      <div className="row">
+        <input id="new-secret" readOnly value={answer.webhook_secret} className="mono" style={{ flex: 1, minWidth: 280 }} onFocus={(e) => e.target.select()} aria-label="Webhook secret" />
+        <button
+          className="primary"
+          onClick={() =>
+            (navigator.clipboard?.writeText(answer.webhook_secret) ?? Promise.reject()).then(
+              () => setCopied("yes"),
+              () => {
+                setCopied("no");
+                (document.getElementById("new-secret") as HTMLInputElement | null)?.select();
+              },
+            )
+          }
+        >
+          {copied === "yes" ? "Copied" : "Copy"}
+        </button>
+        <button onClick={onClose}>I have saved it</button>
+      </div>
+      {copied === "no" && <p className="notice">The browser did not allow copying: the secret is selected, press Ctrl+C (⌘C).</p>}
+      <p className="muted small">
+        Each webhook carries <code>X-OFD-Signature: t=…,v1=…</code>: HMAC-SHA256 of <code>&lt;t&gt;.&lt;raw body&gt;</code> with this
+        secret. The receiver recomputes it, compares in constant time and refuses timestamps older than 5 minutes. Start a search
+        with a webhook:
+      </p>
       <pre className="mono small" style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", margin: 0 }}>
         {curl}
       </pre>

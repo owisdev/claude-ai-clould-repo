@@ -23,6 +23,7 @@ import (
 	"owis_find_deal_engine/internal/auth"
 	"owis_find_deal_engine/internal/cache"
 	"owis_find_deal_engine/internal/config"
+	"owis_find_deal_engine/internal/jobs"
 	"owis_find_deal_engine/internal/markets"
 	"owis_find_deal_engine/internal/metering"
 	"owis_find_deal_engine/internal/providers/apify"
@@ -34,6 +35,7 @@ import (
 	"owis_find_deal_engine/internal/stats"
 	"owis_find_deal_engine/internal/store"
 	"owis_find_deal_engine/internal/usage"
+	"owis_find_deal_engine/internal/webhook"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -173,13 +175,34 @@ func run() error {
 		}
 		sh.usageStore = usage.NewRedisStore(rdb)
 		sh.cacheStore = cache.NewRedisStore(rdb)
-		log.Info("usage counters and search cache in redis")
+		sh.jobs = jobs.NewRunner(jobs.NewRedisStore(rdb), log)
+		log.Info("usage counters, search cache and search jobs in redis")
 	} else {
 		mem := usage.NewMemoryStore()
 		go mem.Cleanup(ctx, 10*time.Minute)
 		sh.usageStore = mem
 		sh.cacheStore = cache.NewMemoryStore(cfg.CacheMaxEntries)
-		log.Warn("REDIS_URL not set: usage counters and search cache in memory, reset on restart")
+		jobStore := jobs.NewMemoryStore()
+		go jobStore.Cleanup(ctx, time.Minute)
+		sh.jobs = jobs.NewRunner(jobStore, log)
+		log.Warn("REDIS_URL not set: usage counters, search cache and search jobs in memory, reset on restart")
+	}
+
+	// Webhooks of the asynchronous search (API clients, so a database):
+	// each client's signing secret is derived from SETTINGS_ENCRYPTION_KEY.
+	if db != nil {
+		key, err := settings.ParseKey(os.Getenv("SETTINGS_ENCRYPTION_KEY"))
+		if err != nil {
+			return err
+		}
+		if sh.webhooks.Secrets, err = webhook.NewSecrets(key); err != nil {
+			return err
+		}
+		sh.webhooks.Sender = webhook.NewSender(webhook.Options{AllowPrivate: cfg.WebhookAllowPrivate})
+		sh.webhooks.AllowPrivate = cfg.WebhookAllowPrivate
+		if cfg.WebhookAllowPrivate {
+			log.Warn("webhooks may call plain http and internal addresses (WEBHOOK_ALLOW_PRIVATE=true); development only")
+		}
 	}
 
 	first, err := buildApp(ctx, cfg, settingsVer, sh)
@@ -225,6 +248,7 @@ func run() error {
 			Settings:       mgr,
 			Clients:        db,
 			ClientsChanged: sh.keys.Forget,
+			WebhookSecrets: sh.webhooks.Secrets,
 			Runtime:        func() api.AdminRuntime { return adminRuntime{a: current.Load(), poll: cfg.SettingsPollInterval} },
 			Verifier:       verifier,
 			Require2FA:     cfg.AdminRequire2FA,
@@ -298,6 +322,9 @@ func run() error {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
 	}
+	// Running search jobs get the rest of the shutdown time; then they are
+	// stopped and saved as failed (the caller can start them again).
+	sh.jobs.Close(shutdownCtx)
 	current.Load().close(shutdownCtx)
 	retiring.Wait()
 	log.Info("server stopped cleanly")
@@ -361,6 +388,8 @@ type shared struct {
 	verifier   *auth.Verifier
 	usageStore usage.Store
 	cacheStore cache.Store
+	jobs       *jobs.Runner // asynchronous searches
+	webhooks   api.Webhooks // webhooks of the jobs; no Sender without a database
 }
 
 // app is everything built from the runtime settings: providers, search
@@ -407,6 +436,9 @@ func buildApp(ctx context.Context, cfg config.Config, settingsVersion int64, sh 
 	ctx, stop := context.WithCancel(ctx)
 	limiter := ratelimit.New(cfg.RateLimitRPS, cfg.RateLimitBurst, 10*time.Minute)
 	go limiter.Cleanup(ctx, time.Minute)
+	// Reading search jobs: generous, so polling does not eat the search limit.
+	pollLimiter := ratelimit.New(5, 20, 10*time.Minute)
+	go pollLimiter.Cleanup(ctx, time.Minute)
 
 	a := &app{cfg: cfg, settingsVersion: settingsVersion, searcher: searcher, stop: stop, log: log}
 	cacheOrLive := metering.WithoutCache(searcher)
@@ -436,6 +468,11 @@ func buildApp(ctx context.Context, cfg config.Config, settingsVersion int64, sh 
 		CORSOrigins:  cfg.CORSOrigins,
 		WriteTimeout: cfg.SearchTimeout + 10*time.Second,
 		Log:          log,
+		Jobs:         sh.jobs,
+		// The cache waits up to the search timeout + 5 s for a live search.
+		JobTimeout:  cfg.SearchTimeout + 15*time.Second,
+		Webhooks:    sh.webhooks,
+		PollLimiter: pollLimiter,
 	})
 	return a, nil
 }

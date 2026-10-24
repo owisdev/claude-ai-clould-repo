@@ -35,6 +35,11 @@ type Config struct {
 	// development (owner, 2026-10-11, test accounts with made-up emails);
 	// turn it on (true) before production.
 	AdminRequireVerifiedEmail bool
+	// WebhookAllowPrivate lets the webhooks of the asynchronous search use
+	// plain http and internal addresses (localhost, 10.x, 192.168.x,
+	// host.docker.internal). Development only: off, a client cannot make
+	// the server call Redis, Postgres or a cloud metadata service.
+	WebhookAllowPrivate bool
 	// Admin web app sign-in (bootstrap): the Firebase project's Web API key
 	// (public) and auth domain (default <project>.firebaseapp.com).
 	AdminFirebaseAPIKey     string
@@ -151,6 +156,7 @@ func LoadFrom(lookup Lookup) (Config, error) {
 		AdminRequire2FA:           parse(getenv, &errs, "ADMIN_REQUIRE_2FA", false, strconv.ParseBool),
 		AdminSessionMaxAge:        parse(getenv, &errs, "ADMIN_SESSION_MAX_AGE", 12*time.Hour, time.ParseDuration),
 		AdminRequireVerifiedEmail: parse(getenv, &errs, "ADMIN_REQUIRE_VERIFIED_EMAIL", false, strconv.ParseBool),
+		WebhookAllowPrivate:       parse(getenv, &errs, "WEBHOOK_ALLOW_PRIVATE", false, strconv.ParseBool),
 		AdminFirebaseAPIKey:       strings.TrimSpace(getenv("ADMIN_FIREBASE_API_KEY")),
 		AdminFirebaseAuthDomain:   strings.TrimSpace(getenv("ADMIN_FIREBASE_AUTH_DOMAIN")),
 		AuthJWKSURL:               getenv("AUTH_JWKS_URL"),

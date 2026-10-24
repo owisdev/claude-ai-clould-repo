@@ -23,6 +23,9 @@ const (
 	KindSearch   = "search"
 	KindSource   = "source"
 	KindFallback = "fallback"
+	// KindClient counts the searches of one API client: k1 = client:<id>,
+	// k2 = country, k3 = outcome (base for billing partners later).
+	KindClient = "client"
 )
 
 // FlushInterval is how often each server adds its counts to the database.
@@ -88,8 +91,9 @@ func (r *Recorder) add(k usageKey, count int64, cost float64, ms int64) {
 	v.totalMS += ms
 }
 
-// Search counts one user search (metering.SearchRecorder) and its query.
-func (r *Recorder) Search(country, title, outcome string) {
+// Search counts one search (metering.SearchRecorder) and its query; an
+// API client's search (client = client:<id>) is also counted per client.
+func (r *Recorder) Search(client, country, title, outcome string) {
 	country = strings.ToLower(strings.TrimSpace(country))
 	query := strings.ToLower(search.NormalizeTitle(title))
 	if utf8.RuneCountInString(query) > search.MaxTitleLen {
@@ -99,6 +103,9 @@ func (r *Recorder) Search(country, title, outcome string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.add(usageKey{day: day, kind: KindSearch, k1: country, k2: outcome}, 1, 0, 0)
+	if client != "" {
+		r.add(usageKey{day: day, kind: KindClient, k1: client, k2: country, k3: outcome}, 1, 0, 0)
+	}
 	if query == "" || (outcome != "hit" && outcome != "stale" && outcome != "live") {
 		return
 	}

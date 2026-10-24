@@ -14,6 +14,7 @@ import (
 
 	"owis_find_deal_engine/internal/apikeys"
 	"owis_find_deal_engine/internal/store"
+	"owis_find_deal_engine/internal/webhook"
 )
 
 // ClientStore keeps the API clients and their keys (store.DB).
@@ -25,6 +26,7 @@ type ClientStore interface {
 	RotateKey(ctx context.Context, clientID int64, key store.NewKey, graceUntil time.Time, by string) (store.APIKey, error)
 	RevokeClient(ctx context.Context, id int64, by string) error
 	RevokeKey(ctx context.Context, clientID, keyID int64) error
+	SetWebhookSalt(ctx context.Context, id int64, salt []byte, prefix, by string) (store.Client, error)
 }
 
 // Grace period of the old keys when a client's key is rotated.
@@ -55,6 +57,9 @@ type clientView struct {
 	RevokedBy  string     `json:"revoked_by,omitempty"`
 	LastUsedAt *time.Time `json:"last_used_at"`
 	Keys       []keyView  `json:"keys"`
+	// Webhook signing secret: only its first characters ("" = none yet).
+	WebhookSecretPrefix string     `json:"webhook_secret_prefix"`
+	WebhookSecretAt     *time.Time `json:"webhook_secret_at"`
 }
 
 type keyView struct {
@@ -72,7 +77,8 @@ func viewClient(c store.Client, now time.Time) clientView {
 	v := clientView{ID: c.ID, Name: c.Name, Owner: c.Owner, Status: "active", Scopes: c.Scopes, DailyQuota: c.DailyQuota,
 		RateRPS: c.RateRPS, RateBurst: c.RateBurst, Countries: c.Countries, IPAllow: c.IPAllow, ExpiresAt: utc(c.ExpiresAt),
 		CreatedAt: c.CreatedAt.UTC(), CreatedBy: c.CreatedBy, UpdatedAt: c.UpdatedAt.UTC(), UpdatedBy: c.UpdatedBy,
-		RevokedAt: utc(c.RevokedAt), RevokedBy: c.RevokedBy, Keys: []keyView{}}
+		RevokedAt: utc(c.RevokedAt), RevokedBy: c.RevokedBy, Keys: []keyView{},
+		WebhookSecretPrefix: c.WebhookSecretPrefix, WebhookSecretAt: utc(c.WebhookSecretAt)}
 	switch {
 	case c.RevokedAt != nil:
 		v.Status = "revoked"
@@ -292,6 +298,33 @@ func (h *adminHandlers) rotateClientKey(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusCreated, map[string]any{"client": viewClient(c, time.Now()), "key": key,
 		"old_keys_until": until.UTC(),
 		"note":           "Copy the key now: it is shown only once. The old keys stop working at old_keys_until."})
+}
+
+// webhookSecret gives the client a new webhook signing secret (in this
+// answer only); a previous secret stops at once.
+func (h *adminHandlers) webhookSecret(w http.ResponseWriter, r *http.Request) {
+	if h.d.WebhookSecrets == nil {
+		writeError(w, http.StatusServiceUnavailable, CodeUnavailable, "webhooks are not enabled on this server")
+		return
+	}
+	c, ok := h.loadClient(w, r)
+	if !ok {
+		return
+	}
+	salt := webhook.NewSalt()
+	secret := h.d.WebhookSecrets.Secret(salt)
+	prefix := webhook.ShownPrefix(secret)
+	replaced := c.WebhookSecretPrefix
+	c, err := h.d.Clients.SetWebhookSalt(r.Context(), c.ID, salt, prefix, actor(r))
+	if h.clientError(w, r, err) {
+		return
+	}
+	h.clientsChanged()
+	h.audit(r, store.AuditEntry{Action: "clients.webhook_secret", Target: clientTarget(c),
+		Detail: jsonDetail(map[string]any{"prefix": prefix, "replaced": replaced})})
+	writeJSON(w, http.StatusCreated, map[string]any{"client": viewClient(c, time.Now()), "webhook_secret": secret,
+		"note": "Copy the secret now: it is shown only once. Check the " + webhook.HeaderSignature + " header of each webhook with it" +
+			" (HMAC-SHA256 of \"<t>.<body>\"). A previous secret no longer signs."})
 }
 
 // revokeClient stops a client and all its keys at once (final).

@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"owis_find_deal_engine/internal/apikeys"
+	"owis_find_deal_engine/internal/auth"
+	"owis_find_deal_engine/internal/jobs"
 	"owis_find_deal_engine/internal/markets"
 	"owis_find_deal_engine/internal/ratelimit"
 )
@@ -24,6 +26,15 @@ type Deps struct {
 	// request because it follows the search timeout, a runtime setting.
 	WriteTimeout time.Duration
 	Log          *slog.Logger
+
+	// Jobs runs asynchronous searches (POST /api/v1/searches); nil = off.
+	Jobs *jobs.Runner
+	// JobTimeout bounds one asynchronous search.
+	JobTimeout time.Duration
+	// Webhooks sign and send the jobs' webhooks.
+	Webhooks Webhooks
+	// PollLimiter limits reading jobs per caller (nil = 5/s, burst 20).
+	PollLimiter *ratelimit.Limiter
 }
 
 // NewRouter returns the service's HTTP handler.
@@ -33,8 +44,14 @@ type Deps struct {
 //	POST /api/v1/search     user JWT or API key (scope "search") -> burst
 //	                        rate limit -> metered search (cached answers
 //	                        free, live searches counted per user / client)
+//	POST /api/v1/searches   the same search, asynchronous: 202 + job id,
+//	                        optional signed webhook (API keys only)
+//	GET  /api/v1/searches/{id}  the job: running, done (result) or failed
 func NewRouter(d Deps) http.Handler {
-	h := &handlers{catalog: d.Catalog, searcher: d.Searcher}
+	h := &handlers{catalog: d.Catalog, searcher: d.Searcher, jobs: d.Jobs, jobTimeout: d.JobTimeout, webhooks: d.Webhooks, log: d.Log}
+	if d.PollLimiter == nil {
+		d.PollLimiter = ratelimit.New(5, 20, 10*time.Minute)
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", h.health)
@@ -43,6 +60,16 @@ func NewRouter(d Deps) http.Handler {
 		requireCaller(d.Verifier, d.Keys, apikeys.ScopeSearch, d.Log),
 		rateLimit(d.Limiter),
 	))
+	if d.Jobs != nil {
+		mux.Handle("POST /api/v1/searches", chain(http.HandlerFunc(h.startSearch),
+			requireCaller(d.Verifier, d.Keys, apikeys.ScopeSearch, d.Log),
+			rateLimit(d.Limiter),
+		))
+		mux.Handle("GET /api/v1/searches/{id}", chain(http.HandlerFunc(h.getSearch),
+			requireCaller(d.Verifier, d.Keys, apikeys.ScopeSearch, d.Log),
+			limitBy(d.PollLimiter, func(r *http.Request) string { u, _ := auth.UserFrom(r.Context()); return "poll:" + u.ID }),
+		))
+	}
 
 	return chain(mux,
 		writeDeadline(d.WriteTimeout),

@@ -229,6 +229,11 @@ included):
   `partial` or `circuit_open`);
 - `top_queries`: most searched queries (normalized, per country, no user
   ids; kept 90 days);
+- `clients`: per API client (step 12) — its searches split the same way
+  (sync and asynchronous), `cost_usd_estimate` (its live searches × the
+  average cost of a live search in these days) and the last day with a
+  search; the base for billing partners later. Counted in `usage_daily`
+  (kind `client`), so kept 400 days;
 - `budget`: this month's estimated cost against `BUDGET_MONTHLY_USD`,
   `status` `none` / `ok` / `warning` (≥ `BUDGET_ALERT_PERCENT`) / `exceeded`.
   Each level reached raises one alert per month: an `ERROR` log line and
@@ -282,7 +287,7 @@ the same model.
 - Command line (for emergencies, e.g. a leaked key while no admin can sign
   in): `clients list`, `clients revoke ID`.
 - Audit log actions: `clients.create`, `clients.change`, `clients.rotate`,
-  `clients.revoke`, `clients.key_revoke`.
+  `clients.revoke`, `clients.key_revoke`, `clients.webhook_secret`.
 
 ```sh
 curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
@@ -296,6 +301,84 @@ curl -H "Authorization: Bearer ofd_live_…" -H 'Content-Type: application/json'
 Behind a reverse proxy (step 14) the allowed-address check sees the
 proxy's address until the proxy's client header is trusted; leave the
 list empty until then.
+
+## Asynchronous search and webhooks
+
+A live search takes 25–50 s (cached answers are instant). Servers and
+agents that do not want to hold a connection that long start it as a
+**job** and fetch the result later, or get it by a **signed webhook**.
+App users (login token) can use it too, without webhooks.
+
+```sh
+curl -i -X POST localhost:3002/api/v1/searches -H "Authorization: Bearer $KEY_OR_JWT" \
+     -H 'Content-Type: application/json' -d '{"title":"usb c hub","country":"jor"}'
+# 202 Accepted, Location: /api/v1/searches/srch_…, Retry-After: 5
+# {"id":"srch_…","status":"running","request":{…},"created_at":"…","finished_at":null}
+
+curl localhost:3002/api/v1/searches/srch_… -H "Authorization: Bearer $KEY_OR_JWT"
+# {"id":"srch_…","status":"done","result":{…same as POST /search…},"quota":{"plan":"api","limit":100,"remaining":99,"reset":"…"},…}
+```
+
+- Same body, rules and metering as `POST /api/v1/search` (scope `search`,
+  allowed countries, burst limit; cached answers free, a live search
+  counts once). Bad input, a used-up allowance (`402` / `429`) and missing
+  permissions are answered **at once**, before a job starts.
+- Status `running` → `done` (with `result`) or `failed` (with `error`:
+  `http_status`, `code`, `message` — the answer `POST /search` would have
+  given, e.g. `502 upstream_error`; `504 timeout`; `503 job_lost` when the
+  server running it stopped). A cached answer is already `done` in the
+  `202`.
+- Poll every few seconds (`Retry-After: 5` while running); reading jobs
+  has its own limit (5/s, burst 20) and does not use up the search limit.
+- Only the caller who started a job can read it (anyone else: `404`).
+  Finished jobs are kept **1 hour**. Jobs live in Redis (any instance
+  answers) or, without Redis, in memory.
+- At most **10 running jobs per caller** (`429 too_many_jobs`) and 200 per
+  server. At shutdown running jobs get the shutdown time, then end as
+  `failed` (`503`) — start them again.
+
+**Webhooks (API keys only).** Add `"webhook_url": "https://…"`; when the
+job ends the service POSTs the job (the same JSON as `GET`) to it:
+
+```
+POST /your/hook
+Content-Type: application/json
+X-OFD-Event: search.completed            (or search.failed)
+X-OFD-Delivery: srch_…                   (the job id; the same on every retry)
+X-OFD-Signature: t=1792757906,v1=905c03bb…
+```
+
+- **Signing secret per client**, made in the admin panel (*API clients →
+  Webhook secret*, or `POST /admin/v1/clients/{id}/webhook-secret`),
+  shown **once** (`whsec_…`). It is not stored: it is derived from
+  `SETTINGS_ENCRYPTION_KEY` and a random salt in the database, so a copy
+  of the database alone cannot sign. A new secret replaces the old one at
+  once. Without a secret, `webhook_url` is refused
+  (`400 webhook_not_configured`).
+- `v1` = hex HMAC-SHA256 of `"<t>.<raw body>"` with the secret. Check it
+  in constant time and refuse a `t` older than 5 minutes. Use
+  `X-OFD-Delivery` to ignore repeats.
+- Any `2xx` answer within 10 s counts as delivered; network errors, `408`,
+  `429` and `5xx` are retried after 5 s and 30 s (3 attempts). Redirects
+  are not followed. The job shows how it went: `webhook.status`
+  (`pending` / `delivered` / `failed`), `attempts`, `http_status`, `error`.
+- Only `https` to public addresses; internal ones (localhost, 10.x,
+  192.168.x, 169.254.x, …) are refused, also when a host name resolves to
+  them. For a test receiver on your PC set `WEBHOOK_ALLOW_PRIVATE=true`
+  (development only: it also allows plain `http`).
+
+Check a webhook (Python):
+
+```python
+import hashlib, hmac, time
+
+def verify(secret: str, header: str, body: bytes, tolerance=300) -> bool:
+    parts = dict(p.split("=", 1) for p in header.split(","))
+    if abs(time.time() - int(parts["t"])) > tolerance:
+        return False
+    want = hmac.new(secret.encode(), parts["t"].encode() + b"." + body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(want, parts["v1"])
+```
 
 ## Search providers
 
@@ -393,6 +476,10 @@ curl -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
      localhost:3002/api/v1/search
 
 # pull to refresh: add "refresh": true
+
+# asynchronous (slow live searches), see "Asynchronous search and webhooks"
+curl -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
+     -d '{"title":"samsung s pen","country":"jor"}' localhost:3002/api/v1/searches
 ```
 
 Search response:
@@ -438,6 +525,9 @@ Errors always look like `{"error": {"code": "...", "message": "..."}}`:
 | 402 | `payment_required` | free daily searches used up — show upgrade |
 | 429 | `rate_limited` | too fast; see `Retry-After` |
 | 429 | `quota_exceeded` | paid plan's (or API client's) daily searches used up |
+| 429 | `too_many_jobs` | 10 asynchronous searches already running for this caller |
+| 400 | `webhook_not_configured` | `webhook_url` given, but the API client has no webhook secret |
+| 404 | `not_found` | no such search job (or someone else's, or older than 1 h) |
 | 502 | `upstream_error` | all marketplaces failed |
 | 503 | `service_unavailable` | usage store unreachable (fails closed) |
 | 500 | `internal_error` | bug |
@@ -478,11 +568,15 @@ internal/adminui            serves the admin web app (embedded build) at /admin/
 web/admin                   admin web app source (React + TypeScript, Vite)
 internal/api                router, handlers, middleware; admin.go +
                             admin_handlers.go: the admin API;
-                            admin_clients.go: API clients
+                            admin_clients.go: API clients;
+                            searches.go: asynchronous search
 internal/search/probe.go    admin test search, provider health
 internal/search/instrument.go  reports source calls and fallbacks
 internal/stats              usage counters (flushed to Postgres), dashboard
-                            report, monthly budget alert
+                            report (also per API client), monthly budget alert
+internal/jobs               asynchronous searches: jobs (Redis / memory), runner
+internal/webhook            webhook secrets, HMAC signing, sender (public
+                            addresses only, retries)
 deploy/searxng              SearXNG settings
 Dockerfile                  distroless, non-root image (~19 MB)
 docker-compose.yml          full stack on private networks

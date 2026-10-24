@@ -16,6 +16,7 @@ import (
 	"owis_find_deal_engine/internal/ratelimit"
 	"owis_find_deal_engine/internal/search"
 	"owis_find_deal_engine/internal/store"
+	"owis_find_deal_engine/internal/webhook"
 )
 
 // Error codes of the admin API (besides the public ones).
@@ -87,6 +88,8 @@ type AdminDeps struct {
 	// ClientsChanged is called after an API client changed (drops the
 	// key cache of this server); nil = nothing to do.
 	ClientsChanged func()
+	// WebhookSecrets derives the clients' webhook secrets; nil = off.
+	WebhookSecrets *webhook.Secrets
 	Runtime        func() AdminRuntime
 	Verifier       TokenVerifier
 	// Require2FA refuses admins who signed in without a second factor.
@@ -138,6 +141,7 @@ const adminWriteTimeout = 330 * time.Second
 //	POST   /admin/v1/clients/{id}/rotate     new key; old keys valid for {"grace": "24h"}
 //	POST   /admin/v1/clients/{id}/revoke     client and all keys stop at once
 //	POST   /admin/v1/clients/{id}/keys/{key}/revoke   one key stops at once
+//	POST   /admin/v1/clients/{id}/webhook-secret      new webhook signing secret, shown once
 func NewAdminRouter(d AdminDeps) http.Handler {
 	if d.IPLimiter == nil {
 		d.IPLimiter = ratelimit.New(10, 40, 10*time.Minute)
@@ -178,6 +182,7 @@ func NewAdminRouter(d AdminDeps) http.Handler {
 	mux.HandleFunc("POST /admin/v1/clients/{id}/rotate", h.rotateClientKey)
 	mux.HandleFunc("POST /admin/v1/clients/{id}/revoke", h.revokeClient)
 	mux.HandleFunc("POST /admin/v1/clients/{id}/keys/{key}/revoke", h.revokeClientKey)
+	mux.HandleFunc("POST /admin/v1/clients/{id}/webhook-secret", h.webhookSecret)
 	mux.HandleFunc("/admin/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, CodeNotFound, "no such admin endpoint")
 	})
