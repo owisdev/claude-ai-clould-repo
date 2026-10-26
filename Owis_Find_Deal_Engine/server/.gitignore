@@ -2,8 +2,11 @@
 /owis_find_deal_engine
 *.exe
 
-# Local secrets
+# Local secrets, and any copy of them (.env.bk, .env.backup, …);
+# the template .env.example is kept
 .env
+.env.*
+!.env.example
 
 # Admin web app: dependencies and build output (built in Docker / CI;
 # embedded from internal/adminui/dist)
