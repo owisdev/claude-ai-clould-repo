@@ -1,10 +1,15 @@
 # Project status and handoff
 
-Last updated: 2026-10-24 · Project branch: `claude/cloud-vs-local-7xi988`
+Last updated: 2026-10-26 · Project branch: `claude/cloud-vs-local-7xi988`
 (steps 7–12 merged: step 12 via PR #9, fixes PR #10, guide PR #11;
-nothing is merged into `main` yet).
+step 13 on branch `claude/optimistic-brown-tqclh3`, to be merged by pull
+request; nothing is merged into `main` yet).
 
 Read first:
+- [docs/step13_guide.pdf](docs/step13_guide.pdf) — **step 13**: what the
+  MCP endpoint for AI agents, the OpenAPI description and the developer
+  docs page do, and the test steps 0–10 with the Git Bash commands
+  (26 Oct 2026).
 - [docs/step12_guide.pdf](docs/step12_guide.pdf) — **step 12**: what the
   asynchronous search, signed webhooks and per-client usage do, and the
   test steps 0–17 with the Git Bash commands (updated after the owner's
@@ -24,11 +29,84 @@ Read first:
 - [docs/architecture.pdf](docs/architecture.pdf) — the original full
   architecture (predates the dedicated sources per shop).
 
-Regenerate the PDFs: `python3 docs/build_service_guide_pdf.py`,
+Regenerate the PDFs: `python3 docs/build_step13_guide_pdf.py`,
+`python3 docs/build_service_guide_pdf.py`,
 `python3 docs/build_flow_and_plan_pdfs.py` and
 `python3 docs/build_architecture_pdf.py` (needs `reportlab`).
 
 ## Where we are
+
+**Phase 3, step 13 — AI agents (MCP) and developer docs: done
+(2026-10-26). Phase 3 is complete.** Details: server README section "AI
+agents (MCP) and developer docs", PLAN.md step 13. Not yet tested by the
+owner: [docs/step13_guide.pdf](docs/step13_guide.pdf).
+
+- **MCP endpoint `POST /mcp`** (Model Context Protocol, Streamable HTTP)
+  for AI agents, with the **same API keys** (login tokens refused: `401`).
+  Tools: `list_countries` (scope `countries`; the countries the key may
+  use, currency, marketplaces; free) and `search_products` (scope
+  `search`; `title`, `country`, optional `refresh`; same result as
+  `/api/v1/search` + `quota`; cached free, live counted once — the same
+  daily counter and burst limit as the REST API). Every MCP message is
+  also limited to 5/s (burst 20) per client.
+- Problems come back to the agent as readable tool errors (`isError`,
+  `{"error":{"code","message"}}`): `quota_exceeded` with
+  `retry_after_seconds`, `country_not_allowed`, `forbidden` (scope
+  missing), `invalid_request`, `upstream_error`, …
+- **Both MCP generations**: 2026-07-28 (the newest spec, stateless:
+  `server/discover`, version in each request's `_meta` and in the
+  `MCP-Protocol-Version` / `Mcp-Method` / `Mcp-Name` headers, which must
+  match → `400` `-32020`) and 2025-03-26 / 2025-06-18 / 2025-11-25
+  (`initialize` handshake). One JSON answer per request: no sessions, no
+  SSE, no batches; `GET /mcp` → `405`. A browser `Origin` must be the
+  server or in `CORS_ORIGINS` (DNS rebinding protection).
+- **OpenAPI 3.1** at `GET /api/v1/openapi.json` (every public endpoint,
+  the webhook as `webhooks` + `callbacks`, `/mcp`) and a **developer docs
+  page** at `GET /docs/` (quick start, keys, search, async, webhooks with
+  signature checks in Python and Node.js, MCP client setup for Claude
+  Code / JSON-configured clients / `mcp-remote`, limits, errors). Both
+  public, embedded in the binary (`internal/devdocs`), strict CSP, no
+  scripts. The OpenAPI file is hand-written: update it with every API
+  change (a test checks routes, error codes and `$ref`s).
+- No new settings, no database change, no new Go or npm dependencies.
+- **Fixed on the way (step 12):** a data race found by the race detector
+  in `TestAsyncSearchWebhook`: after a webhook delivery the job runner
+  wrote the delivery result into the webhook record that the `202`
+  answer could still be writing out (cached search + webhook). It now
+  updates its own copy (`internal/jobs/jobs.go`).
+- Tested: unit tests (both protocol eras, header checks, version
+  negotiation, tool errors, scopes, countries filter, rate limit and
+  shared daily counter, transport errors, Origin, docs and spec), the
+  race detector, `@redocly/cli lint` (valid; only style warnings), and an
+  end-to-end run of the binary with Postgres 16, Redis and a fake search
+  source, driven by the **official MCP SDKs**: TypeScript 1.32.2 and
+  1.12.0 (2025-11-25 / 2025-03-26 handshake) and Go 1.8.0 (2026-07-28 via
+  `server/discover`, and forced 2025-06-18) — tools listed, both tools
+  called, cached second call free, errors as tool results, key never in
+  the log. Every command in the step 13 guide was run against it. Docs
+  page checked in Chromium (light, dark, phone width). Not run here:
+  `govulncheck` (CI runs it).
+- **Open question for the owner:** a live search through
+  `search_products` waits 20–60 s. If an agent cannot wait that long, a
+  third tool pair (`start_search` + `get_search`, on top of the
+  asynchronous search of step 12) can be added.
+
+**Owner, to try step 13** (full steps in
+[docs/step13_guide.pdf](docs/step13_guide.pdf); free with the cached
+`usb c hub` / `jor` search):
+
+1. `docker compose up -d --build` (nothing to add to `.env`).
+2. Open <http://localhost:3002/docs/>; `curl localhost:3002/api/v1/openapi.json`.
+3. Admin panel → **API clients** → new client with scopes `search` and
+   `countries`, country `jor` → copy the key → `export KEY=ofd_live_…`.
+4. MCP by hand (Git Bash):
+   `curl -s localhost:3002/mcp -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -H "MCP-Protocol-Version: 2025-06-18" -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_products","arguments":{"title":"usb c hub","country":"jor"}}}'`
+   → `"structuredContent":{…"results":[…]…,"quota":{…}}`.
+5. A real agent: `claude mcp add --transport http owis-find-deal http://localhost:3002/mcp --header "Authorization: Bearer $KEY"`,
+   then ask Claude Code to find a usb c hub in Jordan.
+6. Report: which agents you will connect; is waiting up to 60 s per new
+   search fine for them; is the docs page clear; should `/docs/` and the
+   OpenAPI file stay public in production.
 
 **Phase 3, step 12 — integration endpoints: done (2026-10-23).** Details:
 server README section "Asynchronous search and webhooks", PLAN.md step 12.
@@ -357,10 +435,10 @@ that admin entry).
 4. Optional: set the cost estimates, e.g.
    `{"changes":{"APIFY_TEMU_RUN_COST_USD":"0.10","APIFY_SHEIN_RUN_COST_USD":"0.033","APIFY_ALIEXPRESS_RUN_COST_USD":"0.02"}}`.
 
-**Next: phase 3, step 13 — AI agents:** an MCP server endpoint (`/mcp`,
-Streamable HTTP) with tools `search_products` and `list_countries`, the
-same API keys (scope `countries` for the list); OpenAPI 3.1 spec + docs
-page for developers (including the asynchronous search and webhooks).
+**Next: phase 4, step 14 — deployment** (after the owner has tested step
+13): turn on two-factor admin login and admin email verification,
+hosting choice (D6), domain (D7), HTTPS, hardening, secrets, Postgres
+backups, staging + production, CI/CD, monitoring (PLAN.md step 14).
 
 **Phase 2, step 7 — database + settings store: done (2026-10-11).**
 
@@ -627,7 +705,7 @@ instant); label scraper prices as approximate in the app.
    CI/CD, monitoring).
 4. **Phase 5 — users** (old phase 2).
 
-**Phase 2 (steps 7–10) is done (2026-10-11); phase 3, step 11 (API clients and keys) is done (2026-10-15), step 12 (integration endpoints) is done (2026-10-23); next session starts step 13 (AI agents: MCP + OpenAPI).**
+**Phase 2 (steps 7–10) is done (2026-10-11); phase 3 is done: step 11 (API clients and keys) 2026-10-15, step 12 (integration endpoints) 2026-10-23, step 13 (AI agents: MCP + OpenAPI + docs) 2026-10-26. Next: the owner tests step 13, then phase 4, step 14 (deployment; decisions D6 hosting and D7 domain needed).**
 **Owner decisions D1–D4 (answered 2026-10-11):**
 
 - **D1 admin web app:** small React app built into the server image,
@@ -656,7 +734,10 @@ Open the repository and say:
 
 > Continue the Owis_Find_Deal_Engine project from
 > `Owis_Find_Deal_Engine/STATUS.md` on branch `claude/cloud-vs-local-7xi988`.
-> Start phase 3, step 13. (Decisions D1–D5 are recorded in STATUS.md.)
+> Start phase 4, step 14. (Decisions D1–D5 are recorded in STATUS.md.)
+
+(Merge the step 13 pull request into `claude/cloud-vs-local-7xi988`
+first, and test step 13 with [docs/step13_guide.pdf](docs/step13_guide.pdf).)
 
 ## Run it on your PC
 

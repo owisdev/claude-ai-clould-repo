@@ -355,7 +355,11 @@ func (r *Runner) run(values context.Context, j Job, timeout time.Duration, work 
 	wctx, wcancel := context.WithTimeout(mergeValues(r.ctx, values), 2*time.Minute)
 	defer wcancel()
 	res := notify(wctx, j)
-	j.Webhook.Status, j.Webhook.Attempts, j.Webhook.HTTPStatus, j.Webhook.Error = res.Status, res.Attempts, res.HTTPStatus, res.Error
+	// A copy: the job sent on finished (and maybe being written as the
+	// HTTP answer right now) shares the old Webhook.
+	hook := *j.Webhook
+	hook.Status, hook.Attempts, hook.HTTPStatus, hook.Error = res.Status, res.Attempts, res.HTTPStatus, res.Error
+	j.Webhook = &hook
 	r.save(wctx, j)
 	if res.Status != webhook.StatusDelivered {
 		r.log.WarnContext(wctx, "webhook not delivered", "job", j.ID, "attempts", res.Attempts, "http_status", res.HTTPStatus, "err", res.Error)

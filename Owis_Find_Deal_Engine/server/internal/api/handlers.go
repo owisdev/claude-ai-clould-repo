@@ -13,6 +13,7 @@ import (
 	"owis_find_deal_engine/internal/jobs"
 	"owis_find_deal_engine/internal/markets"
 	"owis_find_deal_engine/internal/metering"
+	"owis_find_deal_engine/internal/ratelimit"
 	"owis_find_deal_engine/internal/search"
 	"owis_find_deal_engine/internal/usage"
 )
@@ -28,6 +29,8 @@ type handlers struct {
 	jobs       *jobs.Runner
 	jobTimeout time.Duration
 	webhooks   Webhooks
+	limiter    *ratelimit.Limiter
+	mcpServer  *mcpServer
 	log        *slog.Logger
 }
 

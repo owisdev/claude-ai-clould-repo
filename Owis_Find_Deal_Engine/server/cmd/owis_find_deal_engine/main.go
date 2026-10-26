@@ -473,6 +473,7 @@ func buildApp(ctx context.Context, cfg config.Config, settingsVersion int64, sh 
 		JobTimeout:  cfg.SearchTimeout + 15*time.Second,
 		Webhooks:    sh.webhooks,
 		PollLimiter: pollLimiter,
+		Version:     version,
 	})
 	return a, nil
 }
