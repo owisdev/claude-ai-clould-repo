@@ -297,7 +297,8 @@ All paths under `/api/v1`. Errors: `{"error": {"code", "message"}}`.
 | GET  | `/health` | – | ✅ |
 | GET  | `/countries` | – | ✅ |
 | POST | `/searches`, GET `/searches/{id}` (async, optional signed webhook) | API key or JWT | ✅ step 12 |
-| POST | `/mcp` (MCP tools for AI agents) | API key | step 13 |
+| POST | `/mcp` (MCP tools `search_products`, `list_countries` for AI agents; outside `/api/v1`) | API key | ✅ step 13 |
+| GET  | `/openapi.json` (OpenAPI 3.1); `/docs/` (developer docs, outside `/api/v1`) | – | ✅ step 13 |
 | * | `/admin/v1/...` (settings, clients, usage, audit) | JWT + admin role | steps 8–11 |
 | POST | `/search` `{"title","country"}` | JWT or API key + quota | ✅ |
 | GET/PATCH | `/me` | JWT | step 15 |
@@ -514,9 +515,20 @@ first, keys made in the panel (partners later).
     searches × average cost of a live search).
     *Tested by the owner 2026-10-24* on the Docker stack (guide steps
     0–13, 15, 16 passed; [docs/step12_guide.pdf](docs/step12_guide.pdf)).
-13. **AI agents:** an **MCP server** endpoint (`/mcp`, Streamable HTTP)
-    with tools `search_products` and `list_countries`, authenticated with
-    the same API keys; **OpenAPI 3.1** spec + docs page for developers.
+13. ✅ **AI agents** (2026-10-26): **MCP endpoint** `POST /mcp`
+    (Streamable HTTP, stateless: one JSON answer per request, no sessions
+    or SSE) with tools `list_countries` (scope `countries`, free) and
+    `search_products` (scope `search`, metered like `/api/v1/search`, the
+    same daily counter and burst limit), API keys only. Protocol versions
+    2026-07-28 (`server/discover`, `_meta` + `MCP-Protocol-Version` /
+    `Mcp-Method` / `Mcp-Name` checked against the body) and 2025-03-26 …
+    2025-11-25 (`initialize`). Tool failures as `isError` results the
+    agent can read; `Origin` checked (DNS rebinding). **OpenAPI 3.1**
+    (`/api/v1/openapi.json`, with the webhook) and a **docs page**
+    (`/docs/`), both embedded (package `internal/devdocs`). Tested with
+    the official TypeScript (1.32.2, 1.12.0) and Go (1.8.0) MCP SDKs
+    against the binary with Postgres and Redis.
+    Owner test: [docs/step13_guide.pdf](docs/step13_guide.pdf).
 
 **Phase 4 — deployment** (all parts: server, admin web app, SearXNG,
 Redis, Postgres)

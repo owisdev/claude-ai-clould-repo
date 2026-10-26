@@ -380,6 +380,71 @@ def verify(secret: str, header: str, body: bytes, tolerance=300) -> bool:
     return hmac.compare_digest(want, parts["v1"])
 ```
 
+## AI agents (MCP) and developer docs
+
+**MCP endpoint `POST /mcp`** — AI agents call the search as tools over the
+[Model Context Protocol](https://modelcontextprotocol.io) (Streamable
+HTTP), with the same **API keys** as the REST API (login tokens are
+refused: `401`).
+
+| Tool | Scope | Arguments | Result |
+|---|---|---|---|
+| `list_countries` | `countries` | none | countries this key may use, currency, marketplaces (free) |
+| `search_products` | `search` | `title`, `country`, optional `refresh` | same as `POST /api/v1/search` + `quota`; metered the same way |
+
+- A key needs only the scope of the tools it calls; another tool answers
+  with a tool error (`isError: true`, `{"error":{"code":"forbidden",…}}`).
+  All tool failures come back that way (allowance used up with
+  `retry_after_seconds`, country not allowed, bad arguments, every
+  marketplace failed), so the agent can read them. Unknown tool or method:
+  a JSON-RPC error.
+- Results: `structuredContent` (with an `outputSchema`) and the same JSON
+  in a text block. `search_products` waits for the search (20–60 s for a
+  live one): clients need a timeout of ~90 s.
+- **Protocol versions**: `2026-07-28` (stateless: `server/discover`,
+  `_meta` protocol version per request, `MCP-Protocol-Version` /
+  `Mcp-Method` / `Mcp-Name` headers checked against the body → `400`
+  `-32020` on a mismatch) and `2025-03-26` / `2025-06-18` / `2025-11-25`
+  (`initialize` handshake). Unknown version → `400` `-32022` with
+  `data.supported`. Tested with the official TypeScript SDK (1.32.2 and
+  1.12.0) and Go SDK (1.8.0, both eras).
+- Stateless: one JSON answer per request, no sessions (`Mcp-Session-Id`
+  never issued), no SSE, no batches; `GET` / `DELETE /mcp` → `405`.
+- Limits: every MCP message 5/s (burst 20) per client; `search_products`
+  also takes from the client's search burst limit (shared with the REST
+  API), and the daily allowance is the same counter.
+- A browser `Origin` must be the server itself or in `CORS_ORIGINS`
+  (otherwise `403`, DNS rebinding protection).
+
+Connect Claude Code:
+
+```sh
+claude mcp add --transport http owis-find-deal http://localhost:3002/mcp \
+  --header "Authorization: Bearer ofd_live_…"
+```
+
+Raw call (2026-07-28):
+
+```sh
+curl localhost:3002/mcp -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+  -H 'MCP-Protocol-Version: 2026-07-28' -H 'Mcp-Method: tools/call' -H 'Mcp-Name: list_countries' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_countries",
+       "_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
+```
+
+**Developer docs** (public, embedded in the binary,
+[`internal/devdocs`](internal/devdocs)):
+
+- <http://localhost:3002/docs/> — the page for developers: quick start,
+  keys, search, asynchronous search, webhooks (with signature checks in
+  Python and Node.js), MCP client setup, limits, errors. No scripts;
+  strict Content-Security-Policy.
+- <http://localhost:3002/api/v1/openapi.json> — OpenAPI 3.1 description
+  of the public API, including the webhook (`webhooks`, `callbacks`) and
+  `/mcp`. Hand-written: **update it with every API change** (a test
+  checks that every route and error code is in it and every `$ref`
+  resolves; `npx @redocly/cli lint` passes).
+
 ## Search providers
 
 `SEARCH_PROVIDERS` lists providers in order; the first that succeeds
@@ -477,6 +542,10 @@ curl -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
 
 # pull to refresh: add "refresh": true
 
+# AI agents: POST /mcp, see "AI agents (MCP) and developer docs"
+curl localhost:3002/api/v1/openapi.json           # OpenAPI 3.1, public
+# developer docs: http://localhost:3002/docs/
+
 # asynchronous (slow live searches), see "Asynchronous search and webhooks"
 curl -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
      -d '{"title":"samsung s pen","country":"jor"}' localhost:3002/api/v1/searches
@@ -569,7 +638,10 @@ web/admin                   admin web app source (React + TypeScript, Vite)
 internal/api                router, handlers, middleware; admin.go +
                             admin_handlers.go: the admin API;
                             admin_clients.go: API clients;
-                            searches.go: asynchronous search
+                            searches.go: asynchronous search;
+                            mcp.go: MCP endpoint for AI agents
+internal/devdocs            developer docs page + OpenAPI 3.1 (/docs/,
+                            /api/v1/openapi.json)
 internal/search/probe.go    admin test search, provider health
 internal/search/instrument.go  reports source calls and fallbacks
 internal/stats              usage counters (flushed to Postgres), dashboard

@@ -38,7 +38,9 @@ func clientFrom(ctx context.Context) (store.Client, bool) {
 
 // requireCaller accepts "Authorization: Bearer <token>" with either an app
 // user's login token (JWT) or an API client's key (ofd_live_...) that has
-// scope. keys nil = API keys are not accepted (no database).
+// scope. keys nil = API keys are not accepted (no database); v nil = only
+// API keys (the MCP endpoint); scope "" = any scope (checked later, per
+// tool).
 func requireCaller(v TokenVerifier, keys KeyAuthenticator, scope string, log *slog.Logger) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -73,12 +75,15 @@ func requireCaller(v TokenVerifier, keys KeyAuthenticator, scope string, log *sl
 					writeError(w, http.StatusForbidden, CodeForbidden, "this API key may not be used from this address")
 					return
 				}
-				if !apikeys.HasScope(c, scope) {
+				if scope != "" && !apikeys.HasScope(c, scope) {
 					writeError(w, http.StatusForbidden, CodeForbidden, fmt.Sprintf("this API key lacks the scope %q", scope))
 					return
 				}
 				user = auth.User{ID: caller.UserID(), Plan: usage.APIPlan, DailyLimit: c.DailyQuota}
 				ctx = context.WithValue(ctx, clientKey{}, c)
+			} else if v == nil {
+				unauthorized(w, "this endpoint takes an API key (Authorization: Bearer ofd_live_...), not a login token")
+				return
 			} else {
 				var err error
 				user, err = v.Verify(ctx, token)
@@ -114,15 +119,8 @@ func unauthorized(w http.ResponseWriter, msg string) {
 func rateLimit(l *ratelimit.Limiter) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			user, _ := auth.UserFrom(r.Context())
-			ok, wait := false, time.Duration(0)
-			if c, isClient := clientFrom(r.Context()); isClient {
-				ok, wait = l.AllowRate(user.ID, c.RateRPS, c.RateBurst)
-			} else {
-				ok, wait = l.Allow("user:" + user.ID)
-			}
-			if !ok {
-				w.Header().Set("Retry-After", strconv.Itoa(max(int(math.Ceil(wait.Seconds())), 1)))
+			if ok, wait := allowCaller(l, r.Context()); !ok {
+				w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds(wait)))
 				writeError(w, http.StatusTooManyRequests, CodeRateLimited, "too many requests, slow down")
 				return
 			}
@@ -130,3 +128,16 @@ func rateLimit(l *ratelimit.Limiter) Middleware {
 		})
 	}
 }
+
+// allowCaller takes one request from the caller's burst limit: an API
+// client's own limit, or the per-user limit. Must run after requireCaller.
+func allowCaller(l *ratelimit.Limiter, ctx context.Context) (bool, time.Duration) {
+	user, _ := auth.UserFrom(ctx)
+	if c, isClient := clientFrom(ctx); isClient {
+		return l.AllowRate(user.ID, c.RateRPS, c.RateBurst)
+	}
+	return l.Allow("user:" + user.ID)
+}
+
+// retryAfterSeconds rounds a wait up to whole seconds (at least 1).
+func retryAfterSeconds(wait time.Duration) int { return max(int(math.Ceil(wait.Seconds())), 1) }

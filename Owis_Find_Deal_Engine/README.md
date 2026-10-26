@@ -14,5 +14,11 @@ limited to the shops that deliver to the user's country (USA, KSA, Jordan).
 - [`docs/step12_guide.pdf`](docs/step12_guide.pdf) — step 12 (asynchronous
   search, signed webhooks, usage per API client): what it does and how to
   test it step by step (Git Bash commands)
+- [`docs/step13_guide.pdf`](docs/step13_guide.pdf) — step 13 (MCP endpoint
+  for AI agents, OpenAPI 3.1, developer docs page): what it does and how to
+  test it step by step (Git Bash commands)
+- Developer docs of the running server: `/docs/` and
+  `/api/v1/openapi.json` (source in
+  [`server/internal/devdocs`](server/internal/devdocs))
 - [`STATUS.md`](STATUS.md) — where the project stands, how to run it
   locally, how to resume

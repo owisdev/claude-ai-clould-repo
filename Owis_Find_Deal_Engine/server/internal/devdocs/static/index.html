@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Owis Find Deal API</title>
+<meta name="description" content="Developer documentation of the Owis Find Deal API: product search across marketplaces, asynchronous search, signed webhooks and the MCP endpoint for AI agents.">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<div class="wrap">
+<nav aria-label="Contents">
+  <div class="brand">Owis Find Deal API</div>
+  <a href="#start">Quick start</a>
+  <a href="#auth">Authentication</a>
+  <a href="#search">Search</a>
+  <a href="#async">Asynchronous search</a>
+  <a href="#webhooks">Webhooks</a>
+  <a href="#mcp">AI agents (MCP)</a>
+  <a href="#limits">Limits and cost</a>
+  <a href="#errors">Errors</a>
+  <a href="#openapi">OpenAPI</a>
+</nav>
+<main>
+<h1>Owis Find Deal API</h1>
+<p class="lead">Search the online marketplaces of a country (Amazon, AliExpress, Temu, SHEIN, eBay, …) for a product and get the offers with price, currency and link. Use it from your own servers over HTTP, or let AI agents call it as tools over MCP.</p>
+
+<div class="note">The base URL in the examples is <code>http://localhost:3002</code> (the local Docker stack). Use your server's address instead. The machine-readable description is at <a href="/api/v1/openapi.json"><code>/api/v1/openapi.json</code></a>.</div>
+
+<h2 id="start">Quick start</h2>
+<ol>
+  <li>Ask the service owner for an <strong>API key</strong>. They make it in the admin panel (<em>API clients</em>) and choose its scopes, countries and daily allowance. The key looks like <code>ofd_live_…</code> (49 characters) and is shown once: keep it in your server's secret store, never in an app or web page.</li>
+  <li>List the countries:
+<pre><code>curl http://localhost:3002/api/v1/countries</code></pre></li>
+  <li>Search:
+<pre><code>curl -X POST http://localhost:3002/api/v1/search \
+  -H "Authorization: Bearer $OFD_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"usb c hub","country":"jor"}'</code></pre></li>
+</ol>
+<p>A new search takes 20–60 seconds. The same search again within 48 hours is answered at once from the cache, and is free.</p>
+
+<h2 id="auth">Authentication</h2>
+<p>Every call except <code>/api/v1/health</code>, <code>/api/v1/countries</code> and these docs needs <code>Authorization: Bearer &lt;token&gt;</code>:</p>
+<table>
+  <tr><th>Token</th><th>For</th><th>Notes</th></tr>
+  <tr><td>API key <code>ofd_live_…</code></td><td>Your servers and AI agents</td><td>Own daily allowance and per-second limit; may be limited to some countries, IP addresses and scopes; can expire, be rotated (old key keeps working for a grace period) or revoked.</td></tr>
+  <tr><td>Firebase ID token (JWT)</td><td>The mobile / web app</td><td>The user's plan decides the daily allowance. Not accepted by <code>/mcp</code>.</td></tr>
+</table>
+<p>Scopes of an API key: <code>search</code> (search endpoints and the MCP tool <code>search_products</code>) and <code>countries</code> (the MCP tool <code>list_countries</code>).</p>
+
+<h2 id="search">Search</h2>
+<p><span class="method">POST</span> <code>/api/v1/search</code> — waits for the answer.</p>
+<table>
+  <tr><th>Field</th><th>Type</th><th></th></tr>
+  <tr><td><code>title</code></td><td>string, 2–200 characters</td><td>What to search for. Short is best: brand + model.</td></tr>
+  <tr><td><code>country</code></td><td>string</td><td>A code from <code>/api/v1/countries</code>, e.g. <code>jor</code>.</td></tr>
+  <tr><td><code>refresh</code></td><td>boolean, optional</td><td><code>true</code> skips the cache (a live search: slower, counts against the allowance).</td></tr>
+</table>
+<p>Answer (shortened):</p>
+<pre><code>{
+  "query": "usb c hub",
+  "country": "jor",
+  "results": [
+    {"market": "amazon", "title": "Anker USB C Hub, 7-in-1", "link": "https://www.amazon.com/dp/…",
+     "price": 29.99, "currency": "USD", "position": 1, "provider": "serpapi"}
+  ],
+  "markets": {"amazon": "ok", "aliexpress": "ok", "temu": "ok", "shein": "no_results"},
+  "took_ms": 41250,
+  "fetched_at": "2026-10-26T09:12:03Z",
+  "cached": false,
+  "stale": false
+}</code></pre>
+<p>Headers: <code>X-Cache</code> (<code>HIT</code>, <code>STALE</code>, <code>MISS</code>), <code>X-Plan</code> (<code>api</code> for keys), <code>X-RateLimit-Limit</code>, <code>X-RateLimit-Remaining</code>, <code>X-RateLimit-Reset</code> (Unix seconds), <code>X-Request-ID</code>.</p>
+<p><code>markets</code> gives each marketplace's status: <code>ok</code>, <code>no_results</code> or <code>error</code> (that source failed; the others still answer). A product whose <code>link_type</code> is <code>search</code> links to the marketplace's own search because no product page was found.</p>
+
+<h2 id="async">Asynchronous search</h2>
+<p>For live searches without holding a connection open for a minute:</p>
+<pre><code>curl -i -X POST http://localhost:3002/api/v1/searches \
+  -H "Authorization: Bearer $OFD_KEY" -H "Content-Type: application/json" \
+  -d '{"title":"usb c hub","country":"jor"}'
+
+HTTP/1.1 202 Accepted
+Location: /api/v1/searches/srch_…
+Retry-After: 5
+
+{"id":"srch_…","status":"running","request":{…},"created_at":"…","finished_at":null}</code></pre>
+<p>Then poll every ~5 seconds until <code>status</code> is <code>done</code> (with <code>result</code>, the same object as the synchronous answer) or <code>failed</code> (with <code>error</code>: the status and code the synchronous search would have given):</p>
+<pre><code>curl http://localhost:3002/api/v1/searches/srch_… -H "Authorization: Bearer $OFD_KEY"</code></pre>
+<ul>
+  <li>A cached answer is already <code>done</code> in the <code>202</code>.</li>
+  <li>Bad input, a used-up allowance, a missing scope or a country the key may not use are refused at once (no job).</li>
+  <li>Only the caller can read its jobs (others get <code>404</code>). Finished jobs are kept 1 hour.</li>
+  <li>At most 10 jobs per caller run at once (<code>429 too_many_jobs</code>). Polling has its own limit (5 per second) and does not count as searches.</li>
+</ul>
+
+<h2 id="webhooks">Webhooks</h2>
+<p>Instead of polling, an API key can add <code>"webhook_url":"https://…"</code> to <code>POST /api/v1/searches</code>. When the search finishes, the job is POSTed there. The client needs a webhook secret first: the service owner makes it in the admin panel (<em>API clients → Webhook secret</em>, shown once, <code>whsec_…</code>). Without one the request is refused with <code>400 webhook_not_configured</code>.</p>
+<table>
+  <tr><th>Header</th><th></th></tr>
+  <tr><td><code>X-OFD-Signature</code></td><td><code>t=&lt;unix seconds&gt;,v1=&lt;hex HMAC-SHA256(secret, "&lt;t&gt;." + raw body)&gt;</code></td></tr>
+  <tr><td><code>X-OFD-Event</code></td><td><code>search.completed</code> or <code>search.failed</code></td></tr>
+  <tr><td><code>X-OFD-Delivery</code></td><td>The job id; the same on every attempt, so you can drop repeats.</td></tr>
+</table>
+<ul>
+  <li>Answer with any 2xx within 10 seconds. Otherwise it is retried: 3 attempts in all (at once, after 5 s, after 30 s). Redirects are not followed.</li>
+  <li>Only <code>https</code> URLs on public addresses are accepted.</li>
+  <li>The job (<code>GET /api/v1/searches/{id}</code>) shows how the delivery went in <code>webhook.status</code>: <code>pending</code>, <code>delivered</code> or <code>failed</code>.</li>
+</ul>
+<p><strong>Always check the signature</strong> on the raw body, before parsing it, and refuse old timestamps:</p>
+<pre><code># Python
+import hashlib, hmac, time
+
+def verify(secret: str, header: str, body: bytes, tolerance: int = 300) -&gt; bool:
+    parts = dict(p.split("=", 1) for p in header.split(","))
+    t, sig = parts.get("t", ""), parts.get("v1", "")
+    if not t.isdigit() or abs(time.time() - int(t)) &gt; tolerance:
+        return False
+    want = hmac.new(secret.encode(), t.encode() + b"." + body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(want, sig)</code></pre>
+<pre><code>// Node.js
+const crypto = require("node:crypto");
+
+function verify(secret, header, rawBody, tolerance = 300) {
+  const parts = Object.fromEntries(header.split(",").map((p) =&gt; p.split("=", 2)));
+  const t = Number(parts.t);
+  if (!Number.isInteger(t) || Math.abs(Date.now() / 1000 - t) &gt; tolerance) return false;
+  const want = crypto.createHmac("sha256", secret).update(`${parts.t}.`).update(rawBody).digest("hex");
+  const got = Buffer.from(parts.v1 || "", "utf8");
+  return got.length === want.length &amp;&amp; crypto.timingSafeEqual(got, Buffer.from(want, "utf8"));
+}</code></pre>
+<p>A new webhook secret replaces the old one at once.</p>
+
+<h2 id="mcp">AI agents (MCP)</h2>
+<p>AI agents can call the search as tools over the <a href="https://modelcontextprotocol.io">Model Context Protocol</a>. The endpoint is <code>POST /mcp</code> (Streamable HTTP) and takes the same API keys (login tokens are not accepted).</p>
+<table>
+  <tr><th>Tool</th><th>Scope</th><th>Arguments</th><th>Returns</th></tr>
+  <tr><td><code>list_countries</code></td><td><code>countries</code></td><td>none</td><td>The countries this key may search in, with currency and marketplaces. Free.</td></tr>
+  <tr><td><code>search_products</code></td><td><code>search</code></td><td><code>title</code>, <code>country</code>, optional <code>refresh</code></td><td>The same result as <code>POST /api/v1/search</code>, plus <code>quota</code> (the allowance left). Metered the same way.</td></tr>
+</table>
+<p>Results come as structured content (with an output schema) and as the same JSON in a text block. When a tool cannot run — allowance used up, country not allowed, scope missing, every marketplace failing — the result has <code>isError: true</code> and a text block <code>{"error":{"code":"…","message":"…"}}</code>, so the agent can read why and adjust.</p>
+
+<h3>Connect a client</h3>
+<p>Claude Code:</p>
+<pre><code>claude mcp add --transport http owis-find-deal http://localhost:3002/mcp \
+  --header "Authorization: Bearer ofd_live_…"</code></pre>
+<p>Clients that are configured with JSON (Cursor, VS Code, and others that support remote servers with headers):</p>
+<pre><code>{
+  "mcpServers": {
+    "owis-find-deal": {
+      "type": "http",
+      "url": "http://localhost:3002/mcp",
+      "headers": { "Authorization": "Bearer ofd_live_…" }
+    }
+  }
+}</code></pre>
+<p>Clients that only start local (stdio) servers can go through the <code>mcp-remote</code> bridge:</p>
+<pre><code>npx -y mcp-remote http://localhost:3002/mcp --header "Authorization: Bearer ${OFD_KEY}"</code></pre>
+<p>In your own agent code, use any MCP SDK's Streamable HTTP client with the <code>Authorization</code> header.</p>
+<div class="warn">The key gives access to your allowance. Put it in the client's secret or environment settings, not in a shared file or repository.</div>
+
+<h3>Protocol details</h3>
+<ul>
+  <li>Versions: <code>2026-07-28</code> (stateless: each request carries <code>params._meta["io.modelcontextprotocol/protocolVersion"]</code> and the headers <code>MCP-Protocol-Version</code>, <code>Mcp-Method</code>, <code>Mcp-Name</code>; <code>server/discover</code> lists what the server supports) and <code>2025-03-26</code>, <code>2025-06-18</code>, <code>2025-11-25</code> (with the <code>initialize</code> handshake).</li>
+  <li>Every request is answered with one JSON object. No sessions (<code>Mcp-Session-Id</code> is never issued), no SSE streams; <code>GET /mcp</code> answers <code>405</code>. One message per request (no batches).</li>
+  <li>An unsupported version answers <code>400</code> with JSON-RPC error <code>-32022</code> and <code>data.supported</code>; headers that do not match the body answer <code>400</code> with <code>-32020</code>.</li>
+  <li><code>search_products</code> waits for the search (20–60 s for a new one), so give your client a timeout of at least 90 seconds.</li>
+</ul>
+<p>A raw call (2026-07-28):</p>
+<pre><code>curl http://localhost:3002/mcp \
+  -H "Authorization: Bearer $OFD_KEY" \
+  -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
+  -H "MCP-Protocol-Version: 2026-07-28" -H "Mcp-Method: tools/call" -H "Mcp-Name: search_products" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+        "name":"search_products","arguments":{"title":"usb c hub","country":"jor"},
+        "_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28",
+                 "io.modelcontextprotocol/clientCapabilities":{}}}}'</code></pre>
+
+<h2 id="limits">Limits and cost</h2>
+<table>
+  <tr><th>Limit</th><th>Default for a new API key</th><th>When reached</th></tr>
+  <tr><td>Live searches per day</td><td>100 (set per key)</td><td><code>429 quota_exceeded</code> with <code>Retry-After</code> until the reset. Cached answers stay free and keep working.</td></tr>
+  <tr><td>Requests per second</td><td>1 per second, bursts of 5 (set per key)</td><td><code>429 rate_limited</code> with <code>Retry-After</code>.</td></tr>
+  <tr><td>Asynchronous jobs running</td><td>10</td><td><code>429 too_many_jobs</code>.</td></tr>
+  <tr><td>Polling a job / MCP messages</td><td>5 per second, bursts of 20</td><td><code>429 rate_limited</code>.</td></tr>
+  <tr><td>Request body</td><td>64 KB</td><td><code>400 invalid_request</code>.</td></tr>
+</table>
+<p>Prices change: <code>fetched_at</code> says when an answer was fetched. A cached answer older than its fresh period is marked <code>stale</code> and refreshed in the background; ask with <code>"refresh": true</code> only when you need prices from right now.</p>
+
+<h2 id="errors">Errors</h2>
+<p>Errors have the body <code>{"error":{"code":"…","message":"…"}}</code>. Act on <code>code</code>; <code>message</code> is for people and may change.</p>
+<table>
+  <tr><th>Status</th><th>Code</th><th>Meaning</th></tr>
+  <tr><td>400</td><td><code>invalid_request</code></td><td>Bad JSON, an unknown field, a title not 2–200 characters, a bad webhook URL.</td></tr>
+  <tr><td>400</td><td><code>unsupported_country</code></td><td>Not a code from <code>/api/v1/countries</code>.</td></tr>
+  <tr><td>400</td><td><code>webhook_not_configured</code></td><td>The API client has no webhook secret yet.</td></tr>
+  <tr><td>401</td><td><code>unauthorized</code></td><td>Missing, invalid, expired or revoked token or key.</td></tr>
+  <tr><td>402</td><td><code>payment_required</code></td><td>An app user's free searches are used up (never for API keys).</td></tr>
+  <tr><td>403</td><td><code>forbidden</code></td><td>The key lacks the scope, or may not be used from this address.</td></tr>
+  <tr><td>403</td><td><code>country_not_allowed</code></td><td>The key may not search in this country.</td></tr>
+  <tr><td>404</td><td><code>not_found</code></td><td>No such job for this caller (or older than 1 hour).</td></tr>
+  <tr><td>429</td><td><code>rate_limited</code>, <code>quota_exceeded</code>, <code>too_many_jobs</code></td><td>See <a href="#limits">Limits</a>; wait <code>Retry-After</code> seconds.</td></tr>
+  <tr><td>502</td><td><code>upstream_error</code></td><td>Every marketplace source failed; retry later.</td></tr>
+  <tr><td>503</td><td><code>service_unavailable</code></td><td>Temporarily unavailable or busy; retry.</td></tr>
+  <tr><td>—</td><td><code>timeout</code>, <code>job_lost</code></td><td>Only in a failed job: the search took too long, or the server stopped during it. Start it again.</td></tr>
+</table>
+
+<h2 id="openapi">OpenAPI</h2>
+<p>The full description of the HTTP API, including the webhook, is an OpenAPI 3.1 document: <a href="/api/v1/openapi.json"><code>/api/v1/openapi.json</code></a>. Load it into Swagger UI, Redoc, Postman or Insomnia, or generate a client from it (for example with <code>openapi-generator</code>).</p>
+</main>
+</div>
+</body>
+</html>
