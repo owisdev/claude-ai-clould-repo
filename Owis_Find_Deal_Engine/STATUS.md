@@ -767,6 +767,17 @@ Open the repository and say:
 (Step 13 is merged (PR #12) and tested up to step 7; its steps 8–10 are
 part of the production test, PLAN.md step 14.)
 
+**Next is phase 4, step 14: deployment (saved 2026-10-26).** It needs two
+decisions from the owner first:
+
+- **D6 hosting:** where the server runs, e.g. a small VPS or a container
+  platform (options and costs: PLAN.md section 10).
+- **D7 domain:** the web address; HTTPS and the agents' MCP URL
+  (`https://<domain>/mcp`) use it.
+
+The session for step 14 starts by laying out the hosting options with
+their costs, so the owner can decide D6 and D7 before anything is built.
+
 ## Run it on your PC
 
 Needs: **Docker Desktop** (Windows/macOS) or Docker Engine (Linux), and
