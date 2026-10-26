@@ -2,8 +2,7 @@
 
 Last updated: 2026-10-26 · Project branch: `claude/cloud-vs-local-7xi988`
 (steps 7–12 merged: step 12 via PR #9, fixes PR #10, guide PR #11;
-step 13 on branch `claude/optimistic-brown-tqclh3`, to be merged by pull
-request; nothing is merged into `main` yet).
+step 13 via PR #12; nothing is merged into `main` yet).
 
 Read first:
 - [docs/step13_guide.pdf](docs/step13_guide.pdf) — **step 13**: what the
@@ -38,8 +37,37 @@ Regenerate the PDFs: `python3 docs/build_step13_guide_pdf.py`,
 
 **Phase 3, step 13 — AI agents (MCP) and developer docs: done
 (2026-10-26). Phase 3 is complete.** Details: server README section "AI
-agents (MCP) and developer docs", PLAN.md step 13. Not yet tested by the
-owner: [docs/step13_guide.pdf](docs/step13_guide.pdf).
+agents (MCP) and developer docs", PLAN.md step 13. Merged via PR #12.
+
+- **Owner test on the Docker stack (2026-10-26, Windows, Git Bash),
+  guide steps 0–7: all passed. ✅** Docs page and OpenAPI file (`3.1.0`,
+  `/docs` → `301`); client `step13 agent` (20 per day, `jor`, both
+  scopes); `initialize` → `2025-06-18` with server info and
+  instructions; `tools/list` → `list_countries`, `search_products`;
+  `list_countries` → Jordan only; `search_products` `usb c hub` / `jor`
+  → cached, free (remaining 20; AliExpress, Temu, SHEIN 5 each, Amazon
+  none — the open SerpApi point below); `usa` → `country_not_allowed`,
+  title `x` → `invalid_request` (both `isError`), unknown tool → `-32602`;
+  2026-07-28 `server/discover` → four versions, wrong `Mcp-Method`
+  header → `400 -32020`; no key / login token → `401`, `GET` → `405`;
+  client `step13 lister` (scope `countries` only) → `search_products`
+  `forbidden`, `list_countries` works.
+- **Steps 8–10 moved to the production test (owner, 2026-10-26)**, see
+  PLAN.md step 14: real agent, logs and dashboard, daily limit through
+  MCP. On the owner's PC Claude Code 2.1.310 (Windows) could not connect
+  to the local stack: `InvalidHTTPResponse fetching
+  "http://127.0.0.1:3002"` (debug log: "version negotiation probe failed
+  … reconnecting pinned legacy", then the same error). Found so far: not
+  a proxy setting (none set), not IPv6 (`127.0.0.1` fails too), not the
+  server (both requests logged `200`; the raw reply is valid HTTP; the
+  same Claude Code version connects on Linux, also under Bun and through
+  a relay), not Docker Desktop's port alone (it also fails through a
+  Python relay on port 3003). Left: something on the PC catching Claude
+  Code's connections (antivirus web protection, VPN client) or a Claude
+  Code bug on Windows. Next check, if it also fails against production:
+  the logging relay ([`docs/relay_log.py`](docs/relay_log.py), prints every request and reply,
+  key hidden) shows whether Claude Code's request arrives and what it
+  gets back.
 
 - **MCP endpoint `POST /mcp`** (Model Context Protocol, Streamable HTTP)
   for AI agents, with the **same API keys** (login tokens refused: `401`).
@@ -91,7 +119,7 @@ owner: [docs/step13_guide.pdf](docs/step13_guide.pdf).
   third tool pair (`start_search` + `get_search`, on top of the
   asynchronous search of step 12) can be added.
 
-**Owner, to try step 13** (full steps in
+**Owner, to try step 13** (done 2026-10-26, steps 0–7, see above; full steps in
 [docs/step13_guide.pdf](docs/step13_guide.pdf); free with the cached
 `usb c hub` / `jor` search):
 
@@ -435,8 +463,8 @@ that admin entry).
 4. Optional: set the cost estimates, e.g.
    `{"changes":{"APIFY_TEMU_RUN_COST_USD":"0.10","APIFY_SHEIN_RUN_COST_USD":"0.033","APIFY_ALIEXPRESS_RUN_COST_USD":"0.02"}}`.
 
-**Next: phase 4, step 14 — deployment** (after the owner has tested step
-13): turn on two-factor admin login and admin email verification,
+**Next: phase 4, step 14 — deployment** (step 13 tested by the owner,
+steps 0–7; steps 8–10 are part of the production test): turn on two-factor admin login and admin email verification,
 hosting choice (D6), domain (D7), HTTPS, hardening, secrets, Postgres
 backups, staging + production, CI/CD, monitoring (PLAN.md step 14).
 
@@ -705,7 +733,7 @@ instant); label scraper prices as approximate in the app.
    CI/CD, monitoring).
 4. **Phase 5 — users** (old phase 2).
 
-**Phase 2 (steps 7–10) is done (2026-10-11); phase 3 is done: step 11 (API clients and keys) 2026-10-15, step 12 (integration endpoints) 2026-10-23, step 13 (AI agents: MCP + OpenAPI + docs) 2026-10-26. Next: the owner tests step 13, then phase 4, step 14 (deployment; decisions D6 hosting and D7 domain needed).**
+**Phase 2 (steps 7–10) is done (2026-10-11); phase 3 is done: step 11 (API clients and keys) 2026-10-15, step 12 (integration endpoints) 2026-10-23, step 13 (AI agents: MCP + OpenAPI + docs) 2026-10-26. Step 13 tested by the owner (steps 0–7; real-agent test moved to production). Next: phase 4, step 14 (deployment; decisions D6 hosting and D7 domain needed).**
 **Owner decisions D1–D4 (answered 2026-10-11):**
 
 - **D1 admin web app:** small React app built into the server image,
@@ -736,8 +764,8 @@ Open the repository and say:
 > `Owis_Find_Deal_Engine/STATUS.md` on branch `claude/cloud-vs-local-7xi988`.
 > Start phase 4, step 14. (Decisions D1–D5 are recorded in STATUS.md.)
 
-(Merge the step 13 pull request into `claude/cloud-vs-local-7xi988`
-first, and test step 13 with [docs/step13_guide.pdf](docs/step13_guide.pdf).)
+(Step 13 is merged (PR #12) and tested up to step 7; its steps 8–10 are
+part of the production test, PLAN.md step 14.)
 
 ## Run it on your PC
 
