@@ -1,0 +1,391 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Owis Find Deal API",
+    "version": "1.0.0",
+    "summary": "Search online marketplaces for a product, per country.",
+    "description": "Searches the marketplaces of one country (Amazon, AliExpress, Temu, SHEIN, eBay, … depending on the country) for a product and returns the offers with price, currency and link.\n\n**Authentication.** `Authorization: Bearer <token>` with either an **API key** (`ofd_live_…`, for servers and AI agents; made by the service owner in the admin panel) or an app user's **Firebase ID token**.\n\n**Cache.** The same search (title + country) is answered from a 48-hour cache at once and is free. A live search takes 20–60 seconds and counts once against the daily allowance (`X-RateLimit-*` headers).\n\n**AI agents** can use the MCP endpoint `POST /mcp` (Model Context Protocol, Streamable HTTP) with the same API keys; see the developer documentation at `/docs/`.\n\nEvery answer carries `X-Request-ID` (send your own to correlate logs). Errors have the body `{\"error\":{\"code\":\"…\",\"message\":\"…\"}}`.",
+    "contact": { "name": "Owis Find Deal" }
+  },
+  "servers": [
+    { "url": "/", "description": "This server" },
+    { "url": "http://localhost:3002", "description": "Local Docker stack" }
+  ],
+  "externalDocs": { "description": "Developer documentation", "url": "/docs/" },
+  "security": [{ "bearer": [] }],
+  "tags": [
+    { "name": "search", "description": "Product search (synchronous and asynchronous)." },
+    { "name": "catalog", "description": "Countries and marketplaces." },
+    { "name": "agents", "description": "Model Context Protocol endpoint for AI agents." },
+    { "name": "meta", "description": "Health and this description." }
+  ],
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "tags": ["meta"],
+        "operationId": "health",
+        "summary": "Health check",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The server is up.",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "status": { "const": "ok" } }, "required": ["status"] } } }
+          }
+        }
+      }
+    },
+    "/api/v1/countries": {
+      "get": {
+        "tags": ["catalog"],
+        "operationId": "listCountries",
+        "summary": "Countries and their marketplaces",
+        "description": "The country codes accepted by the search, each with its currency and the marketplaces searched there. Public. (An API key may be limited to some of them: a search elsewhere answers `403 country_not_allowed`.)",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The countries.",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "countries": { "type": "array", "items": { "$ref": "#/components/schemas/Country" } } }, "required": ["countries"] } } }
+          }
+        }
+      }
+    },
+    "/api/v1/search": {
+      "post": {
+        "tags": ["search"],
+        "operationId": "search",
+        "summary": "Search (synchronous)",
+        "description": "Searches and waits for the answer: at once from the cache, otherwise 20–60 seconds. For slow searches without holding a connection open, use `POST /api/v1/searches`.\n\nNeeds the API key scope `search`. A cached answer is free; a live search counts once against the daily allowance.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SearchRequest" } } } },
+        "responses": {
+          "200": {
+            "description": "The offers. `X-Cache` says whether they came from the cache.",
+            "headers": {
+              "X-Cache": { "$ref": "#/components/headers/X-Cache" },
+              "X-Plan": { "$ref": "#/components/headers/X-Plan" },
+              "X-RateLimit-Limit": { "$ref": "#/components/headers/X-RateLimit-Limit" },
+              "X-RateLimit-Remaining": { "$ref": "#/components/headers/X-RateLimit-Remaining" },
+              "X-RateLimit-Reset": { "$ref": "#/components/headers/X-RateLimit-Reset" },
+              "X-Request-ID": { "$ref": "#/components/headers/X-Request-ID" }
+            },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SearchResult" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "402": { "$ref": "#/components/responses/PaymentRequired" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/TooManyRequests" },
+          "502": { "$ref": "#/components/responses/Upstream" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/api/v1/searches": {
+      "post": {
+        "tags": ["search"],
+        "operationId": "startSearch",
+        "summary": "Start an asynchronous search",
+        "description": "Starts the same search as `POST /api/v1/search` and answers at once with `202` and the job. Poll `GET /api/v1/searches/{id}` (every ~5 s, see `Retry-After`) until `status` is `done` or `failed`, or give a `webhook_url` (API keys only) to receive the job when it finishes.\n\nA cached answer is already `done` in the `202`. Bad input, a used-up allowance, a missing scope or a country the key may not use are refused at once with the same answers as the synchronous search. At most 10 jobs per caller run at once; finished jobs are kept 1 hour and only their caller can read them.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AsyncSearchRequest" } } } },
+        "callbacks": {
+          "searchFinished": {
+            "{$request.body#/webhook_url}": {
+              "post": { "$ref": "#/components/pathItems/SearchWebhook/post" }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "The job: `running`, or already `done` for a cached answer.",
+            "headers": {
+              "Location": { "description": "Where to poll the job: `/api/v1/searches/{id}`.", "schema": { "type": "string" } },
+              "Retry-After": { "$ref": "#/components/headers/Retry-After" },
+              "X-Plan": { "$ref": "#/components/headers/X-Plan" },
+              "X-RateLimit-Limit": { "$ref": "#/components/headers/X-RateLimit-Limit" },
+              "X-RateLimit-Remaining": { "$ref": "#/components/headers/X-RateLimit-Remaining" },
+              "X-RateLimit-Reset": { "$ref": "#/components/headers/X-RateLimit-Reset" }
+            },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Job" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "402": { "$ref": "#/components/responses/PaymentRequired" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/TooManyRequests" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/api/v1/searches/{id}": {
+      "get": {
+        "tags": ["search"],
+        "operationId": "getSearch",
+        "summary": "Read an asynchronous search",
+        "description": "The job: `running` (poll again after `Retry-After` seconds), `done` (with `result`) or `failed` (with `error`, the answer the synchronous search would have given). Polling does not use up the search limit (it has its own: 5 per second).",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "pattern": "^srch_[a-z2-7]{26}$" }, "description": "The job id from the `202`." }
+        ],
+        "responses": {
+          "200": {
+            "description": "The job.",
+            "headers": { "Retry-After": { "$ref": "#/components/headers/Retry-After" } },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Job" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/TooManyRequests" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/mcp": {
+      "post": {
+        "tags": ["agents"],
+        "operationId": "mcp",
+        "summary": "MCP endpoint for AI agents",
+        "description": "Model Context Protocol over Streamable HTTP (stateless; every request is answered with one JSON object, no sessions, no SSE). **API keys only.** Protocol versions `2026-07-28` (no handshake: `_meta` + `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name` headers) and `2025-03-26` … `2025-11-25` (`initialize` handshake).\n\nTools: `list_countries` (scope `countries`, free) and `search_products` (scope `search`, metered like `POST /api/v1/search`). Tool failures (allowance used up, country not allowed, …) come back as a tool result with `isError: true` and `{\"error\":{\"code\",\"message\"}}`, so the agent can read them.\n\nPoint an MCP client at this URL with the header `Authorization: Bearer ofd_live_…`; see `/docs/` for client setup.",
+        "parameters": [
+          { "name": "MCP-Protocol-Version", "in": "header", "required": false, "schema": { "type": "string", "examples": ["2026-07-28"] }, "description": "Required from 2025-06-18 on; must match `params._meta[\"io.modelcontextprotocol/protocolVersion\"]` for 2026-07-28." },
+          { "name": "Mcp-Method", "in": "header", "required": false, "schema": { "type": "string" }, "description": "2026-07-28: the JSON-RPC method." },
+          { "name": "Mcp-Name", "in": "header", "required": false, "schema": { "type": "string" }, "description": "2026-07-28, `tools/call`: the tool name." }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/JSONRPCRequest" },
+              "examples": {
+                "call": {
+                  "summary": "Call search_products (2026-07-28)",
+                  "value": {
+                    "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                    "params": {
+                      "name": "search_products",
+                      "arguments": { "title": "usb c hub", "country": "jor" },
+                      "_meta": { "io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {} }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "A JSON-RPC response (a result, or an error for an unknown method or tool).", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/JSONRPCResponse" } } } },
+          "202": { "description": "A notification or response from the client was accepted (no body)." },
+          "400": { "description": "Not JSON / not JSON-RPC, unsupported protocol version (`-32022`, `data.supported` lists the versions) or headers that do not match the body (`-32020`).", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/JSONRPCResponse" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "description": "The key may not be used from this address, or a browser `Origin` that is not allowed.", "content": { "application/json": { "schema": { "oneOf": [{ "$ref": "#/components/schemas/Error" }, { "$ref": "#/components/schemas/JSONRPCResponse" }] } } } },
+          "404": { "description": "2026-07-28: method not found (`-32601`).", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/JSONRPCResponse" } } } },
+          "429": { "$ref": "#/components/responses/TooManyRequests" }
+        }
+      }
+    },
+    "/api/v1/openapi.json": {
+      "get": {
+        "tags": ["meta"],
+        "operationId": "openapi",
+        "summary": "This OpenAPI description",
+        "security": [],
+        "responses": { "200": { "description": "OpenAPI 3.1 document.", "content": { "application/json": { "schema": { "type": "object" } } } } }
+      }
+    }
+  },
+  "webhooks": {
+    "searchFinished": { "$ref": "#/components/pathItems/SearchWebhook" }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "An API key (`ofd_live_` + 40 characters; for servers and AI agents) or an app user's Firebase ID token (JWT)."
+      }
+    },
+    "headers": {
+      "X-Cache": { "description": "`HIT` (fresh cache), `STALE` (cache past its fresh period; refreshed in the background) or `MISS` (live search).", "schema": { "type": "string", "enum": ["HIT", "STALE", "MISS"] } },
+      "X-Plan": { "description": "The caller's plan: `api` for API keys, otherwise the user's plan (e.g. `free`).", "schema": { "type": "string" } },
+      "X-RateLimit-Limit": { "description": "Live searches allowed per day.", "schema": { "type": "integer" } },
+      "X-RateLimit-Remaining": { "description": "Live searches left today.", "schema": { "type": "integer" } },
+      "X-RateLimit-Reset": { "description": "When the daily allowance resets (Unix seconds).", "schema": { "type": "integer" } },
+      "X-Request-ID": { "description": "The request's id (yours if you sent a valid one).", "schema": { "type": "string" } },
+      "Retry-After": { "description": "Seconds to wait before retrying (or before polling again).", "schema": { "type": "integer" } }
+    },
+    "responses": {
+      "BadRequest": { "description": "`invalid_request` (bad JSON, unknown field, title not 2–200 characters, bad webhook URL), `unsupported_country` or `webhook_not_configured`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Unauthorized": { "description": "`unauthorized`: missing, invalid, expired or revoked token / key.", "headers": { "WWW-Authenticate": { "schema": { "type": "string" } } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "PaymentRequired": { "description": "`payment_required`: an app user's free daily searches are used up (never for API keys).", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Forbidden": { "description": "`forbidden` (the key lacks the scope, or may not be used from this address) or `country_not_allowed`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "NotFound": { "description": "`not_found`: no job with this id for this caller (finished jobs are kept 1 hour).", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "TooManyRequests": { "description": "`rate_limited` (too many requests per second), `quota_exceeded` (daily allowance used up) or `too_many_jobs` (10 asynchronous searches running). See `Retry-After`.", "headers": { "Retry-After": { "$ref": "#/components/headers/Retry-After" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Upstream": { "description": "`upstream_error`: every marketplace source failed; retry later.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Unavailable": { "description": "`service_unavailable`: temporarily unavailable or busy; retry.", "headers": { "Retry-After": { "$ref": "#/components/headers/Retry-After" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": { "$ref": "#/components/schemas/ErrorCode" },
+              "message": { "type": "string", "description": "Human-readable; may change." }
+            },
+            "required": ["code", "message"]
+          }
+        },
+        "required": ["error"]
+      },
+      "ErrorCode": {
+        "type": "string",
+        "description": "Stable machine-readable error code.",
+        "enum": ["invalid_request", "unsupported_country", "country_not_allowed", "unauthorized", "forbidden", "not_found", "rate_limited", "quota_exceeded", "payment_required", "too_many_jobs", "webhook_not_configured", "job_lost", "timeout", "service_unavailable", "upstream_error", "internal_error"]
+      },
+      "SearchRequest": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string", "minLength": 2, "maxLength": 200, "description": "What to search for (spaces are collapsed).", "examples": ["usb c hub"] },
+          "country": { "type": "string", "description": "A code from `GET /api/v1/countries`.", "examples": ["jor"] },
+          "refresh": { "type": "boolean", "default": false, "description": "Ignore the cache and search live (counts against the allowance)." }
+        },
+        "required": ["title", "country"],
+        "additionalProperties": false
+      },
+      "AsyncSearchRequest": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string", "minLength": 2, "maxLength": 200, "examples": ["usb c hub"] },
+          "country": { "type": "string", "examples": ["jor"] },
+          "refresh": { "type": "boolean", "default": false },
+          "webhook_url": { "type": "string", "format": "uri", "maxLength": 2048, "description": "API keys only: an `https` URL on a public address that receives the job when it finishes (signed, see the `searchFinished` webhook). The API client needs a webhook secret (admin panel → API clients → Webhook secret)." }
+        },
+        "required": ["title", "country"],
+        "additionalProperties": false
+      },
+      "Product": {
+        "type": "object",
+        "properties": {
+          "market": { "type": "string", "description": "Marketplace id, e.g. `amazon`, `aliexpress`, `temu`, `shein`." },
+          "title": { "type": "string" },
+          "link": { "type": "string", "description": "Product page (or the marketplace's search when `link_type` is `search`)." },
+          "link_type": { "type": "string", "enum": ["search"], "description": "Set when `link` opens the marketplace's search instead of a product page." },
+          "snippet": { "type": "string" },
+          "thumbnail": { "type": "string" },
+          "price": { "type": "number" },
+          "currency": { "type": "string", "description": "ISO 4217." },
+          "position": { "type": "integer", "description": "Rank within its marketplace (1 = first)." },
+          "provider": { "type": "string", "description": "The source that found it." },
+          "extensions": { "type": "array", "items": { "type": "string" }, "description": "Extra facts (rating, shipping, …)." }
+        },
+        "required": ["market", "title", "link", "position", "provider"]
+      },
+      "SearchResult": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string" },
+          "country": { "type": "string" },
+          "results": { "type": ["array", "null"], "items": { "$ref": "#/components/schemas/Product" } },
+          "markets": { "type": "object", "additionalProperties": { "type": "string", "enum": ["ok", "no_results", "error"] }, "description": "Status per marketplace." },
+          "took_ms": { "type": "integer" },
+          "fetched_at": { "type": "string", "format": "date-time", "description": "When the prices were fetched (for cached answers: how old they are)." },
+          "cached": { "type": "boolean" },
+          "stale": { "type": "boolean", "description": "A cached answer past its fresh period; a background refresh has started." }
+        },
+        "required": ["query", "country", "results", "markets", "took_ms", "fetched_at", "cached", "stale"]
+      },
+      "Job": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "examples": ["srch_…"] },
+          "status": { "type": "string", "enum": ["running", "done", "failed"] },
+          "request": {
+            "type": "object",
+            "properties": { "title": { "type": "string" }, "country": { "type": "string" }, "refresh": { "type": "boolean" } },
+            "required": ["title", "country", "refresh"]
+          },
+          "created_at": { "type": "string", "format": "date-time" },
+          "finished_at": { "type": ["string", "null"], "format": "date-time" },
+          "result": { "$ref": "#/components/schemas/SearchResult" },
+          "error": {
+            "type": "object",
+            "description": "Why it failed: the status and error the synchronous search would have answered.",
+            "properties": { "http_status": { "type": "integer" }, "code": { "$ref": "#/components/schemas/ErrorCode" }, "message": { "type": "string" } },
+            "required": ["http_status", "code", "message"]
+          },
+          "quota": {
+            "type": "object",
+            "description": "The caller's daily allowance after the search.",
+            "properties": { "plan": { "type": "string" }, "limit": { "type": "integer" }, "remaining": { "type": "integer" }, "reset": { "type": "string", "format": "date-time" } },
+            "required": ["plan", "limit", "remaining", "reset"]
+          },
+          "webhook": {
+            "type": "object",
+            "description": "The webhook and how its delivery went (not in the webhook's own body).",
+            "properties": {
+              "url": { "type": "string" },
+              "status": { "type": "string", "enum": ["pending", "delivered", "failed"] },
+              "attempts": { "type": "integer" },
+              "http_status": { "type": "integer" },
+              "error": { "type": "string" }
+            },
+            "required": ["url", "status", "attempts"]
+          }
+        },
+        "required": ["id", "status", "request", "created_at", "finished_at"]
+      },
+      "Country": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "string", "examples": ["jor"] },
+          "name": { "type": "string" },
+          "currency": { "type": "string" },
+          "markets": {
+            "type": "array",
+            "items": { "type": "object", "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "domain": { "type": "string" } }, "required": ["id", "name", "domain"] }
+          }
+        },
+        "required": ["code", "name", "currency", "markets"]
+      },
+      "JSONRPCRequest": {
+        "type": "object",
+        "properties": {
+          "jsonrpc": { "const": "2.0" },
+          "id": { "type": ["string", "integer"], "description": "Absent for notifications." },
+          "method": { "type": "string", "enum": ["server/discover", "initialize", "ping", "tools/list", "tools/call", "notifications/initialized"] },
+          "params": { "type": "object" }
+        },
+        "required": ["jsonrpc", "method"]
+      },
+      "JSONRPCResponse": {
+        "type": "object",
+        "properties": {
+          "jsonrpc": { "const": "2.0" },
+          "id": { "type": ["string", "integer"] },
+          "result": { "type": "object" },
+          "error": {
+            "type": "object",
+            "properties": { "code": { "type": "integer" }, "message": { "type": "string" }, "data": {} },
+            "required": ["code", "message"]
+          }
+        },
+        "required": ["jsonrpc"]
+      }
+    },
+    "pathItems": {
+      "SearchWebhook": {
+        "post": {
+          "operationId": "searchFinished",
+          "summary": "Search finished (webhook)",
+          "description": "Sent to the job's `webhook_url` when an asynchronous search finishes. Body: the job (as `GET /api/v1/searches/{id}` returns it, without `webhook`).\n\n**Check the signature** before trusting the body: `X-OFD-Signature: t=<unix seconds>,v1=<hex>`, where `v1 = HMAC-SHA256(secret, \"<t>.\" + raw body)` with the client's webhook secret (`whsec_…`). Compare in constant time and refuse timestamps older than 5 minutes.\n\nAnswer with a 2xx within 10 seconds. Up to 3 attempts (at once, after 5 s, after 30 s); `X-OFD-Delivery` (the job id) is the same for every attempt, so you can ignore repeats. Redirects are not followed.",
+          "parameters": [
+            { "name": "X-OFD-Signature", "in": "header", "required": true, "schema": { "type": "string", "pattern": "^t=\\d+,v1=[0-9a-f]{64}$" } },
+            { "name": "X-OFD-Event", "in": "header", "required": true, "schema": { "type": "string", "enum": ["search.completed", "search.failed"] } },
+            { "name": "X-OFD-Delivery", "in": "header", "required": true, "schema": { "type": "string" }, "description": "The job id." }
+          ],
+          "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Job" } } } },
+          "responses": { "2XX": { "description": "Received. Any other answer (or none within 10 s) is retried." } }
+        }
+      }
+    }
+  }
+}

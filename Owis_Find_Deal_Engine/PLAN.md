@@ -1,0 +1,589 @@
+# owis_find_deal_engine — Server Plan
+
+Status: **v2** · Scope: **server / service first**, user features after,
+client apps later.
+
+## 1. Goal
+
+A backend service that receives a product name and a country, searches the
+online shops that deliver to that country, and returns one merged list of
+results. Logged-in users later get a saved cart, purchase reports and
+notifications. Running cost should stay as close to **$0** as possible,
+with a free quota and paid plans for heavier use.
+
+Consumers: mobile app, web app, and later AI agents (as a tool / MCP server).
+
+## 2. Countries and marketplaces ✅ implemented
+
+Supported countries: `usa`, `ksa`, `jor`. Marketplaces: `amazon`, `ebay`,
+`aliexpress`, `temu`, `shein`. A search only queries the marketplaces
+enabled for the requested country.
+
+| Marketplace | usa | ksa | jor |
+|---|---|---|---|
+| Amazon     | amazon.com   | amazon.sa    | amazon.com |
+| eBay       | ebay.com     | ebay.com     | ❌ no delivery |
+| AliExpress | aliexpress.com | aliexpress.com | aliexpress.com |
+| Temu       | temu.com     | temu.com     | temu.com |
+| SHEIN      | us.shein.com | ar.shein.com | ar.shein.com |
+
+This is configuration, not code:
+[`server/internal/markets/markets.json`](server/internal/markets/markets.json).
+Adding a country or a shop means editing that file.
+
+## 3. Security model
+
+App users: every protected call carries the **user's JWT**. Other
+applications and AI agents (phase 3): **API keys** issued in the admin
+panel (step 11). Admins: JWT + admin role (step 8).
+
+### 3.1 End-to-end flow ✅ implemented
+
+1. **Sign-in** — the app signs the user in with Google, Apple or Facebook
+   through an auth provider (Firebase Auth, Supabase Auth, Clerk or Auth0;
+   the server works with any of them).
+2. **JWT** — the provider returns a signed JWT whose `sub` is the user id.
+3. **API call** — `Authorization: Bearer <JWT>`.
+4. **Middleware check** (in the Go service, before any business logic):
+   - verify the signature **locally** with the provider's public keys
+     (JWKS, RS256/ES256, cached and refreshed hourly; key rotation handled);
+   - check `iss`, `aud`, `exp`, `iat`; reject `alg: none` and HMAC tokens;
+   - take the user id (`sub`) and the plan (custom claim, default `free`);
+   - per-user burst limit (token bucket);
+   - daily allowance by plan in **Redis** (atomic increment).
+5. **Execute or reject**
+   - answer already cached → served **free** (not counted), even when the
+     allowance is used up;
+   - within limits → counter incremented, live search runs; failed
+     searches are refunded;
+   - free plan used up → **402 Payment Required** (show the upgrade screen);
+   - paid plan used up → **429 Too Many Requests** with `Retry-After`;
+   - Redis unreachable → **503** (fail closed, protects paid search quota).
+
+Public endpoints: `/health`, `/countries`. Everything else needs a JWT.
+
+Where the plan comes from: a custom claim in the token (e.g. Firebase
+custom claims set by a payment webhook). Later it can move to the database;
+only the plan lookup changes.
+
+### 3.2 Deployment hardening (step 14)
+
+The JWT check runs **inside** the service, so there is no separate gateway
+to secure internally for now. When deploying:
+
+- **Private network** (✅ in `docker-compose.yml`): the Go service listens
+  only on Docker networks; Redis is on an internal network. The only public entry point is a reverse proxy
+  (Caddy or Nginx) or a **Cloudflare Tunnel** — then the server has no open
+  inbound port at all.
+- **HTTPS only**, terminated at the proxy / Cloudflare.
+- Redis and Postgres on the private network only, with passwords.
+- Secrets (SerpApi key, Redis URL) from the host's secret store / env, never
+  in the repo.
+- **If** a separate API gateway is added later (gateway → backend on
+  different machines): authenticate that hop with mTLS or a shared internal
+  token, and allow inbound traffic to the backend only from the gateway.
+- Optional later: Firebase App Check / Play Integrity / App Attest so only
+  the genuine app can call the API.
+
+## 4. Search providers
+
+Every source sits behind one Go interface:
+
+```go
+type Provider interface {
+    Name() string
+    Batch() bool // true: all marketplaces in one call
+    Search(ctx context.Context, q Query) ([]Product, error)
+}
+```
+
+| Provider | Used for | Cost | Status |
+|---|---|---|---|
+| `serpapi-amazon` | **Amazon** via SerpApi's Amazon engine: price, rating, direct `/dp/` link | 1 SerpApi search per live search | ✅ default when `SERPAPI_KEY` is set (`SERPAPI_MARKETS`) |
+| `serpapi-ebay` | **eBay** via SerpApi's eBay engine: price, condition, shipping, direct `/itm/` link | 1 SerpApi search per live search | ✅ default when `SERPAPI_KEY` is set (`SERPAPI_MARKETS`); Browse API later if keys arrive |
+| `apify` | AliExpress / Temu / SHEIN scrapers from the Apify store (real prices, direct item links), per marketplace | $5 free credit/month, then ~$0.7–5 / 1,000 results | ✅ optional (`APIFY_MARKETS`; AliExpress tested) |
+| `serpapi` | **Google Shopping** (default) or Google web search, any market — see the comparison below | 250 free/month, then ~$25 / 1,000 | ✅ fallback for the shops above |
+| `searxng` (self-hosted) | site-restricted metasearch, any market | free | ✅ last fallback only: search engines block it quickly from one IP (seen in the local test) |
+| `ebay` (Browse API) | eBay with real prices | free (5,000 calls/day) | when keys arrive |
+| `aliexpress` (Affiliate API) | AliExpress with prices + affiliate links | free | when keys arrive |
+
+Implemented behaviour:
+- `SEARCH_COMBINED=true` (default): **one** SerpApi call per search,
+  `"<title>" (site:amazon.com OR site:temu.com OR ...)`.
+  `false`: one call per marketplace, run in parallel.
+- **Fallback chain** (`SEARCH_PROVIDERS=searxng,serpapi`): the first
+  provider that succeeds answers; each attempt has its own timeout, and a
+  provider failing repeatedly is skipped for a cooldown (circuit breaker).
+- Provider calls run on a **bounded worker pool** (goroutines + buffered
+  channels, `SEARCH_MAX_CONCURRENCY`), all under one `context` timeout.
+- A failing marketplace never fails the request: `markets` reports
+  `ok`/`error` for each one; `502` only when all fail.
+- Results are mapped to their marketplace by link domain (Google
+  Shopping: by seller name), numbered per marketplace, and interleaved
+  (best result of each shop first).
+- **Google Shopping** (`SERPAPI_ENGINE=google_shopping`): one query for
+  all shops (no `site:` support there); offers from other sellers are
+  dropped; if nothing from our shops is found, one web search retry.
+- **Per-marketplace providers**: shops listed in `APIFY_MARKETS` use
+  their own chain `Apify scraper → web providers`, with `APIFY_TIMEOUT`
+  per attempt (the search timeout is raised to fit it). The scraper and
+  its input are configuration, so a broken scraper can be swapped without
+  a code change.
+
+### SerpApi engine: `google_shopping` (current) vs `google`
+
+`SERPAPI_ENGINE` picks what the SerpApi fallback searches. Decision (local
+test, October 2026): **keep `google_shopping`**. Amazon and AliExpress have
+dedicated sources with direct links and prices, so SerpApi only answers
+when those fail and for shops without one.
+
+| | `google_shopping` (current) | `google` (web search) |
+|---|---|---|
+| Price | ✅ almost always (structured) | ✗ rarely (only when Google shows a rich snippet) |
+| Image | ✅ | sometimes |
+| Link | ✗ no direct item link: Google's own offer pages (`google.com/search?ibp=oshop…`) only open inside a Google session, so the service links to **the shop's search for that product** (`"link_type": "search"`) | ✅ the shop's product page (`/item/…`, `/dp/…`, `-g-….html`, `-p-….html`), filtered by `product_pages` |
+| Shops covered | shops Google Shopping lists for the region; for Jordan (`shopping_region: us`) mostly AliExpress, rarely Temu / SHEIN | any shop Google indexes, via `site:` |
+| Relevance | Google may list merely similar products; the relevance filter drops most | `site:` keeps results on the shop; the relevance and product-page filters drop the rest |
+| Country | not every country (no Jordan → US listings) | every country (`gl=jo` works) |
+| Cost per live search | 1 search (+0 when a free provider follows: no web retry) | 1 search with `SEARCH_COMBINED=true` (one `site:a OR site:b` query, big shops can crowd out small ones); 1 per shop with `false` |
+| Speed | 5–15 s uncached (`SERPAPI_TIMEOUT=25s`) | 1–3 s |
+
+Switch with `SERPAPI_ENGINE=google` in `.env`; no code change needed.
+
+### Tools evaluated (October 2026)
+
+| Tool | Verdict |
+|---|---|
+| Apify | ✅ added (optional) for Temu / SHEIN, which have no official API |
+| Google Shopping (via SerpApi) | ✅ added as SerpApi's default engine |
+| Google Lens (via SerpApi) | ⏳ future feature — see section 5.5 |
+| ShoppingScraper | ✗ from €49/month, no Temu / SHEIN / AliExpress, built for retailers |
+| AfterShip | ✗ for search (shipment tracking); maybe phase 2 for delivery tracking |
+| ChatGPT shopping | ✗ no API for its results; we reach assistants via step 15 instead |
+
+## 4b. Cache and price freshness ✅ implemented
+
+Goal: popular searches cost nothing, while prices shown stay reasonably
+current. Strategy, in layers:
+
+1. **Stale-while-revalidate** (per country + normalized title):
+   fresh for 2 h → served from cache; 2–24 h → served instantly *and*
+   refreshed in the background so the next user gets new prices; > 24 h →
+   fetched live. Identical concurrent searches share one upstream call.
+2. **Shorter life for doubtful answers**: a result where a shop failed is
+   fresh 10 min, an empty result 30 min.
+3. **User-driven refresh**: `"refresh": true` (pull to refresh) fetches
+   live, at most once per 10 min per query, so it cannot be abused.
+4. **Stale-if-error**: if a live fetch fails, the last good answer is
+   returned (marked stale) instead of an error.
+5. **Transparency**: `fetched_at` / `stale` in every response; the app
+   shows "prices updated X ago", and the product link always opens the
+   shop with its live price.
+6. **Automatic invalidation** when `markets.json` changes (the shop list
+   is part of the cache key).
+7. **Cached answers are free** for users: only live searches count against
+   the daily allowance (they are the only ones that cost us anything).
+
+Later (phase 2+):
+- **Saved-item price tracker**: a scheduled job re-checks items in users'
+  saved carts (e.g. every 6–12 h, popular ones more often) and sends a
+  price-drop notification. Uses the same cache, so shared items are
+  fetched once.
+- **Pre-warm** the most searched queries per country before they expire.
+- **Shop APIs with real prices** (eBay, AliExpress) get their own, shorter
+  TTL since their prices are exact.
+- **Purchase reports** feed back real paid prices per shop.
+
+## 4c. Background jobs and queues (phase 2)
+
+The search request itself stays **synchronous**: the user waits for
+results, and its robustness comes from the fallback chain, circuit
+breaker, cache (stale-if-error) and request merging, not from a queue.
+
+A queue becomes useful for work that does not need to answer the user
+immediately:
+
+| Job | Trigger |
+|---|---|
+| saved-item price tracker | schedule (every 6–12 h) |
+| price-drop / "did you buy it?" notifications | tracker, link clicks |
+| pre-warming popular searches | schedule |
+| analytics events (searches, clicks, purchases) | every request |
+
+Choice: start with a **Redis-backed job queue** (e.g. `asynq`, or Redis
+Streams) because Redis is already deployed: retries with backoff,
+scheduled jobs, dead-letter queue, at no extra cost. Jobs go through a
+small Go interface, so moving to NATS JetStream or Kafka later is a
+swap of one adapter. Kafka is worth it only at high event volume (many
+services consuming the same event stream); for this service it would
+add a cluster to run and pay for without a matching benefit today.
+
+## 5. Users and features (after the service is finished)
+
+### 5.1 Saved cart
+The user saves a search result with notes ("check size", "wait for sale"),
+and can list, edit and delete saved items.
+
+### 5.2 Purchase reports
+The user reports **marketplace, purchase date, price, currency**, optionally
+linked to a saved item.
+- When the user opens a product link the app calls `POST /clicks`. About
+  24 h later the server creates a friendly "Did you buy it? Tell us the
+  price" notification. Filling it in is optional.
+- This data later powers price insights.
+
+### 5.3 Notifications
+- In-app inbox stored in the database (list, mark read).
+- Push via **Firebase Cloud Messaging** (free); the app registers its device
+  token with the server.
+- v1 types: `purchase_prompt`, `system`. Later: price drops on saved items.
+
+### 5.4 Plans and payments
+- Daily quotas per plan are already enforced (section 3.1, `PLANS` env).
+- Later: plans in the database, monthly limits, payment provider and a
+  webhook that updates the user's plan.
+
+More features may be added here before this phase starts.
+
+### 5.6 App login: Firebase email links (reminder)
+
+Only relevant when the app offers **email** sign-in; Google, Apple and
+Facebook sign-in do not use email links, and the search service itself is
+not affected (it only verifies ID tokens with the public JWKS).
+
+- Firebase Dynamic Links are shut down. Email action links (verify
+  email, reset password, passwordless sign-in link) must use the
+  **Firebase Hosting domain** instead, e.g.
+  `owis-find-deal-engine.firebaseapp.com` (or a verified custom domain).
+- One-time project setting (Admin SDK `projectConfigManager()
+  .updateProjectConfig({ mobileLinksConfig: { domain: ... } })`, or the
+  equivalent console/REST setting).
+- Wherever action links are created (preferably the app via the Firebase
+  client SDK, so Firebase sends the emails), set `linkDomain` in
+  `ActionCodeSettings`, never the deprecated `dynamicLinkDomain`; add the
+  iOS bundle ID and Android package name.
+- Only if our backend ever generates these links itself: use a current
+  Admin SDK that supports `linkDomain`, and send the emails through our
+  own mail service.
+- Check the domain is in Firebase Auth → Settings → Authorized domains.
+
+### 5.5 Future features (noted, not planned yet)
+
+- **Search by photo — Google Lens.** The user takes or uploads a photo of
+  a product; the service finds it and returns offers from the shops of
+  their country. Implementation sketch: `POST /api/v1/search/image`
+  (image upload, size-limited) → SerpApi `engine=google_lens` → product
+  name + matching offers → the same shop filtering, cache (keyed by image
+  hash), metering and response format as text search. Same SerpApi
+  account; counts as a live search. Best added together with the mobile
+  app (camera), after phase 2.
+
+- **Direct links for Google Shopping results, resolved on tap.** Google
+  Shopping gives prices but no direct shop link (see section 4). SerpApi
+  can resolve an offer to its shop link (Google immersive product API), but
+  at **one search per product** — doing it for every result (10 products =
+  10 searches) is ruled out. Cheaper later option: resolve only when a user
+  taps a result (`GET /api/v1/link?offer=…`): one search per tap, the
+  resolved link cached for everyone; until then the result keeps the
+  shop-search link. Only worth it if Google Shopping becomes a main source
+  again.
+
+## 6. API
+
+All paths under `/api/v1`. Errors: `{"error": {"code", "message"}}`.
+
+| Method | Path | Auth | Status |
+|---|---|---|---|
+| GET  | `/health` | – | ✅ |
+| GET  | `/countries` | – | ✅ |
+| POST | `/searches`, GET `/searches/{id}` (async, optional signed webhook) | API key or JWT | ✅ step 12 |
+| POST | `/mcp` (MCP tools `search_products`, `list_countries` for AI agents; outside `/api/v1`) | API key | ✅ step 13 |
+| GET  | `/openapi.json` (OpenAPI 3.1); `/docs/` (developer docs, outside `/api/v1`) | – | ✅ step 13 |
+| * | `/admin/v1/...` (settings, clients, usage, audit) | JWT + admin role | steps 8–11 |
+| POST | `/search` `{"title","country"}` | JWT or API key + quota | ✅ |
+| GET/PATCH | `/me` | JWT | step 15 |
+| GET/POST | `/cart`, PATCH/DELETE `/cart/{id}` | JWT | step 17 |
+| POST | `/clicks` | JWT | step 18 |
+| GET/POST | `/purchases` | JWT | step 18 |
+| GET | `/notifications`, POST `/notifications/{id}/read` | JWT | step 19 |
+| POST | `/devices` | JWT | step 19 |
+
+## 7. Data model (PostgreSQL)
+
+Since step 7 (✅):
+
+```
+settings          key (PK), value (secrets AES-256-GCM encrypted), secret, updated_at, updated_by
+settings_history  id, key, old_value, new_value (NULL for secrets), secret, changed_by, changed_at
+admins            id, email (unique, lower case), firebase_uid (unique, NULL until first login), created_at, created_by, disabled_at
+```
+
+Users (phase 5):
+
+```
+users          id, firebase_uid (unique), email, country, language, plan_id, created_at
+plans          id, name, searches_per_day, searches_per_month, price
+usage          user_id, day, searches
+saved_items    id, user_id, market, title, link, thumbnail, price, currency, notes, created_at, updated_at
+link_clicks    id, user_id, market, link, title, clicked_at, prompted_at
+purchases      id, user_id, saved_item_id NULL, market, title, price, currency, purchased_at, created_at
+notifications  id, user_id, type, title, body, data JSONB, read_at NULL, created_at
+devices        id, user_id, fcm_token (unique), platform, created_at
+```
+
+## 8. Layout
+
+```
+Owis_Find_Deal_Engine/
+├── PLAN.md
+├── README.md
+├── server/                          # Go service: owis_find_deal_engine
+│   ├── cmd/owis_find_deal_engine/   # main: config, wiring, graceful shutdown
+│   └── internal/
+│       ├── config/                  # environment variables
+│       ├── markets/                 # countries -> marketplaces (markets.json)
+│       ├── search/                  # worker pool, merge, fallback chain
+│       ├── cache/                   # stale-while-revalidate search cache
+│       ├── metering/                # cached answers free, live searches counted
+│       ├── providers/               # searxng, serpapi (+ ebay, aliexpress later)
+│       ├── auth/                    # JWT verification, JWKS cache
+│       ├── usage/                   # plans, daily quotas (Redis / memory)
+│       ├── ratelimit/               # per-user token bucket
+│       ├── api/                     # router, handlers, middleware
+│       ├── settings/                # settings store: encryption, validation, watcher (step 7)
+│       ├── store/                   # Postgres: migrations, settings, admins (step 7)
+│       └── notify/                  # inbox + FCM (step 19)
+└── app/                             # client apps (later)
+```
+
+## 9. Steps
+
+Each step ends with code that builds, passes `go vet` and `go test -race`,
+and is pushed.
+
+**Phase 1 — search service**
+1. ✅ Folder + module `owis_find_deal_engine`.
+2. ✅ Restructure + best practices: `cmd/` + `internal/` layout; env config
+   with validation; structured JSON logs (`slog`) with request IDs; panic
+   recovery; strict JSON decoding with body limit; consistent JSON errors;
+   HTTP server timeouts; graceful shutdown on SIGINT/SIGTERM; bounded
+   worker pool with `context` cancellation and no goroutine leaks; typed
+   SerpApi client (no panics on missing fields, API key never in errors or
+   logs); CORS by allow-list; tests for every package.
+3. ✅ Countries & marketplaces: `markets.json`, `GET /countries`, country
+   validation, search limited to the country's marketplaces.
+4. ✅ SearXNG provider (free) + fallback chain (SearXNG first, SerpApi if
+   it fails) with per-attempt timeout and circuit breaker;
+   `docker-compose` with SearXNG + Redis for local dev.
+5. ✅ Cache: stale-while-revalidate in Redis (or in-memory LRU), request
+   coalescing, pull-to-refresh, stale-if-error (section 4b).
+6. ✅ Distroless non-root Docker image; `docker-compose` with server,
+   SearXNG and Redis on private networks (Redis on an internal network,
+   only the API published, all containers read-only, no capabilities);
+   GitHub Actions: gofmt, mod tidy, vet, race tests, govulncheck, compose
+   validation, image build + smoke test. Go 1.26 (supported release).
+   Postgres joins the stack in phase 2.
+
+3b. ✅ Security: JWT auth middleware (JWKS, RS256/ES256), per-user burst
+   limit, daily quota by plan in Redis with 402/429, refunds on failure.
+   (Replaced the earlier per-app API keys.)
+
+**New order (owner, 2026-10-07):** admin panel → API integration for
+other applications and AI agents → deployment. The user features (old
+phase 2) come after that.
+
+**Owner decisions (2026-10-11):** D1 React admin app inside the server
+image · D2 Firebase + admin list in the database + two-factor · D3 secrets
+editable in the panel (encrypted, write-only) · D4 own apps and agents
+first, keys made in the panel (partners later).
+
+**Phase 2 — admin panel** (control every setting of the service)
+
+7. ✅ **Database + settings store.** Postgres joins the stack (migrations,
+   private network, backups later). Tables: `settings` (current values),
+   `settings_history` (every change: who, when, old → new), `admins`.
+   Runtime settings move from `.env` to the database; `.env` keeps only
+   bootstrap values (database URL, auth issuer, encryption key, first
+   admin). On change the server rebuilds its provider chain and swaps it
+   atomically — no restart, searches in flight finish on the old one.
+   *Built 2026-10-11:* Postgres 17 on the internal `data` network; embedded
+   SQL migrations (advisory lock, safe with several instances); on the
+   first start the runtime settings in `.env` are imported once; every
+   change validated as a whole before it is stored; secrets AES-256-GCM
+   (`SETTINGS_ENCRYPTION_KEY`), write-only, not in the history; the server
+   polls the settings version (`SETTINGS_POLL_INTERVAL`, 10 s) and swaps a
+   new provider chain + cache front + router atomically; first admin from
+   `ADMIN_EMAIL`; command line `settings list|get|set|unset|history`,
+   `admins list` until the admin API exists. Countries and shops
+   (`markets.json`) stay a file until step 8.
+8. ✅ **Admin API** `/admin/v1/...` — separate from the public API:
+   - login with the same auth provider (Firebase) **plus** an admin role
+     (admin allow-list in the database / custom claim); every call checked
+     server-side; admin actions rate-limited and written to the audit log;
+   - settings: countries and shops (today `markets.json`), source per shop
+     (Apify Actor / input / currency / result limit / timeout / max cost,
+     SerpApi engines), cache times, plans, quotas and rate limits, CORS;
+   - secrets (SerpApi key, Apify token): **write-only** — they can be
+     replaced but never read back; stored encrypted (AES-256-GCM, key from
+     the environment);
+   - tools: "test search" (shows each source's raw answer, time, cost),
+     clear cache for a query / bump results version, provider health and
+     circuit state.
+   *Built 2026-10-11:* Firebase ID token + two-factor sign-in
+   (`firebase.sign_in_second_factor`, `ADMIN_REQUIRE_2FA`; **disabled for
+   now** by the owner, default `false` — turn on at step 14) + sign-in not
+   older than `ADMIN_SESSION_MAX_AGE` (12 h) + active entry in `admins`
+   (uid linked at the first sign-in with a verified email); rate limits per
+   IP, per admin and for the test search; table `audit_log` (every change,
+   tool use and refused login; never secret values). Settings read / change
+   (validated as a whole, secrets write-only) and history; countries and
+   shops as the runtime setting `MARKETS` (`GET` / `PUT` / `DELETE
+   /admin/v1/markets`, hot-applied); admin list (add, disable, enable,
+   unlink; never yourself or the last one); test search asking each source
+   directly with time, products, error and estimated cost
+   (`SERPAPI_SEARCH_COST_USD`, `APIFY_<SHOP>_RUN_COST_USD`); forget one
+   cached search; bump `CACHE_GENERATION`; breaker state per source.
+   Command line gained `admins add|disable|enable|unlink` and `audit`.
+9. ✅ **Usage and cost dashboard:** live searches, cache hit rate, fallbacks
+   and errors per source, estimated cost per day (Apify runs × price per
+   Actor, SerpApi searches), top queries; alert when the monthly budget
+   reaches a limit set in the panel.
+   *Built 2026-10-11:* counters in memory, added to Postgres every 30 s and
+   at shutdown (`usage_daily` per UTC day, kept 400 days; `query_daily` for
+   top queries, no user ids, kept 90 days; several instances add up);
+   every source call is counted per shop with outcome, time and estimated
+   cost, every fallback with its reason, every user search as hit / stale /
+   live / quota / error; `GET /admin/v1/usage`; budget settings
+   `BUDGET_MONTHLY_USD`, `BUDGET_ALERT_PERCENT` → alert (error log + audit
+   entry `budget.alert`, once per level and month) and dashboard status.
+   No hard stop yet.
+10. ✅ **Admin web app** (desktop browser): settings forms with validation,
+    dashboard, audit log, API clients (step 11). Built as a static web app
+    and served by the same server under `/admin` (same origin, one deploy).
+    *Built 2026-10-11:* React 19 + TypeScript + Vite in `server/web/admin`,
+    built in a Node stage of the Dockerfile and embedded in the Go binary
+    (`internal/adminui`); Firebase email/password sign-in (tab session,
+    `ADMIN_FIREBASE_API_KEY`), strict CSP; pages: dashboard with charts,
+    settings, countries & shops, test search, cache & sources, admins,
+    audit log. Only `@firebase/app` + `@firebase/auth` (no Firestore, npm
+    audit clean). API clients page added with step 11; the two-factor
+    sign-in screen comes with step 14.
+
+**Phase 3 — API integration** (other applications and AI agents)
+
+11. ✅ **API clients and keys.** Created in the admin panel: name, owner,
+    scopes (`search`, `countries`), daily quota, rate limit, allowed
+    countries, optional IP allow-list, expiry. The key is shown **once**
+    (`ofd_live_<random>`); only its SHA-256 hash and a short prefix are
+    stored; revoke and rotate (old key valid for a grace period). Calls:
+    `Authorization: Bearer ofd_live_...`. App users keep their JWT; the
+    middleware accepts either and meters each separately.
+    *Built 2026-10-15:* tables `api_clients` and `api_keys` (migration
+    0004); keys `ofd_live_` + 40 base32 characters (200 bits), stored as
+    SHA-256 + 8-character prefix; package `internal/apikeys` checks keys
+    with a 10 s cache (dropped at once on the instance where an admin
+    changes a client) and saves each key's last use every minute; the
+    public search accepts a JWT or a key (scope `search`, allowed address,
+    allowed country → `403 country_not_allowed`); each client has its own
+    burst limit and daily counter `client:<id>` (`X-Plan: api`, used up →
+    429, never 402); login tokens with a `client:` subject are refused so
+    counters never mix. Admin API `/admin/v1/clients` (create, change,
+    rotate with grace 0–720 h, revoke a client or one key; all audited, the
+    key never), admin web page *API clients*, command line `clients list`
+    / `clients revoke ID`. Per-client usage on the dashboard comes with
+    step 12.
+12. ✅ **Integration endpoints:** the same `/api/v1/search` and `/countries`,
+    plus an **asynchronous search** for slow live searches (25–50 s):
+    `POST /api/v1/searches` → `202` + id, `GET /api/v1/searches/{id}`,
+    optional signed webhook (HMAC) when done. Per-client usage counters
+    (base for billing partners later).
+    *Built 2026-10-23:* package `internal/jobs` (job `srch_` + 128 random
+    bits, kept 1 h in Redis or memory; runner with at most 10 running jobs
+    per caller and 200 per server; a job whose server stopped shows as
+    `503 job_lost` after its deadline); same metering as the sync search,
+    with a pre-check so bad input and a used-up allowance are refused
+    before a job starts; a cached answer comes back already `done` in the
+    `202`. Webhooks for API clients only (package `internal/webhook`):
+    `X-OFD-Signature: t=<unix>,v1=<hex HMAC-SHA256("<t>.<body>")>`, event
+    and delivery headers, 3 attempts (5 s, 30 s), no redirects, https to
+    public addresses only (checked again at dial time; development switch
+    `WEBHOOK_ALLOW_PRIVATE`). Signing secret per client from the admin
+    panel, shown once, derived from `SETTINGS_ENCRYPTION_KEY` + a random
+    salt (migration 0005: `api_clients.webhook_salt`, prefix, time).
+    Per-client counters: `usage_daily` kind `client` (client, country,
+    outcome), dashboard table *API clients* with an estimated cost (live
+    searches × average cost of a live search).
+    *Tested by the owner 2026-10-24* on the Docker stack (guide steps
+    0–13, 15, 16 passed; [docs/step12_guide.pdf](docs/step12_guide.pdf)).
+13. ✅ **AI agents** (2026-10-26): **MCP endpoint** `POST /mcp`
+    (Streamable HTTP, stateless: one JSON answer per request, no sessions
+    or SSE) with tools `list_countries` (scope `countries`, free) and
+    `search_products` (scope `search`, metered like `/api/v1/search`, the
+    same daily counter and burst limit), API keys only. Protocol versions
+    2026-07-28 (`server/discover`, `_meta` + `MCP-Protocol-Version` /
+    `Mcp-Method` / `Mcp-Name` checked against the body) and 2025-03-26 …
+    2025-11-25 (`initialize`). Tool failures as `isError` results the
+    agent can read; `Origin` checked (DNS rebinding). **OpenAPI 3.1**
+    (`/api/v1/openapi.json`, with the webhook) and a **docs page**
+    (`/docs/`), both embedded (package `internal/devdocs`). Tested with
+    the official TypeScript (1.32.2, 1.12.0) and Go (1.8.0) MCP SDKs
+    against the binary with Postgres and Redis.
+    Owner test: [docs/step13_guide.pdf](docs/step13_guide.pdf) — steps
+    0–7 passed 2026-10-26; steps 8–10 (real agent, logs, daily limit)
+    moved to the production test in step 14.
+
+**Phase 4 — deployment** (all parts: server, admin web app, SearXNG,
+Redis, Postgres)
+
+14. **Turn on two-factor admin login** (`ADMIN_REQUIRE_2FA=true`, Firebase
+    Identity Platform, admins enrolled; disabled since 2026-10-11) **and
+    admin email verification** (`ADMIN_REQUIRE_VERIFIED_EMAIL=true`, real
+    admin emails, verified; disabled since 2026-10-11).
+    Hosting choice (section 10), domain, HTTPS (Caddy / Cloudflare),
+    hardening of section 3.2, secrets in the host's secret store,
+    Postgres backups, staging + production, CI/CD deploy from `main`,
+    monitoring and alerts (metrics; replace the hand-written circuit
+    breaker with `github.com/sony/gobreaker` v2 as noted before).
+    **After the first deployment, test the MCP endpoint with real agents**
+    (moved here from the step 13 owner test, 2026-10-26): connect Claude
+    Code (`claude mcp add --transport http owis-find-deal
+    https://<domain>/mcp --header "Authorization: Bearer ofd_live_…"`),
+    check `claude mcp list` → ✔ Connected and a `search_products` call
+    from a chat; then the step 13 guide steps 9 (logs: one line per MCP
+    request, no key in the log; dashboard row of the client) and 10
+    (daily limit through MCP). On the owner's Windows PC, Claude Code
+    2.1.310 could not connect to the local Docker stack
+    (`InvalidHTTPResponse`), although the server answered `200` with valid
+    HTTP and the same Claude Code version connects on Linux; also
+    through a local relay instead of Docker's port. Cause not found
+    (suspects: antivirus / web protection catching Claude Code's
+    connections, or a Claude Code bug on Windows). If it also fails
+    against production from Windows: run the logging relay
+    (`docs/relay_log.py`) or report it with `/bug` and `claude
+    --debug-file`.
+
+**Phase 5 — users** (old phase 2, after deployment)
+
+15. `users` table, `/me` (Firebase email-link reminder in section 5.6).
+16. Plans in the database + payment webhook.
+17. Saved cart + saved-item price tracker (section 4b).
+18. Clicks + purchase reports.
+19. Notifications: inbox, devices, FCM push, background jobs (section 4c).
+
+**Later:** eBay Browse API and AliExpress affiliate API if the keys are
+approved; another SHEIN scraper (cheaper or Saudi site).
+
+## 10. Hosting (not decided yet)
+
+Nothing to decide until step 14. The service ships as one Docker image, so
+any of these work and can be switched later:
+
+| Option | Cost | Notes |
+|---|---|---|
+| Small VPS (Hetzner, DigitalOcean, ...) | ~$4–6/month | runs server + SearXNG + Postgres together; full control |
+| Oracle Cloud Always Free | $0 | free ARM VM; sign-up can be strict |
+| Fly.io / Render / Railway | free tier or a few $ | easy deploys; SearXNG needs its own service |
+| Postgres: Neon / Supabase free tier | $0 | if the server host has no database |
+
+Recommendation for now: develop locally with `docker-compose` (step 6) and
+choose when the first app is ready to test with real users.
