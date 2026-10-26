@@ -528,7 +528,9 @@ first, keys made in the panel (partners later).
     (`/docs/`), both embedded (package `internal/devdocs`). Tested with
     the official TypeScript (1.32.2, 1.12.0) and Go (1.8.0) MCP SDKs
     against the binary with Postgres and Redis.
-    Owner test: [docs/step13_guide.pdf](docs/step13_guide.pdf).
+    Owner test: [docs/step13_guide.pdf](docs/step13_guide.pdf) — steps
+    0–7 passed 2026-10-26; steps 8–10 (real agent, logs, daily limit)
+    moved to the production test in step 14.
 
 **Phase 4 — deployment** (all parts: server, admin web app, SearXNG,
 Redis, Postgres)
@@ -542,6 +544,23 @@ Redis, Postgres)
     Postgres backups, staging + production, CI/CD deploy from `main`,
     monitoring and alerts (metrics; replace the hand-written circuit
     breaker with `github.com/sony/gobreaker` v2 as noted before).
+    **After the first deployment, test the MCP endpoint with real agents**
+    (moved here from the step 13 owner test, 2026-10-26): connect Claude
+    Code (`claude mcp add --transport http owis-find-deal
+    https://<domain>/mcp --header "Authorization: Bearer ofd_live_…"`),
+    check `claude mcp list` → ✔ Connected and a `search_products` call
+    from a chat; then the step 13 guide steps 9 (logs: one line per MCP
+    request, no key in the log; dashboard row of the client) and 10
+    (daily limit through MCP). On the owner's Windows PC, Claude Code
+    2.1.310 could not connect to the local Docker stack
+    (`InvalidHTTPResponse`), although the server answered `200` with valid
+    HTTP and the same Claude Code version connects on Linux; also
+    through a local relay instead of Docker's port. Cause not found
+    (suspects: antivirus / web protection catching Claude Code's
+    connections, or a Claude Code bug on Windows). If it also fails
+    against production from Windows: run the logging relay
+    (`docs/relay_log.py`) or report it with `/bug` and `claude
+    --debug-file`.
 
 **Phase 5 — users** (old phase 2, after deployment)
 
