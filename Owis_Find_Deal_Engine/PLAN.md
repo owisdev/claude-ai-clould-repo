@@ -589,9 +589,9 @@ reached through a Cloudflare Tunnel (no web port open on the VM);
 `/admin` behind Cloudflare Access + Firebase login with two-factor.
 Details in STATUS.md, "Where we are".
 
-Options that were compared (prices of October 2026 are higher than the
-first table: Hetzner raised prices twice in 2026, Fly.io and Railway cut
-their free tiers):
+Options that were compared (the prices below date from early October
+2026; by the decision they were higher: Hetzner ~€6–8/month for 4 GB
+after two 2026 increases, Fly.io and Railway with smaller free tiers):
 
 | Option | Cost | Notes |
 |---|---|---|
