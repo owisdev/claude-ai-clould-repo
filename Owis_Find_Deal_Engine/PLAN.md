@@ -539,9 +539,12 @@ Redis, Postgres)
     Identity Platform, admins enrolled; disabled since 2026-10-11) **and
     admin email verification** (`ADMIN_REQUIRE_VERIFIED_EMAIL=true`, real
     admin emails, verified; disabled since 2026-10-11).
-    Hosting choice (section 10), domain, HTTPS (Caddy / Cloudflare),
+    Hosting choice (section 10: **Oracle Always Free, Dubai**), domain
+    (**`dealcoon.com`**, API at `api.dealcoon.com`), HTTPS (**Cloudflare
+    Tunnel**; **Cloudflare Access** on `/admin`), arm64 image,
     hardening of section 3.2, secrets in the host's secret store,
-    Postgres backups, staging + production, CI/CD deploy from `main`,
+    Postgres backups (**Oracle Object Storage**), staging (later, before
+    real users) + production, CI/CD deploy from `main`,
     monitoring and alerts (metrics; replace the hand-written circuit
     breaker with `github.com/sony/gobreaker` v2 as noted before).
     **After the first deployment, test the MCP endpoint with real agents**
@@ -573,10 +576,22 @@ Redis, Postgres)
 **Later:** eBay Browse API and AliExpress affiliate API if the keys are
 approved; another SHEIN scraper (cheaper or Saudi site).
 
-## 10. Hosting (not decided yet)
+## 10. Hosting ✅ decided (2026-11-01)
 
-Nothing to decide until step 14. The service ships as one Docker image, so
-any of these work and can be switched later:
+**Decision (D6):** Oracle Cloud Always Free, home region UAE East
+(Dubai): one Arm VM `VM.Standard.A1.Flex`, 2 OCPUs, 12 GB, Ubuntu 24.04,
+running the whole compose stack. Backups to Oracle Object Storage (free
+20 GB). Fallback: Hetzner (€6–8/month, billed by the hour).
+
+**Domain (D7):** `dealcoon.com` at Cloudflare Registrar. The service is
+`https://api.dealcoon.com` (agents: `https://api.dealcoon.com/mcp`),
+reached through a Cloudflare Tunnel (no web port open on the VM);
+`/admin` behind Cloudflare Access + Firebase login with two-factor.
+Details in STATUS.md, "Where we are".
+
+Options that were compared (the prices below date from early October
+2026; by the decision they were higher: Hetzner ~€6–8/month for 4 GB
+after two 2026 increases, Fly.io and Railway with smaller free tiers):
 
 | Option | Cost | Notes |
 |---|---|---|
@@ -585,5 +600,5 @@ any of these work and can be switched later:
 | Fly.io / Render / Railway | free tier or a few $ | easy deploys; SearXNG needs its own service |
 | Postgres: Neon / Supabase free tier | $0 | if the server host has no database |
 
-Recommendation for now: develop locally with `docker-compose` (step 6) and
-choose when the first app is ready to test with real users.
+(Contabo Cloud VPS 6, ~€7.50/month, was also considered: most memory per
+euro, but monthly contracts instead of hourly billing.)

@@ -1,6 +1,6 @@
 # Project status and handoff
 
-Last updated: 2026-10-26 · Project branch: `claude/cloud-vs-local-7xi988`
+Last updated: 2026-11-01 · Project branch: `claude/cloud-vs-local-7xi988`
 (steps 7–12 merged: step 12 via PR #9, fixes PR #10, guide PR #11;
 step 13 via PR #12; nothing is merged into `main` yet).
 
@@ -34,6 +34,60 @@ Regenerate the PDFs: `python3 docs/build_step13_guide_pdf.py`,
 `python3 docs/build_architecture_pdf.py` (needs `reportlab`).
 
 ## Where we are
+
+**Phase 4, step 14 — deployment: decisions taken (2026-11-01), nothing
+built yet.** The owner chose hosting and domain and created the server;
+the detailed step 14 build plan comes next, for the owner's approval
+before any implementation.
+
+- **D6 hosting: Oracle Cloud Always Free.** Home region **UAE East
+  (Dubai)** (cannot change). VM `VM.Standard.A1.Flex` (Ampere Arm,
+  aarch64), **2 OCPUs, 12 GB**, Canonical Ubuntu 24.04, default boot
+  volume (~47 GB), on-demand capacity, own VCN `owis-vcn` (made with
+  the VCN wizard "Create VCN with Internet Connectivity"; the instance
+  wizard would not give a public IP with a new VCN) and its public
+  subnet, public IPv4. Created 2026-11-01, running; the owner logs in
+  with `ssh -i ~/.ssh/owis_oracle.key ubuntu@<public IP>` (IP in the
+  Oracle console; key only on the owner's PC, never in the repo);
+  packages updated. Half of the free allowance (4 OCPUs / 24 GB,
+  200 GB disk) is left.
+  - Budget alert: `free-tier-guard`, €1 / month, email at 1 % of actual
+    spend (any real charge).
+  - **To do (owner): upgrade to Pay-As-You-Go before the 30-day trial
+    ends** — still $0 within Always Free, and idle Always Free VMs are
+    then no longer reclaimed (ours is idle most of the time).
+  - The image must be built for **linux/arm64** (GitHub Actions,
+    multi-arch); SearXNG, Redis and Postgres have arm64 images.
+  - Why: free; 12 GB is far more than the stack needs (~1.5 GB).
+    Hetzner (€6–8/month, PayPal) stays the fallback; the compose stack
+    moves in about an hour. Oracle sign-up needs a physical bank card
+    (virtual / prepaid refused).
+- **D7 domain: `dealcoon.com`** (brand **DealCoon**, raccoon logo),
+  bought 2026-11-01 at Cloudflare Registrar ($11.17 / year,
+  auto-renew on), in the owner's existing Cloudflare account. "Deal
+  Scout" was dropped: an app of that name exists (`dealscout.app`).
+  Addresses: **`api.dealcoon.com`** for the API, `/docs`, `/admin` and
+  the agents (`https://api.dealcoon.com/mcp`); `dealcoon.com` / `www`
+  free for the app website (e.g. the owner's Cloudflare Pages project).
+  Owner to do: verify the registrant email (within 14 days),
+  two-factor login on the Cloudflare account. DNS not changed yet.
+- **HTTPS: permanent Cloudflare Tunnel** (`cloudflared` next to the
+  stack) for `api.dealcoon.com`: no web port open on the VM, only SSH.
+  Turn off Cloudflare bot blocking for `/api` and `/mcp` (agents and
+  apps must get through); Cloudflare's 100 s limit is above the 60 s
+  live search.
+- **`/admin` extra lock: Cloudflare Access** (free, ≤ 50 users): only
+  the owner's email (one-time code or Google) reaches the admin login
+  page; then Firebase login + two-factor as before. API, `/mcp` and
+  `/docs` stay public.
+- **Backups: Oracle Object Storage** (Always Free, 20 GB): nightly
+  `pg_dump`, kept for a limited number of days.
+- **Staging: none for now** (only the owner tests). Added before real
+  users, with fuller monitoring.
+- Until the tunnel exists: admin panel and API through an SSH tunnel
+  (`ssh -L 3002:127.0.0.1:3002 …` → `http://localhost:3002`); a
+  temporary Cloudflare quick tunnel (`*.trycloudflare.com`) can serve
+  a one-off agent test.
 
 **Phase 3, step 13 — AI agents (MCP) and developer docs: done
 (2026-10-26). Phase 3 is complete.** Details: server README section "AI
@@ -733,7 +787,7 @@ instant); label scraper prices as approximate in the app.
    CI/CD, monitoring).
 4. **Phase 5 — users** (old phase 2).
 
-**Phase 2 (steps 7–10) is done (2026-10-11); phase 3 is done: step 11 (API clients and keys) 2026-10-15, step 12 (integration endpoints) 2026-10-23, step 13 (AI agents: MCP + OpenAPI + docs) 2026-10-26. Step 13 tested by the owner (steps 0–7; real-agent test moved to production). Next: phase 4, step 14 (deployment; decisions D6 hosting and D7 domain needed).**
+**Phase 2 (steps 7–10) is done (2026-10-11); phase 3 is done: step 11 (API clients and keys) 2026-10-15, step 12 (integration endpoints) 2026-10-23, step 13 (AI agents: MCP + OpenAPI + docs) 2026-10-26. Step 13 tested by the owner (steps 0–7; real-agent test moved to production). Next: phase 4, step 14 (deployment; D6 hosting and D7 domain decided 2026-11-01, see "Where we are").**
 **Owner decisions D1–D4 (answered 2026-10-11):**
 
 - **D1 admin web app:** small React app built into the server image,
@@ -753,8 +807,10 @@ instant); label scraper prices as approximate in the app.
   `.env`. Partner self-service sign-up and billing later, on the same
   key model.
 
-D5 answered: $5 per month (free plans). Later: D6 hosting and D7 domain
-(step 14), D8 paid Apify / SerpApi plans (before real users).
+D5 answered: $5 per month (free plans). D6 and D7 answered 2026-11-01:
+**D6** Oracle Cloud Always Free (Dubai, Arm A1, 2 OCPUs / 12 GB),
+**D7** `dealcoon.com` (API at `api.dealcoon.com`) — details in "Where
+we are". Later: D8 paid Apify / SerpApi plans (before real users).
 
 ## To resume in a new Claude Code session
 
@@ -762,7 +818,8 @@ Open the repository and say:
 
 > Continue the Owis_Find_Deal_Engine project from
 > `Owis_Find_Deal_Engine/STATUS.md` on branch `claude/cloud-vs-local-7xi988`.
-> Start phase 4, step 14. (Decisions D1–D5 are recorded in STATUS.md.)
+> Continue phase 4, step 14: lay out the detailed build plan for approval.
+> (Decisions D1–D7 are recorded in STATUS.md.)
 
 (Step 13 is merged (PR #12) and tested up to step 7; its steps 8–10 are
 part of the production test, PLAN.md step 14.)
@@ -906,5 +963,7 @@ Please report:
 
 ## Open decisions (owner)
 
-- Hosting (PLAN.md section 10) — not needed until deployment.
+- Hosting and domain: decided 2026-11-01 (D6 Oracle, D7 `dealcoon.com`).
+- Oracle Pay-As-You-Go upgrade — before the 30-day trial ends.
+- D8 paid Apify / SerpApi plans — before real users.
 - Payment provider for paid plans — phase 2.
