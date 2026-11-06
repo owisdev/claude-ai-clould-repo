@@ -40,8 +40,32 @@ built yet.** The owner chose hosting and domain and created the server;
 the detailed step 14 build plan comes next, for the owner's approval
 before any implementation.
 
-**Step 14 build plan — under review with the owner, part by part
-(2026-11-06), not approved yet.** Agreed so far:
+**Step 14 — worked through one step at a time with the owner
+(2026-11-06): each step is explained, approved, built, then the next.**
+
+- **Step 1 — built 2026-11-06 (PR into the project branch):** real
+  client IP + E1. New bootstrap settings `TRUSTED_PROXIES` (compose:
+  `10.203.20.10`, cloudflared's fixed address on the new `tunnel`
+  network `10.203.20.0/28`; others get `.0–.7`) and
+  `AUTH_ALLOWED_SIGN_IN` (default `google.com,apple.com,password`, `*` =
+  any). `api.WithClientIP` wraps the whole server; `remoteIP` now gives
+  the caller's address (admin per-IP limit, API key `ip_allow`, audit
+  log, and the request log's new `"ip"` field). Refused sign-in method →
+  `401 unauthorized` with a clear message; API keys and admin login not
+  affected. Tested: unit tests (header only from the trusted address,
+  faked / bad / missing header, IPv6, allow-list through the tunnel,
+  each sign-in method, settings parsing), race detector, and the stack
+  in Docker with a fake Firebase, a fake cloudflared at `10.203.20.10`
+  and an "intruder" on the tunnel network: tunnel → caller IP in log
+  and audit (`203.0.113.7`), intruder's and host port's fake header
+  ignored, anonymous `401`, password / Google accepted. Not run here:
+  `govulncheck`, store tests (CI runs them). Owner: review and merge the
+  PR; optional check on the PC (`docker compose up -d --build`, normal
+  login and test search still work).
+- **Next: step 2** (deployment plumbing: arm64 image, production compose
+  with cloudflared, VM setup and deploy scripts) — to explain first.
+
+Agreed in the plan review:
 - **Real client IP behind the tunnel:** behind `cloudflared` every
   request comes from the tunnel's Docker address, which breaks the
   admin per-IP limit, API key IP allow-lists and the audit log. Fix:

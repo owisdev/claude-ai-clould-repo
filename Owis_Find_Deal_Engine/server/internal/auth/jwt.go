@@ -24,6 +24,10 @@ type User struct {
 	Plan  string // from the plan claim; empty if absent
 
 	EmailVerified bool
+	// SignInProvider is how the account signed in (Firebase:
+	// firebase.sign_in_provider, e.g. "google.com", "apple.com",
+	// "password", "anonymous"); empty for other auth providers.
+	SignInProvider string
 	// SecondFactor is the second factor used at sign-in ("phone", "totp"),
 	// empty without two-factor login (Firebase: firebase.sign_in_second_factor).
 	SecondFactor string
@@ -102,6 +106,7 @@ func (v *Verifier) Verify(ctx context.Context, token string) (User, error) {
 	u.EmailVerified, _ = claims["email_verified"].(bool)
 	if fb, ok := claims["firebase"].(map[string]any); ok {
 		u.SecondFactor, _ = fb["sign_in_second_factor"].(string)
+		u.SignInProvider, _ = fb["sign_in_provider"].(string)
 	}
 	if at, ok := claims["auth_time"].(float64); ok && at > 0 {
 		u.AuthTime = time.Unix(int64(at), 0)

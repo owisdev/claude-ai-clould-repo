@@ -20,9 +20,12 @@ type Deps struct {
 	Searcher MeteredSearcher
 	Verifier TokenVerifier
 	// Keys checks API keys; nil = only app users' login tokens.
-	Keys        KeyAuthenticator
-	Limiter     *ratelimit.Limiter
-	CORSOrigins []string
+	Keys KeyAuthenticator
+	// AllowedSignIn: the sign-in methods accepted in app users' login
+	// tokens (auth.User.SignInProvider); empty = any.
+	AllowedSignIn []string
+	Limiter       *ratelimit.Limiter
+	CORSOrigins   []string
 	// WriteTimeout bounds writing each response (0 = none). It is set per
 	// request because it follows the search timeout, a runtime setting.
 	WriteTimeout time.Duration
@@ -68,16 +71,16 @@ func NewRouter(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/v1/health", h.health)
 	mux.HandleFunc("GET /api/v1/countries", h.countries)
 	mux.Handle("POST /api/v1/search", chain(http.HandlerFunc(h.search),
-		requireCaller(d.Verifier, d.Keys, apikeys.ScopeSearch, d.Log),
+		requireCaller(d.Verifier, d.Keys, apikeys.ScopeSearch, d.AllowedSignIn, d.Log),
 		rateLimit(d.Limiter),
 	))
 	if d.Jobs != nil {
 		mux.Handle("POST /api/v1/searches", chain(http.HandlerFunc(h.startSearch),
-			requireCaller(d.Verifier, d.Keys, apikeys.ScopeSearch, d.Log),
+			requireCaller(d.Verifier, d.Keys, apikeys.ScopeSearch, d.AllowedSignIn, d.Log),
 			rateLimit(d.Limiter),
 		))
 		mux.Handle("GET /api/v1/searches/{id}", chain(http.HandlerFunc(h.getSearch),
-			requireCaller(d.Verifier, d.Keys, apikeys.ScopeSearch, d.Log),
+			requireCaller(d.Verifier, d.Keys, apikeys.ScopeSearch, d.AllowedSignIn, d.Log),
 			limitBy(d.PollLimiter, func(r *http.Request) string { u, _ := auth.UserFrom(r.Context()); return "poll:" + u.ID }),
 		))
 	}
@@ -86,7 +89,7 @@ func NewRouter(d Deps) http.Handler {
 	// limited per client; search_products also takes from the client's
 	// search burst limit, like POST /api/v1/search.
 	mux.Handle("POST /mcp", chain(http.HandlerFunc(h.mcp),
-		requireCaller(nil, d.Keys, "", d.Log),
+		requireCaller(nil, d.Keys, "", nil, d.Log),
 		limitBy(d.PollLimiter, func(r *http.Request) string { u, _ := auth.UserFrom(r.Context()); return "mcp:" + u.ID }),
 	))
 

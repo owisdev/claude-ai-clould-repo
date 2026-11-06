@@ -6,7 +6,6 @@ import (
 	"errors"
 	"log/slog"
 	"math"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -301,16 +300,6 @@ func noStore(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		next.ServeHTTP(w, r)
 	})
-}
-
-// remoteIP is the connection's address. Behind a reverse proxy (step 14)
-// this is the proxy; the proxy's client header is not trusted yet.
-func remoteIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }
 
 // audit writes an audit entry; a failure is logged, never shown.

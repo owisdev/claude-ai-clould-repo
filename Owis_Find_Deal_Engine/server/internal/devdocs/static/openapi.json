@@ -213,7 +213,7 @@
     },
     "responses": {
       "BadRequest": { "description": "`invalid_request` (bad JSON, unknown field, title not 2–200 characters, bad webhook URL), `unsupported_country` or `webhook_not_configured`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
-      "Unauthorized": { "description": "`unauthorized`: missing, invalid, expired or revoked token / key.", "headers": { "WWW-Authenticate": { "schema": { "type": "string" } } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Unauthorized": { "description": "`unauthorized`: missing, invalid, expired or revoked token / key, or a login token from a sign-in method that is not accepted (e.g. anonymous accounts).", "headers": { "WWW-Authenticate": { "schema": { "type": "string" } } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "PaymentRequired": { "description": "`payment_required`: an app user's free daily searches are used up (never for API keys).", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "Forbidden": { "description": "`forbidden` (the key lacks the scope, or may not be used from this address) or `country_not_allowed`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "NotFound": { "description": "`not_found`: no job with this id for this caller (finished jobs are kept 1 hour).", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },

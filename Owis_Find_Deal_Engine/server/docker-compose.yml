@@ -8,6 +8,13 @@
 #           engines, the server calls SerpApi and the auth provider's JWKS).
 #   data  - server, Redis and Postgres only; internal: no internet, no
 #           published ports.
+#   tunnel - server and (in production) cloudflared, the Cloudflare
+#           Tunnel, only. cloudflared gets the fixed address 10.203.20.10,
+#           the only one whose CF-Connecting-IP header (the caller's own
+#           address) the server believes (TRUSTED_PROXIES). Other members
+#           get addresses from 10.203.20.0-7. If 10.203.20.0/28 is already
+#           used on the host, change the subnet, ip_range and both
+#           addresses together.
 # Only the API port is published, on 127.0.0.1 by default: put a reverse
 # proxy (Caddy/Nginx) or a Cloudflare Tunnel in front of it in production.
 # SearXNG, Redis and Postgres are never reachable from outside Docker.
@@ -43,9 +50,11 @@ services:
       # README "Settings"). sslmode=disable: internal Docker network only.
       DATABASE_URL: postgres://ofd:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/ofd?sslmode=disable
       SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?set SETTINGS_ENCRYPTION_KEY in .env}
+      # cloudflared's address on the tunnel network (see the top).
+      TRUSTED_PROXIES: 10.203.20.10
     ports:
       - "${API_BIND:-127.0.0.1}:${API_PORT:-3002}:3002"
-    networks: [edge, data]
+    networks: [edge, data, tunnel]
     depends_on:
       redis: { condition: service_healthy }
       searxng: { condition: service_healthy }
@@ -143,6 +152,12 @@ networks:
   edge: {}
   data:
     internal: true
+  tunnel:
+    # Not internal: cloudflared reaches Cloudflare through it.
+    ipam:
+      config:
+        - subnet: 10.203.20.0/28
+          ip_range: 10.203.20.0/29
 
 volumes:
   redis-data: {}

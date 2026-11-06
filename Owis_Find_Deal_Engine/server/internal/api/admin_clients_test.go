@@ -5,6 +5,8 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net/http/httptest"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -307,6 +309,27 @@ func TestAPIKeysOnPublicAPI(t *testing.T) {
 	walled := create(`{"name":"walled","ip_allow":["203.0.113.0/24"]}`)
 	if rec := pub.do("POST", "/api/v1/search", walled, searchBody); rec.Code != 403 {
 		t.Errorf("address not allowed = %d %s", rec.Code, rec.Body) // httptest: 192.0.2.1
+	}
+	// Behind the tunnel: the caller's address comes from cloudflared's
+	// header, and only from cloudflared.
+	tunnel := WithClientIP([]netip.Prefix{netip.MustParsePrefix("192.0.2.1/32")})(pub.handler)
+	viaTunnel := func(remote, header string) int {
+		req := httptest.NewRequest("POST", "/api/v1/search", strings.NewReader(searchBody))
+		req.RemoteAddr = remote
+		req.Header.Set("Authorization", "Bearer "+walled)
+		req.Header.Set(ClientIPHeader, header)
+		rec := httptest.NewRecorder()
+		tunnel.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if code := viaTunnel("192.0.2.1:1234", "203.0.113.7"); code != 200 {
+		t.Errorf("allowed address through the tunnel = %d", code)
+	}
+	if code := viaTunnel("192.0.2.1:1234", "198.51.100.7"); code != 403 {
+		t.Errorf("other address through the tunnel = %d", code)
+	}
+	if code := viaTunnel("198.51.100.9:1234", "203.0.113.7"); code != 403 {
+		t.Errorf("faked header, not from the tunnel = %d", code)
 	}
 
 	bad, _ := apikeys.Generate()

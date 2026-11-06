@@ -1,6 +1,8 @@
 package config
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -171,5 +173,45 @@ func TestLoadSerpAPIMarkets(t *testing.T) {
 	t.Setenv("SERPAPI_MARKETS", "temu")
 	if _, err := Load(); err == nil {
 		t.Error("market without a SerpApi engine accepted")
+	}
+}
+
+func TestLoadSignInAndProxies(t *testing.T) {
+	t.Setenv("AUTH_JWKS_URL", "https://example.com/jwks")
+	t.Setenv("AUTH_ISSUER", "https://securetoken.google.com/p")
+	t.Setenv("AUTH_AUDIENCE", "p")
+	t.Setenv("SEARCH_PROVIDERS", "searxng")
+	t.Setenv("SEARXNG_URL", "http://searxng:8080")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(cfg.AuthAllowedSignIn, ",") != "google.com,apple.com,password" || len(cfg.TrustedProxies) != 0 {
+		t.Errorf("defaults: sign-in %v, proxies %v", cfg.AuthAllowedSignIn, cfg.TrustedProxies)
+	}
+
+	t.Setenv("AUTH_ALLOWED_SIGN_IN", " Google.com , password")
+	t.Setenv("TRUSTED_PROXIES", "10.203.20.10, 10.0.0.0/8, ::ffff:192.0.2.1, 10.203.20.17/28")
+	if cfg, err = Load(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(cfg.AuthAllowedSignIn, ",") != "google.com,password" {
+		t.Errorf("sign-in = %v", cfg.AuthAllowedSignIn)
+	}
+	if fmt.Sprint(cfg.TrustedProxies) != "[10.203.20.10/32 10.0.0.0/8 192.0.2.1/32 10.203.20.16/28]" {
+		t.Errorf("proxies = %v", cfg.TrustedProxies)
+	}
+
+	t.Setenv("AUTH_ALLOWED_SIGN_IN", "*")
+	if cfg, err = Load(); err != nil || cfg.AuthAllowedSignIn != nil {
+		t.Errorf("* = %v, %v", cfg.AuthAllowedSignIn, err)
+	}
+
+	for _, bad := range []string{"cloudflared", "10.0.0.0/33", "10.0.0.1:80"} {
+		t.Setenv("TRUSTED_PROXIES", bad)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "TRUSTED_PROXIES") {
+			t.Errorf("%q: err = %v", bad, err)
+		}
 	}
 }

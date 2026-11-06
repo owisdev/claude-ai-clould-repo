@@ -95,6 +95,7 @@ func logRequests(log *slog.Logger) Middleware {
 				"status", rec.status,
 				"duration_ms", time.Since(start).Milliseconds(),
 				"request_id", requestIDFrom(r.Context()),
+				"ip", remoteIP(r),
 			}
 			if rec.user != "" {
 				attrs = append(attrs, "user", rec.user)
