@@ -142,6 +142,25 @@ before any implementation.
   To decide at the start of step 3: **Q3** new empty database
   (recommended; API clients made again in the panel) or a copy of the
   local one; which real email is the production admin.
+  **Admin email idea (owner, 2026-11-06): an address on the own domain,
+  e.g. `admin@dawirli.com`, through Cloudflare Email Routing** (free on
+  the Free plan; forwards incoming mail to the owner's existing mailbox,
+  no inbox on Cloudflare; up to 200 rules per domain, catch-all and
+  `user+tag@` supported; Cloudflare adds the MX / TXT records itself).
+  Receiving is enough for us: the Firebase verification link and
+  password-reset mails (step 5) and Cloudflare Access one-time codes
+  (step 6) only need to arrive. Sending from `@dawirli.com` would need
+  Email Sending (Workers Paid) — not needed. Setup (owner): Cloudflare
+  dashboard → `dawirli.com` → Email → Email Routing → add and verify
+  the destination (personal mailbox) → rule `admin@dawirli.com` → it.
+  Check first: (1) whether `dawirli.com` already receives mail
+  elsewhere (existing MX records, e.g. for the Dawirli app): Email
+  Routing replaces them; (2) the admin account then depends on the
+  Cloudflare account and the personal mailbox (whoever controls them
+  can reset the admin's Firebase password), so two-factor login on both
+  (Cloudflare to do, see above) and on the admin (step 5). Then a new
+  Firebase user with that email becomes `ADMIN_EMAIL` in the production
+  `.env`.
 
 Agreed in the plan review:
 - **Real client IP behind the tunnel:** behind `cloudflared` every
