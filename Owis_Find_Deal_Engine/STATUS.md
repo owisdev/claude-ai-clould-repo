@@ -1,6 +1,6 @@
 # Project status and handoff
 
-Last updated: 2026-11-01 · Project branch: `claude/cloud-vs-local-7xi988`
+Last updated: 2026-11-06 · Project branch: `claude/cloud-vs-local-7xi988`
 (steps 7–12 merged: step 12 via PR #9, fixes PR #10, guide PR #11;
 step 13 via PR #12; nothing is merged into `main` yet).
 
@@ -62,17 +62,19 @@ before any implementation.
     Hetzner (€6–8/month, PayPal) stays the fallback; the compose stack
     moves in about an hour. Oracle sign-up needs a physical bank card
     (virtual / prepaid refused).
-- **D7 domain: `dealcoon.com`** (brand **DealCoon**, raccoon logo),
-  bought 2026-11-01 at Cloudflare Registrar ($11.17 / year,
-  auto-renew on), in the owner's existing Cloudflare account. "Deal
-  Scout" was dropped: an app of that name exists (`dealscout.app`).
-  Addresses: **`api.dealcoon.com`** for the API, `/docs`, `/admin` and
-  the agents (`https://api.dealcoon.com/mcp`); `dealcoon.com` / `www`
-  free for the app website (e.g. the owner's Cloudflare Pages project).
-  Owner to do: verify the registrant email (within 14 days),
-  two-factor login on the Cloudflare account. DNS not changed yet.
+- **D7 domain: `dawirli.com`** (changed by the owner 2026-11-06;
+  replaces `dealcoon.com`, which was bought 2026-11-01 at Cloudflare
+  Registrar with the brand DealCoon). Addresses: **`api.dawirli.com`**
+  for the API, `/docs`, `/admin` and the agents
+  (`https://api.dawirli.com/mcp`); `dawirli.com` / `www` free for the
+  app website (e.g. the owner's Cloudflare Pages project). DNS not
+  changed yet. To confirm with the owner: where `dawirli.com` is
+  registered (the tunnel plan needs its DNS on Cloudflare), the brand
+  name, and whether `dealcoon.com` is kept or left to expire. Owner to
+  do: verify the registrant email, two-factor login on the registrar
+  (Cloudflare) account.
 - **HTTPS: permanent Cloudflare Tunnel** (`cloudflared` next to the
-  stack) for `api.dealcoon.com`: no web port open on the VM, only SSH.
+  stack) for `api.dawirli.com`: no web port open on the VM, only SSH.
   Turn off Cloudflare bot blocking for `/api` and `/mcp` (agents and
   apps must get through); Cloudflare's 100 s limit is above the 60 s
   live search.
@@ -809,7 +811,8 @@ instant); label scraper prices as approximate in the app.
 
 D5 answered: $5 per month (free plans). D6 and D7 answered 2026-11-01:
 **D6** Oracle Cloud Always Free (Dubai, Arm A1, 2 OCPUs / 12 GB),
-**D7** `dealcoon.com` (API at `api.dealcoon.com`) — details in "Where
+**D7** `dawirli.com` (API at `api.dawirli.com`; changed from
+`dealcoon.com` 2026-11-06) — details in "Where
 we are". Later: D8 paid Apify / SerpApi plans (before real users).
 
 ## To resume in a new Claude Code session
@@ -963,7 +966,8 @@ Please report:
 
 ## Open decisions (owner)
 
-- Hosting and domain: decided 2026-11-01 (D6 Oracle, D7 `dealcoon.com`).
+- Hosting and domain: decided 2026-11-01 (D6 Oracle, D7 `dawirli.com`,
+  changed from `dealcoon.com` 2026-11-06).
 - Oracle Pay-As-You-Go upgrade — before the 30-day trial ends.
 - D8 paid Apify / SerpApi plans — before real users.
 - Payment provider for paid plans — phase 2.

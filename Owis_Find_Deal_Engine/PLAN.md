@@ -540,7 +540,7 @@ Redis, Postgres)
     admin email verification** (`ADMIN_REQUIRE_VERIFIED_EMAIL=true`, real
     admin emails, verified; disabled since 2026-10-11).
     Hosting choice (section 10: **Oracle Always Free, Dubai**), domain
-    (**`dealcoon.com`**, API at `api.dealcoon.com`), HTTPS (**Cloudflare
+    (**`dawirli.com`**, API at `api.dawirli.com`), HTTPS (**Cloudflare
     Tunnel**; **Cloudflare Access** on `/admin`), arm64 image,
     hardening of section 3.2, secrets in the host's secret store,
     Postgres backups (**Oracle Object Storage**), staging (later, before
@@ -550,7 +550,7 @@ Redis, Postgres)
     **After the first deployment, test the MCP endpoint with real agents**
     (moved here from the step 13 owner test, 2026-10-26): connect Claude
     Code (`claude mcp add --transport http owis-find-deal
-    https://<domain>/mcp --header "Authorization: Bearer ofd_live_…"`),
+    https://api.dawirli.com/mcp --header "Authorization: Bearer ofd_live_…"`),
     check `claude mcp list` → ✔ Connected and a `search_products` call
     from a chat; then the step 13 guide steps 9 (logs: one line per MCP
     request, no key in the log; dashboard row of the client) and 10
@@ -583,8 +583,9 @@ approved; another SHEIN scraper (cheaper or Saudi site).
 running the whole compose stack. Backups to Oracle Object Storage (free
 20 GB). Fallback: Hetzner (€6–8/month, billed by the hour).
 
-**Domain (D7):** `dealcoon.com` at Cloudflare Registrar. The service is
-`https://api.dealcoon.com` (agents: `https://api.dealcoon.com/mcp`),
+**Domain (D7):** `dawirli.com` (changed 2026-11-06 from `dealcoon.com`;
+DNS on Cloudflare for the tunnel). The service is
+`https://api.dawirli.com` (agents: `https://api.dawirli.com/mcp`),
 reached through a Cloudflare Tunnel (no web port open on the VM);
 `/admin` behind Cloudflare Access + Firebase login with two-factor.
 Details in STATUS.md, "Where we are".
