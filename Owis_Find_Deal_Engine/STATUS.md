@@ -1,8 +1,10 @@
 # Project status and handoff
 
-Last updated: 2026-11-06 · Project branch: `claude/cloud-vs-local-7xi988`
-(steps 7–12 merged: step 12 via PR #9, fixes PR #10, guide PR #11;
-step 13 via PR #12; nothing is merged into `main` yet).
+Last updated: 2026-11-06 · Project branch: **`main`** from step 14,
+step 2 on (owner, 2026-11-06, Q8: the old project branch
+`claude/cloud-vs-local-7xi988` goes into `main` with PR #8 and stays
+frozen; new step PRs target `main`). Steps 7–12: PRs #9–#11, step 13:
+#12, step 14 step 1: #17.
 
 Read first:
 - [docs/step13_guide.pdf](docs/step13_guide.pdf) — **step 13**: what the
@@ -62,8 +64,53 @@ before any implementation.
   `govulncheck`, store tests (CI runs them). Owner: review and merge the
   PR; optional check on the PC (`docker compose up -d --build`, normal
   login and test search still work).
-- **Next: step 2** (deployment plumbing: arm64 image, production compose
-  with cloudflared, VM setup and deploy scripts) — to explain first.
+  **Owner test on the PC (2026-11-06): passed. ✅** Start line shows
+  `trusted_proxies [10.203.20.10/32]` and the sign-in list; admin login
+  and test search work (audit IP `172.19.0.1`); every request line has
+  `"ip"`; a faked `CF-Connecting-IP: 1.2.3.4` from the PC is ignored
+  (`172.19.0.1`); email/password user's search works; same search again
+  `cached:true` in 0.22 s, remaining 19 unchanged (the first one was live:
+  the step 13 cache entry was older than 72 h; the admin test search
+  never uses the cache).
+- **Step 2 — built 2026-11-06 (PR into `main`):** deployment plumbing.
+  Owner decisions: **Q1** deploys by hand (each step explained, the owner
+  runs the command; no automatic deploy for now), **Q8** `main`.
+  - Dockerfile cross-compiles (`--platform=$BUILDPLATFORM`, `TARGETARCH`):
+    arm64 without emulation; OCI source label.
+  - CI (`server.yml`): after the tests, builds amd64 + arm64; on pushes
+    to `main` (and *Run workflow*) publishes
+    `ghcr.io/owisdev/owis_find_deal_engine:<commit>` and `:main` (labels
+    `revision`, `source`); PRs build only. Checks `compose.prod.yml` and
+    the scripts' syntax.
+  - `compose.prod.yml`: server from ghcr.io (`IMAGE_TAG`), `cloudflared`
+    `2026.10.7` at `10.203.20.10` (profile `tunnel`, `TUNNEL_TOKEN` from
+    `.env`, read-only, health check `tunnel ready`). SearXNG pinned to
+    `2026.11.2-cccbc9e15` in `docker-compose.yml`.
+  - `deploy/bootstrap-vm.sh` (once, `sudo`): updates, Docker from
+    Docker's apt repo, unattended-upgrades, SSH keys only (drop-in
+    `99-ofd.conf`), Docker log rotation, docker group, clone to
+    `/opt/ofd/repo`, `.env` from `.env.example` (600), listening ports.
+  - `deploy/deploy.sh [commit]`: newest `:main` image or a given commit of
+    `main` (rollback = older commit); moves `/opt/ofd/repo` to it,
+    refuses hand-edited files / unknown / non-main / image-less commits,
+    turns the tunnel on when `TUNNEL_TOKEN` is set, waits for health,
+    warns if the tunnel does not connect, logs to `/opt/ofd/deploys.log`.
+  - Tested here: compose configs; `deploy.sh` against a fake VM (local
+    registry, bare repo as origin, real Postgres / Redis / SearXNG, fake
+    Firebase): first deploy, newer, rollback by short id, unknown,
+    other-branch and image-less commits, hand-edited file, tunnel on with
+    a bad token (warning, server keeps running); `bootstrap-vm.sh` in an
+    Ubuntu 24.04 container (systemd stubbed): Docker + compose
+    installed, SSH settings applied, second run changes nothing, clear
+    stop while `main` has no server, `.env` 600. Not tested here: the
+    real Dockerfile build in Docker (CI builds both platforms on the
+    PR), the real VM (step 3).
+  - Owner: merge PR #8 (project branch → `main`) first, then this PR;
+    CI then publishes the first image; make the package public if it is
+    private (README, Production).
+- **Next: step 3** (VM setup and first start: `bootstrap-vm.sh`,
+  production `.env`, `deploy.sh`, check through the SSH tunnel) — to
+  explain first.
 
 Agreed in the plan review:
 - **Real client IP behind the tunnel:** behind `cloudflared` every

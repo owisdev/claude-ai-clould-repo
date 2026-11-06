@@ -4,8 +4,13 @@
 ARG NODE_IMAGE=node:22-alpine
 ARG GO_IMAGE=golang:1.26-alpine
 
+# The web and Go stages run on the build machine's own platform
+# (BUILDPLATFORM) and the Go compiler cross-compiles for the target
+# (TARGETARCH): an arm64 image (Oracle Ampere VM) builds on a normal
+# amd64 machine without emulation. Only the last stage is per platform.
+
 # Admin web app (React): type-checked and built, then embedded in the binary.
-FROM ${NODE_IMAGE} AS web
+FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS web
 WORKDIR /web
 COPY web/admin/package.json web/admin/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
@@ -13,22 +18,25 @@ COPY web/admin/ ./
 RUN npx tsc --noEmit && npx vite build --outDir /dist --emptyOutDir
 
 # Build: static Go binary (no cgo), reproducible paths, debug info stripped.
-FROM ${GO_IMAGE} AS build
+FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . .
 COPY --from=web /dist ./internal/adminui/dist
 ARG VERSION=dev
+ARG TARGETOS TARGETARCH
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -trimpath \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
       -ldflags="-s -w -X main.version=${VERSION}" \
       -o /out/owis_find_deal_engine ./cmd/owis_find_deal_engine
 
 # Run: distroless = no shell, no package manager; CA certificates included
 # (for SerpApi and the auth provider's JWKS over HTTPS). Runs as non-root.
 FROM gcr.io/distroless/static-debian12:nonroot
+# Links the published image (ghcr.io) to the repository.
+LABEL org.opencontainers.image.source="https://github.com/owisdev/claude-ai-clould-repo"
 COPY --from=build /out/owis_find_deal_engine /owis_find_deal_engine
 USER nonroot:nonroot
 ENV PORT=3002
