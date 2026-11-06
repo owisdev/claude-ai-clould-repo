@@ -63,18 +63,22 @@ before any implementation.
     moves in about an hour. Oracle sign-up needs a physical bank card
     (virtual / prepaid refused).
 - **D7 domain: `dawirli.com`** (changed by the owner 2026-11-06;
-  replaces `dealcoon.com`, which was bought 2026-11-01 at Cloudflare
-  Registrar with the brand DealCoon). Addresses: **`api.dawirli.com`**
-  for the API, `/docs`, `/admin` and the agents
-  (`https://api.dawirli.com/mcp`); `dawirli.com` / `www` free for the
-  app website (e.g. the owner's Cloudflare Pages project). DNS not
-  changed yet. To confirm with the owner: where `dawirli.com` is
-  registered (the tunnel plan needs its DNS on Cloudflare), the brand
-  name, and whether `dealcoon.com` is kept or left to expire. Owner to
-  do: verify the registrant email, two-factor login on the registrar
-  (Cloudflare) account.
+  replaces `dealcoon.com`, bought 2026-11-01 with the brand DealCoon,
+  now dropped). Bought at **Cloudflare Registrar** (DNS already on
+  Cloudflare, as the tunnel needs). `dawirli.com` / `www.dawirli.com`
+  are used by the owner's **Dawirli app**, which will later call this
+  service. This service is **"Global Product Search"** (the external
+  product search behind Dawirli) at its own subdomain
+  **`globalprodsearch.dawirli.com`**: API, `/docs`, `/admin` and the
+  agents (`https://globalprodsearch.dawirli.com/mcp`). The name can
+  still change until the tunnel's DNS record is made. DNS not changed
+  yet. When the Dawirli app calls the API from a browser:
+  `CORS_ALLOWED_ORIGINS=https://dawirli.com,https://www.dawirli.com`.
+  To confirm with the owner: keep `dealcoon.com` or let it expire.
+  Owner to do: verify the registrant email, two-factor login on the
+  Cloudflare account.
 - **HTTPS: permanent Cloudflare Tunnel** (`cloudflared` next to the
-  stack) for `api.dawirli.com`: no web port open on the VM, only SSH.
+  stack) for `globalprodsearch.dawirli.com`: no web port open on the VM, only SSH.
   Turn off Cloudflare bot blocking for `/api` and `/mcp` (agents and
   apps must get through); Cloudflare's 100 s limit is above the 60 s
   live search.
@@ -811,7 +815,7 @@ instant); label scraper prices as approximate in the app.
 
 D5 answered: $5 per month (free plans). D6 and D7 answered 2026-11-01:
 **D6** Oracle Cloud Always Free (Dubai, Arm A1, 2 OCPUs / 12 GB),
-**D7** `dawirli.com` (API at `api.dawirli.com`; changed from
+**D7** `dawirli.com` (service at `globalprodsearch.dawirli.com`; changed from
 `dealcoon.com` 2026-11-06) — details in "Where
 we are". Later: D8 paid Apify / SerpApi plans (before real users).
 
