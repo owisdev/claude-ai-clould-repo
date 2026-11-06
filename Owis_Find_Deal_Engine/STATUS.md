@@ -105,12 +105,43 @@ before any implementation.
     stop while `main` has no server, `.env` 600. Not tested here: the
     real Dockerfile build in Docker (CI builds both platforms on the
     PR), the real VM (step 3).
-  - Owner: merge PR #8 (project branch → `main`) first, then this PR;
-    CI then publishes the first image; make the package public if it is
-    private (README, Production).
-- **Next: step 3** (VM setup and first start: `bootstrap-vm.sh`,
-  production `.env`, `deploy.sh`, check through the SSH tunnel) — to
-  explain first.
+  - **Done by the owner 2026-11-06:** PR #8 (project branch → `main`)
+    and PR #18 merged; CI published the image; package made public
+    (checked: anonymous pull of `:main` lists `amd64` and `arm64`).
+- **Next: step 3 — VM setup and first start. Explained to the owner
+  2026-11-06; to do in a new session**, command by command (Q1: Claude
+  explains each command, the owner runs it over SSH). Nothing is open to
+  the internet yet: no tunnel, no domain (step 4).
+  1. *Owner's PC:* stop the local stack or use another local port for
+     the SSH tunnel (both use 3002). Have the local `.env` at hand.
+  2. *VM:* `ssh -i ~/.ssh/owis_oracle.key ubuntu@<IP>`; download
+     `bootstrap-vm.sh` from `main` (README, Production), read it, `sudo
+     bash bootstrap-vm.sh`; log out and in (docker group). Check its
+     last part: only port 22 listens on all addresses.
+  3. *Production `.env`* (`/opt/ofd/repo/Owis_Find_Deal_Engine/server/.env`,
+     mode 600): start from the local `.env` (copied with `scp`), then
+     **new** `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `SEARXNG_SECRET`,
+     `SETTINGS_ENCRYPTION_KEY` (`openssl rand -hex 32` each; keep the
+     encryption key also offline, e.g. password manager); `ADMIN_EMAIL` =
+     the real admin email; same Firebase values (`AUTH_*`,
+     `ADMIN_FIREBASE_API_KEY`); `ADMIN_REQUIRE_2FA` and
+     `ADMIN_REQUIRE_VERIFIED_EMAIL` stay `false` until step 5;
+     `WEBHOOK_ALLOW_PRIVATE` not true; `CORS_ALLOWED_ORIGINS` empty for
+     now; no `TUNNEL_TOKEN` yet. Search sources (SerpApi key, Apify
+     actors / token, markets) from the local `.env` are copied into the
+     new database once at the first start.
+  4. `deploy/deploy.sh` (no argument: newest image of `main`) → all
+     services healthy, version = the commit.
+  5. *Check from the PC through SSH:* `ssh -i … -L 3012:127.0.0.1:3002
+     ubuntu@<IP>` → `http://localhost:3012/admin/`: admin login,
+     dashboard, settings (sources, keys present), one test search,
+     `/docs/`; `docker logs owis_find_deal_engine-server-1` on the VM.
+  6. *Restart test:* `sudo reboot`, log in again → the stack is back by
+     itself (`restart: unless-stopped`).
+  7. *Oracle console:* the subnet's security list allows only TCP 22 in.
+  To decide at the start of step 3: **Q3** new empty database
+  (recommended; API clients made again in the panel) or a copy of the
+  local one; which real email is the production admin.
 
 Agreed in the plan review:
 - **Real client IP behind the tunnel:** behind `cloudflared` every
