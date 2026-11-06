@@ -54,6 +54,48 @@ curl localhost:3002/api/v1/health
   under memory pressure evicts cache entries before usage counters.
 - `docker compose stop` shuts the server down gracefully.
 
+### Production (Oracle VM)
+
+The VM (Oracle Always Free, Ubuntu 24.04, Arm) runs the same stack from
+`docker-compose.yml` plus `compose.prod.yml`:
+
+- **Image:** CI builds it for amd64 and arm64 on every push to `main` that
+  changes the server and passes the tests, and publishes it as
+  `ghcr.io/owisdev/owis_find_deal_engine:<commit>` (and `:main`). Pull
+  requests build both platforms without publishing. The package must be
+  **public** (GitHub → profile → Packages → `owis_find_deal_engine` →
+  Package settings → Change visibility), so the VM needs no token.
+- **No automatic deploy** (owner, 2026-11-06): the owner deploys by hand.
+- **cloudflared** (Cloudflare Tunnel) at `10.203.20.10` on the `tunnel`
+  network, only when `TUNNEL_TOKEN` is set in `.env`. Before that the
+  server is reached through SSH: `ssh -L 3002:127.0.0.1:3002 ubuntu@<VM>`
+  → `http://localhost:3002`.
+
+Once, on the VM:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/owisdev/claude-ai-clould-repo/main/Owis_Find_Deal_Engine/server/deploy/bootstrap-vm.sh -o bootstrap-vm.sh
+sudo bash bootstrap-vm.sh   # Docker, security updates, SSH keys only, /opt/ofd/repo, .env
+exit                        # log in again (docker group)
+nano /opt/ofd/repo/Owis_Find_Deal_Engine/server/.env   # production secrets
+```
+
+Deploy, roll back, look:
+
+```sh
+cd /opt/ofd/repo/Owis_Find_Deal_Engine/server
+deploy/deploy.sh              # newest image from main
+deploy/deploy.sh c26b5be      # a given commit of main (roll back = older commit)
+cat /opt/ofd/deploys.log      # what was deployed when
+docker logs -f owis_find_deal_engine-server-1   # server log (Ctrl+C to stop)
+```
+
+`deploy.sh` moves `/opt/ofd/repo` to the image's commit (compose files and
+SearXNG settings match the image), pulls, restarts, waits until the
+server is healthy and prints its version; on failure it shows the log and
+the rollback command. `.env` is never touched. Database migrations run at
+start: rolling back past a migration is not supported (restore a backup).
+
 ### Caller address behind the tunnel
 
 In production requests arrive through the Cloudflare Tunnel: the

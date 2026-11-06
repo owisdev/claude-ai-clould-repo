@@ -9,6 +9,8 @@ on:
     paths:
       - "Owis_Find_Deal_Engine/server/**"
       - ".github/workflows/server.yml"
+  # Publish the image of main again by hand (Actions -> server -> Run workflow).
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -100,7 +102,15 @@ jobs:
     name: docker image and compose file
     runs-on: ubuntu-latest
     needs: [test, admin-web]
-    timeout-minutes: 20
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write # publish to ghcr.io (main only)
+    env:
+      IMAGE: ghcr.io/owisdev/owis_find_deal_engine
+      # Production images: pushes to main only (no automatic deploy: the
+      # owner runs deploy/deploy.sh on the VM, owner 2026-11-06).
+      PUBLISH: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -109,6 +119,8 @@ jobs:
           printf 'SEARXNG_SECRET=ci\nREDIS_PASSWORD=ci\nPOSTGRES_PASSWORD=ci\nSETTINGS_ENCRYPTION_KEY=ci\n' > .env
           docker compose config -q
           docker compose -f docker-compose.yml -f compose.dev.yml config -q
+          IMAGE_TAG=ci docker compose -f docker-compose.yml -f compose.prod.yml --profile tunnel config -q
+          bash -n deploy/bootstrap-vm.sh deploy/deploy.sh
           rm .env
 
       - uses: docker/setup-buildx-action@v4
@@ -132,3 +144,36 @@ jobs:
           if docker run --rm owis_find_deal_engine:ci; then
             echo "server started without required config"; exit 1
           fi
+
+      # Both platforms, with the same cache. arm64 = the Oracle VM. The Go
+      # compiler cross-compiles, so no emulation is needed.
+      - name: Log in to ghcr.io
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build amd64 + arm64 (published from main)
+        uses: docker/build-push-action@v7
+        with:
+          context: Owis_Find_Deal_Engine/server
+          platforms: linux/amd64,linux/arm64
+          push: ${{ env.PUBLISH == 'true' }}
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:main
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          build-args: VERSION=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Published image
+        if: env.PUBLISH == 'true'
+        run: |
+          echo "### Image published" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`${IMAGE}:${GITHUB_SHA}\` (also \`:main\`)" >> "$GITHUB_STEP_SUMMARY"
+          echo "On the VM: \`deploy/deploy.sh ${GITHUB_SHA::7}\`" >> "$GITHUB_STEP_SUMMARY"
