@@ -108,6 +108,25 @@ before any implementation.
   - **Done by the owner 2026-11-06:** PR #8 (project branch → `main`)
     and PR #18 merged; CI published the image; package made public
     (checked: anonymous pull of `:main` lists `amd64` and `arm64`).
+- **Start of the next session — admin email first (owner's to-do,
+  2026-11-06).** Cloudflare checked: `dawirli.com` is active in the
+  account and has **no MX records**, so Email Routing breaks nothing.
+  Owner, in this order:
+  1. Two-factor login on the Cloudflare account (profile → My Profile →
+     Authentication → Two-Factor Authentication; authenticator app;
+     keep the backup codes).
+  2. Two-factor on the destination mailbox (Gmail: Google Account →
+     Security → 2-Step Verification).
+  3. Turn on Email Routing for `dawirli.com` (dashboard → `dawirli.com`
+     → Email → Email Routing; Cloudflare adds the MX / TXT records).
+  4. Add and verify the personal mailbox as the destination address.
+  5. Rule `admin@dawirli.com` → that mailbox. No catch-all for now
+     (spam); more addresses (e.g. `support@`) only when needed.
+  6. Test: a mail from another account to `admin@dawirli.com` arrives
+     (also look in spam).
+  Then tell Claude the result; `admin@dawirli.com` becomes the
+  production admin (new Firebase user, `ADMIN_EMAIL` in the production
+  `.env`) and step 3 starts.
 - **Next: step 3 — VM setup and first start. Explained to the owner
   2026-11-06; to do in a new session**, command by command (Q1: Claude
   explains each command, the owner runs it over SSH). Nothing is open to
