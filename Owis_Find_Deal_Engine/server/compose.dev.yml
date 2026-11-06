@@ -1,0 +1,26 @@
+# Development override: run only SearXNG, Redis and Postgres in Docker and
+# the Go server on your machine (go run). Publishes them on 127.0.0.1 only.
+#
+#   docker compose -f docker-compose.yml -f compose.dev.yml up -d searxng redis postgres
+#   set -a; . ./.env; set +a; go run ./cmd/owis_find_deal_engine
+#
+# .env must then use SEARXNG_URL=http://127.0.0.1:8888,
+# REDIS_URL=redis://:<REDIS_PASSWORD>@127.0.0.1:6379/0 and
+# DATABASE_URL=postgres://ofd:<POSTGRES_PASSWORD>@127.0.0.1:5432/ofd?sslmode=disable
+
+services:
+  searxng:
+    ports:
+      - "127.0.0.1:8888:8080"
+  redis:
+    # The data network is internal (no port publishing); add a normal one.
+    networks: [data, devports]
+    ports:
+      - "127.0.0.1:6379:6379"
+  postgres:
+    networks: [data, devports]
+    ports:
+      - "127.0.0.1:5432:5432"
+
+networks:
+  devports: {}

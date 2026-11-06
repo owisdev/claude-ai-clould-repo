@@ -1,0 +1,44 @@
+# SearXNG settings for owis_find_deal_engine.
+# Private instance: reached only by our Go service on the internal network.
+# Docs: https://docs.searxng.org/admin/settings/index.html
+
+use_default_settings:
+  engines:
+    # General web engines that understand the site: operator.
+    keep_only:
+      - google
+      - bing
+      - duckduckgo
+      - brave
+      - startpage
+      - mojeek
+
+general:
+  instance_name: "owis_find_deal_engine"
+
+search:
+  safe_search: 1
+  # json is required by our service; html kept for manual checks in a browser.
+  formats:
+    - html
+    - json
+
+server:
+  # secret_key is taken from the SEARXNG_SECRET environment variable.
+  # No bot limiter: the only client is our own service.
+  limiter: false
+  public_instance: false
+  image_proxy: false
+
+outgoing:
+  # Keep engines fast: our service gives SearXNG PROVIDER_ATTEMPT_TIMEOUT
+  # (8s by default) before falling back to SerpApi.
+  request_timeout: 3.0
+  max_request_timeout: 6.0
+
+engines:
+  # Disabled in SearXNG's defaults; enable them for better shopping results.
+  - name: google
+    disabled: false
+  - name: bing
+    disabled: false

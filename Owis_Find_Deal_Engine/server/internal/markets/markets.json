@@ -1,0 +1,91 @@
+{
+  "markets": {
+    "amazon": {
+      "name": "Amazon", "provider": "web",
+      "search_link": "https://{host}/s?k={query}",
+      "product_pages": {
+        "paths": [
+          "^/(?:[^/]+/){0,3}(?:dp|gp/product|gp/aw/d)/(?P<id>[A-Z0-9]{10})(?:[/?]|$)",
+          "^/clp/(?P<id>[A-Z0-9]{10})(?:[/?]|$)"
+        ],
+        "link": "https://{host}/dp/{id}"
+      }
+    },
+    "ebay": {
+      "name": "eBay", "provider": "web",
+      "search_link": "https://{host}/sch/i.html?_nkw={query}",
+      "product_pages": {
+        "paths": ["^/itm/(?:[^/]+/)?(?P<id>[0-9]{9,15})(?:[/?]|$)"],
+        "link": "https://{host}/itm/{id}"
+      }
+    },
+    "aliexpress": {
+      "name": "AliExpress", "provider": "web",
+      "search_link": "https://{host}/w/wholesale-{slug}.html",
+      "product_pages": {
+        "paths": ["^/item/(?P<id>[0-9]{6,20})\\.html$"],
+        "link": "https://{host}/item/{id}.html"
+      }
+    },
+    "temu": {
+      "name": "Temu", "provider": "web",
+      "search_link": "https://{host}/search_result.html?search_key={query}",
+      "product_pages": {
+        "paths": [
+          "^/(?:[a-z]{2}(?:-[a-z]{2})?/)?[^/]*-g-(?P<id>[0-9]{6,20})\\.html$",
+          "^/(?:[a-z]{2}(?:-[a-z]{2})?/)?goods\\.html$"
+        ],
+        "id_param": "goods_id",
+        "link": "https://{host}/goods.html?goods_id={id}"
+      }
+    },
+    "shein": {
+      "name": "SHEIN", "provider": "web",
+      "search_link": "https://{host}/pdsearch/{query_path}/",
+      "product_pages": {
+        "paths": ["^/(?:[a-z]{2}(?:-[a-z]{2})?/)?[^/]*-p-(?P<id>[0-9]{4,20})(?:-cat-[0-9]+)?\\.html$"]
+      }
+    }
+  },
+  "countries": {
+    "usa": {
+      "name": "United States of America",
+      "currency": "USD",
+      "region": "us",
+      "language": "en",
+      "markets": [
+        { "market": "amazon",     "domain": "amazon.com" },
+        { "market": "ebay",       "domain": "ebay.com" },
+        { "market": "aliexpress", "domain": "aliexpress.com" },
+        { "market": "temu",       "domain": "temu.com" },
+        { "market": "shein",      "domain": "us.shein.com" }
+      ]
+    },
+    "ksa": {
+      "name": "Kingdom of Saudi Arabia",
+      "currency": "SAR",
+      "region": "sa",
+      "language": "en",
+      "markets": [
+        { "market": "amazon",     "domain": "amazon.sa" },
+        { "market": "ebay",       "domain": "ebay.com" },
+        { "market": "aliexpress", "domain": "aliexpress.com" },
+        { "market": "temu",       "domain": "temu.com" },
+        { "market": "shein",      "domain": "ar.shein.com" }
+      ]
+    },
+    "jor": {
+      "name": "Jordan",
+      "currency": "JOD",
+      "region": "jo",
+      "shopping_region": "us",
+      "language": "en",
+      "markets": [
+        { "market": "amazon",     "domain": "amazon.com" },
+        { "market": "aliexpress", "domain": "aliexpress.com" },
+        { "market": "temu",       "domain": "temu.com" },
+        { "market": "shein",      "domain": "ar.shein.com" }
+      ]
+    }
+  }
+}
