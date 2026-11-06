@@ -70,12 +70,11 @@ before any implementation.
   service. This service is **"Global Product Search"** (the external
   product search behind Dawirli) at its own subdomain
   **`globalprodsearch.dawirli.com`**: API, `/docs`, `/admin` and the
-  agents (`https://globalprodsearch.dawirli.com/mcp`). The name can
-  still change until the tunnel's DNS record is made. DNS not changed
-  yet. When the Dawirli app calls the API from a browser:
+  agents (`https://globalprodsearch.dawirli.com/mcp`); name final
+  (owner, 2026-11-06). DNS not changed yet. When the Dawirli app calls the API from a browser:
   `CORS_ALLOWED_ORIGINS=https://dawirli.com,https://www.dawirli.com`.
-  To confirm with the owner: keep `dealcoon.com` or let it expire.
-  Owner to do: verify the registrant email, two-factor login on the
+  `dealcoon.com`: left to expire (owner, 2026-11-06); owner to turn
+  off its auto-renew in Cloudflare. Owner to do: verify the registrant email, two-factor login on the
   Cloudflare account.
 - **HTTPS: permanent Cloudflare Tunnel** (`cloudflared` next to the
   stack) for `globalprodsearch.dawirli.com`: no web port open on the VM, only SSH.
