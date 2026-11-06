@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -40,8 +41,9 @@ func clientFrom(ctx context.Context) (store.Client, bool) {
 // user's login token (JWT) or an API client's key (ofd_live_...) that has
 // scope. keys nil = API keys are not accepted (no database); v nil = only
 // API keys (the MCP endpoint); scope "" = any scope (checked later, per
-// tool).
-func requireCaller(v TokenVerifier, keys KeyAuthenticator, scope string, log *slog.Logger) Middleware {
+// tool). allowedSignIn non-empty = login tokens must come from one of
+// these sign-in methods (no Firebase anonymous accounts).
+func requireCaller(v TokenVerifier, keys KeyAuthenticator, scope string, allowedSignIn []string, log *slog.Logger) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			scheme, token, ok := strings.Cut(r.Header.Get("Authorization"), " ")
@@ -97,6 +99,15 @@ func requireCaller(v TokenVerifier, keys KeyAuthenticator, scope string, log *sl
 						log.WarnContext(ctx, "token verification failed", "err", err)
 					}
 					unauthorized(w, "invalid or expired token")
+					return
+				}
+				if len(allowedSignIn) > 0 && !slices.Contains(allowedSignIn, user.SignInProvider) {
+					method := user.SignInProvider
+					if method == "" {
+						method = "unknown"
+					}
+					unauthorized(w, fmt.Sprintf("accounts signed in with %q are not accepted; sign in with one of: %s",
+						method, strings.Join(allowedSignIn, ", ")))
 					return
 				}
 				if rec, ok := w.(*statusRecorder); ok {

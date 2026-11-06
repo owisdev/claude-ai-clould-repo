@@ -43,8 +43,9 @@ curl localhost:3002/api/v1/health
 
 - `server`, `searxng`, `redis`, `postgres` run as non-root users, with
   read-only file systems, all Linux capabilities dropped and memory limits.
-- Networks: `edge` (server + SearXNG, internet access) and `data`
-  (server + Redis + Postgres, **internal**: no internet, nothing published).
+- Networks: `edge` (server + SearXNG, internet access), `data`
+  (server + Redis + Postgres, **internal**: no internet, nothing published)
+  and `tunnel` (server + cloudflared in production, `10.203.20.0/28`).
 - Postgres holds the runtime settings (see [Settings](#settings)); its
   data is in the `postgres-data` volume (backups: phase 4).
 - Only the API is published, on `127.0.0.1:3002` (`API_BIND`/`API_PORT`).
@@ -52,6 +53,29 @@ curl localhost:3002/api/v1/health
 - Redis needs a password, keeps usage counters across restarts (AOF), and
   under memory pressure evicts cache entries before usage counters.
 - `docker compose stop` shuts the server down gracefully.
+
+### Caller address behind the tunnel
+
+In production requests arrive through the Cloudflare Tunnel: the
+connection comes from cloudflared, not from the caller. Cloudflare puts
+the caller's own address in the `CF-Connecting-IP` header. The server
+believes that header **only** from the addresses in `TRUSTED_PROXIES`
+(compose: `10.203.20.10`, cloudflared's fixed address on the `tunnel`
+network); from anywhere else it is ignored, so nobody can fake an
+address. The result is used by the admin per-IP limit, API key
+allow-lists (`ip_allow`), the audit log and the request log (`"ip"`).
+Without `TRUSTED_PROXIES` (e.g. `go run`) the connection's address is
+used.
+
+### App users' sign-in methods
+
+`AUTH_ALLOWED_SIGN_IN` (default `google.com,apple.com,password`): login
+tokens must come from one of these Firebase sign-in methods
+(`firebase.sign_in_provider`); others, e.g. **anonymous** accounts, get
+`401 unauthorized` ("accounts signed in with "anonymous" are not
+accepted …"). API keys and the admin login are not affected. `*` =
+any method (needed for providers other than Firebase, whose tokens have
+no sign-in method).
 
 ### Server on your machine (development)
 
@@ -298,9 +322,9 @@ curl -H "Authorization: Bearer ofd_live_…" -H 'Content-Type: application/json'
      -d '{"title":"usb c hub","country":"jor"}' localhost:3002/api/v1/search
 ```
 
-Behind a reverse proxy (step 14) the allowed-address check sees the
-proxy's address until the proxy's client header is trusted; leave the
-list empty until then.
+Behind the Cloudflare Tunnel the allowed-address check uses the caller's
+own address from cloudflared's `CF-Connecting-IP` header (see
+[Caller address behind the tunnel](#caller-address-behind-the-tunnel)).
 
 ## Asynchronous search and webhooks
 
@@ -588,7 +612,7 @@ Errors always look like `{"error": {"code": "...", "message": "..."}}`:
 | Status | code | meaning |
 |---|---|---|
 | 400 | `invalid_request`, `unsupported_country` | bad input |
-| 401 | `unauthorized` | missing, invalid or expired JWT; unknown, revoked or expired API key |
+| 401 | `unauthorized` | missing, invalid or expired JWT, or a JWT from a sign-in method not in `AUTH_ALLOWED_SIGN_IN` (e.g. Firebase anonymous accounts); unknown, revoked or expired API key |
 | 403 | `forbidden` | API key: lacks the scope, or not allowed from this address |
 | 403 | `country_not_allowed` | API key limited to other countries |
 | 402 | `payment_required` | free daily searches used up — show upgrade |

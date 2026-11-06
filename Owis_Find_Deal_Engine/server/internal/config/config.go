@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
 	"slices"
 	"strconv"
@@ -90,6 +91,17 @@ type Config struct {
 	AuthIssuer    string
 	AuthAudience  string
 	AuthPlanClaim string
+	// AuthAllowedSignIn: the sign-in methods accepted for app users
+	// (Firebase's firebase.sign_in_provider: "google.com", "apple.com",
+	// "password", ...). Tokens made another way, e.g. Firebase anonymous
+	// accounts, are refused (401). Empty = any method (AUTH_ALLOWED_SIGN_IN=*,
+	// needed for providers other than Firebase). Owner, 2026-11-06 (E1).
+	AuthAllowedSignIn []string
+
+	// TrustedProxies: connections from these addresses may name the
+	// caller's own address in the CF-Connecting-IP header (the Cloudflare
+	// Tunnel's cloudflared). Empty = the header is never believed.
+	TrustedProxies []netip.Prefix
 
 	Plans       string // "free:20,pro:500" daily searches per plan
 	DefaultPlan string
@@ -163,6 +175,8 @@ func LoadFrom(lookup Lookup) (Config, error) {
 		AuthIssuer:                getenv("AUTH_ISSUER"),
 		AuthAudience:              getenv("AUTH_AUDIENCE"),
 		AuthPlanClaim:             env("AUTH_PLAN_CLAIM", "plan"),
+		AuthAllowedSignIn:         parseSignIn(env("AUTH_ALLOWED_SIGN_IN", "google.com,apple.com,password")),
+		TrustedProxies:            parse(getenv, &errs, "TRUSTED_PROXIES", []netip.Prefix(nil), parsePrefixes),
 		Plans:                     env("PLANS", "free:20,pro:500"),
 		DefaultPlan:               env("DEFAULT_PLAN", "free"),
 		RedisURL:                  getenv("REDIS_URL"),
@@ -414,3 +428,35 @@ func splitList(s string) []string {
 }
 
 func parseFloat(s string) (float64, error) { return strconv.ParseFloat(s, 64) }
+
+// parseSignIn reads AUTH_ALLOWED_SIGN_IN; "*" = any method (nil).
+func parseSignIn(s string) []string {
+	list := splitList(strings.ToLower(s))
+	if slices.Contains(list, "*") {
+		return nil
+	}
+	return list
+}
+
+// parsePrefixes reads a list of addresses ("10.203.20.10") and ranges
+// ("10.203.20.0/28").
+func parsePrefixes(s string) ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for _, item := range splitList(s) {
+		if strings.Contains(item, "/") {
+			p, err := netip.ParsePrefix(item)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, p.Masked())
+			continue
+		}
+		a, err := netip.ParseAddr(item)
+		if err != nil {
+			return nil, err
+		}
+		a = a.Unmap()
+		out = append(out, netip.PrefixFrom(a, a.BitLen()))
+	}
+	return out, nil
+}

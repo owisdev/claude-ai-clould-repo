@@ -538,9 +538,21 @@ Redis, Postgres)
 14. **Turn on two-factor admin login** (`ADMIN_REQUIRE_2FA=true`, Firebase
     Identity Platform, admins enrolled; disabled since 2026-10-11) **and
     admin email verification** (`ADMIN_REQUIRE_VERIFIED_EMAIL=true`, real
-    admin emails, verified; disabled since 2026-10-11).
+    admin emails, verified; disabled since 2026-10-11). Needs two new
+    admin panel screens first (owner, 2026-11-06): the second-factor
+    code at sign-in and enrolling an authenticator app (TOTP, QR code
+    drawn by a small QR library + the key as text).
+    **Real client IP behind the tunnel** (owner, 2026-11-06): the
+    server reads `CF-Connecting-IP` only from the trusted `cloudflared`
+    address (new setting), else the connection address; used by the
+    admin per-IP limit, API key IP allow-lists and the audit log.
+    **E1: refuse Firebase anonymous accounts** (owner, 2026-11-06):
+    app-user tokens must come from an allowed sign-in method (new
+    setting with a default list: Google, Apple, email/password; check
+    of `firebase.sign_in_provider`); every search already needs a
+    login token or an API key.
     Hosting choice (section 10: **Oracle Always Free, Dubai**), domain
-    (**`dealcoon.com`**, API at `api.dealcoon.com`), HTTPS (**Cloudflare
+    (**`dawirli.com`**, service at `globalprodsearch.dawirli.com`), HTTPS (**Cloudflare
     Tunnel**; **Cloudflare Access** on `/admin`), arm64 image,
     hardening of section 3.2, secrets in the host's secret store,
     Postgres backups (**Oracle Object Storage**), staging (later, before
@@ -550,7 +562,7 @@ Redis, Postgres)
     **After the first deployment, test the MCP endpoint with real agents**
     (moved here from the step 13 owner test, 2026-10-26): connect Claude
     Code (`claude mcp add --transport http owis-find-deal
-    https://<domain>/mcp --header "Authorization: Bearer ofd_live_…"`),
+    https://globalprodsearch.dawirli.com/mcp --header "Authorization: Bearer ofd_live_…"`),
     check `claude mcp list` → ✔ Connected and a `search_products` call
     from a chat; then the step 13 guide steps 9 (logs: one line per MCP
     request, no key in the log; dashboard row of the client) and 10
@@ -568,6 +580,12 @@ Redis, Postgres)
 **Phase 5 — users** (old phase 2, after deployment)
 
 15. `users` table, `/me` (Firebase email-link reminder in section 5.6).
+    **E2 (owner, 2026-11-06): daily free-search limit per IP address**
+    on top of the per-account limit (stops many Gmail accounts from one
+    person; needs the real client IP from step 14; the number with care,
+    many people share one address on mobile networks and offices).
+    Optional end-user id sent by partners / agents, for per-person
+    limits inside one API client.
 16. Plans in the database + payment webhook.
 17. Saved cart + saved-item price tracker (section 4b).
 18. Clicks + purchase reports.
@@ -583,8 +601,11 @@ approved; another SHEIN scraper (cheaper or Saudi site).
 running the whole compose stack. Backups to Oracle Object Storage (free
 20 GB). Fallback: Hetzner (€6–8/month, billed by the hour).
 
-**Domain (D7):** `dealcoon.com` at Cloudflare Registrar. The service is
-`https://api.dealcoon.com` (agents: `https://api.dealcoon.com/mcp`),
+**Domain (D7):** `dawirli.com` at Cloudflare Registrar (changed
+2026-11-06 from `dealcoon.com`). `dawirli.com` / `www` belong to the
+Dawirli app, a future caller of this service. This service, "Global
+Product Search", is `https://globalprodsearch.dawirli.com` (agents:
+`https://globalprodsearch.dawirli.com/mcp`),
 reached through a Cloudflare Tunnel (no web port open on the VM);
 `/admin` behind Cloudflare Access + Firebase login with two-factor.
 Details in STATUS.md, "Where we are".

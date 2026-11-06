@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -285,13 +286,15 @@ func run() error {
 
 	srv := &http.Server{
 		Addr: net.JoinHostPort("", cfg.Port),
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The caller's address: from cloudflared's CF-Connecting-IP header
+		// (TRUSTED_PROXIES), else the connection's.
+		Handler: api.WithClientIP(cfg.TrustedProxies)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if admin != nil && (r.URL.Path == "/admin" || strings.HasPrefix(r.URL.Path, "/admin/")) {
 				admin.ServeHTTP(w, r)
 				return
 			}
 			current.Load().handler.ServeHTTP(w, r)
-		}),
+		})),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		// The write timeout follows the search timeout, which is a runtime
@@ -300,10 +303,17 @@ func run() error {
 		MaxHeaderBytes: 16 << 10,
 	}
 
+	if len(cfg.AuthAllowedSignIn) == 0 {
+		log.Warn("app users may sign in with any method, also Firebase anonymous accounts (AUTH_ALLOWED_SIGN_IN=*)")
+	} else if slices.Contains(cfg.AuthAllowedSignIn, "anonymous") {
+		log.Warn("Firebase anonymous accounts are accepted (AUTH_ALLOWED_SIGN_IN lists anonymous)")
+	}
+
 	errCh := make(chan error, 1)
 	go func() {
 		log.Info("server started", "addr", srv.Addr, "version", version, "countries", len(cfg.Catalog.Countries()),
-			"markets_source", cfg.MarketsSource, "admin_api", admin != nil)
+			"markets_source", cfg.MarketsSource, "admin_api", admin != nil,
+			"trusted_proxies", fmt.Sprint(cfg.TrustedProxies), "allowed_sign_in", strings.Join(cfg.AuthAllowedSignIn, ","))
 		errCh <- srv.ListenAndServe()
 	}()
 
@@ -460,15 +470,16 @@ func buildApp(ctx context.Context, cfg config.Config, settingsVersion int64, sh 
 	}
 
 	a.handler = api.NewRouter(api.Deps{
-		Catalog:      catalog,
-		Searcher:     metering.New(cacheOrLive, usage.NewQuota(sh.usageStore, plans), log).WithRecorder(sh.searchRecorder()),
-		Verifier:     sh.verifier,
-		Keys:         sh.keyAuthenticator(),
-		Limiter:      limiter,
-		CORSOrigins:  cfg.CORSOrigins,
-		WriteTimeout: cfg.SearchTimeout + 10*time.Second,
-		Log:          log,
-		Jobs:         sh.jobs,
+		Catalog:       catalog,
+		Searcher:      metering.New(cacheOrLive, usage.NewQuota(sh.usageStore, plans), log).WithRecorder(sh.searchRecorder()),
+		Verifier:      sh.verifier,
+		Keys:          sh.keyAuthenticator(),
+		AllowedSignIn: cfg.AuthAllowedSignIn,
+		Limiter:       limiter,
+		CORSOrigins:   cfg.CORSOrigins,
+		WriteTimeout:  cfg.SearchTimeout + 10*time.Second,
+		Log:           log,
+		Jobs:          sh.jobs,
 		// The cache waits up to the search timeout + 5 s for a live search.
 		JobTimeout:  cfg.SearchTimeout + 15*time.Second,
 		Webhooks:    sh.webhooks,

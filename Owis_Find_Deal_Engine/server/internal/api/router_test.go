@@ -66,6 +66,7 @@ type envOpts struct {
 	quota    metering.Quota
 	keys     KeyAuthenticator
 	webhooks Webhooks
+	signIn   []string // AllowedSignIn
 }
 
 func newEnv(t *testing.T, o envOpts) *testEnv {
@@ -109,16 +110,17 @@ func newEnv(t *testing.T, o envOpts) *testEnv {
 	return &testEnv{
 		jobs: runner,
 		handler: NewRouter(Deps{
-			Jobs:        runner,
-			JobTimeout:  5 * time.Second,
-			Webhooks:    o.webhooks,
-			Catalog:     cat,
-			Searcher:    metering.New(o.searcher, o.quota, log),
-			Verifier:    verifier,
-			Keys:        o.keys,
-			Limiter:     ratelimit.New(0.001, o.burst, time.Minute),
-			CORSOrigins: []string{"https://app.example"},
-			Log:         log,
+			Jobs:          runner,
+			JobTimeout:    5 * time.Second,
+			Webhooks:      o.webhooks,
+			Catalog:       cat,
+			Searcher:      metering.New(o.searcher, o.quota, log),
+			Verifier:      verifier,
+			Keys:          o.keys,
+			AllowedSignIn: o.signIn,
+			Limiter:       ratelimit.New(0.001, o.burst, time.Minute),
+			CORSOrigins:   []string{"https://app.example"},
+			Log:           log,
 		}),
 		provider: p,
 		store:    store,
@@ -186,6 +188,40 @@ func TestSearchRequiresValidToken(t *testing.T) {
 		if rec.Header().Get("WWW-Authenticate") == "" {
 			t.Errorf("%s: missing WWW-Authenticate", name)
 		}
+	}
+}
+
+// TestAllowedSignIn (E1): login tokens from other sign-in methods, e.g.
+// Firebase anonymous accounts, are refused; API keys are not affected.
+func TestAllowedSignIn(t *testing.T) {
+	e := newEnv(t, envOpts{signIn: []string{"google.com", "apple.com", "password"}})
+	tok := func(provider string) string {
+		claims := jwt.MapClaims{}
+		if provider != "-" {
+			claims["firebase"] = map[string]any{"sign_in_provider": provider}
+		}
+		return e.provider.Token(t, "u-"+provider, claims)
+	}
+	for _, p := range []string{"google.com", "apple.com", "password"} {
+		if rec := e.do(http.MethodPost, "/api/v1/search", tok(p), searchBody); rec.Code != http.StatusOK {
+			t.Errorf("%s: status = %d body = %s", p, rec.Code, rec.Body)
+		}
+	}
+	for _, p := range []string{"anonymous", "custom", "phone", "-"} {
+		for _, path := range []string{"/api/v1/search", "/api/v1/searches"} {
+			rec := e.do(http.MethodPost, path, tok(p), searchBody)
+			if rec.Code != http.StatusUnauthorized || errorCode(t, rec) != CodeUnauthorized ||
+				!strings.Contains(rec.Body.String(), "sign in with one of: google.com, apple.com, password") {
+				t.Errorf("%s %s: status = %d body = %s", p, path, rec.Code, rec.Body)
+			}
+		}
+	}
+
+	// No list: any method (the setting AUTH_ALLOWED_SIGN_IN=*).
+	open := newEnv(t, envOpts{})
+	anon := open.provider.Token(t, "anon", jwt.MapClaims{"firebase": map[string]any{"sign_in_provider": "anonymous"}})
+	if rec := open.do(http.MethodPost, "/api/v1/search", anon, searchBody); rec.Code != http.StatusOK {
+		t.Errorf("no list, anonymous: status = %d", rec.Code)
 	}
 }
 

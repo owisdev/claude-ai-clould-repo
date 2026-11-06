@@ -1,6 +1,6 @@
 # Project status and handoff
 
-Last updated: 2026-11-01 · Project branch: `claude/cloud-vs-local-7xi988`
+Last updated: 2026-11-06 · Project branch: `claude/cloud-vs-local-7xi988`
 (steps 7–12 merged: step 12 via PR #9, fixes PR #10, guide PR #11;
 step 13 via PR #12; nothing is merged into `main` yet).
 
@@ -40,6 +40,56 @@ built yet.** The owner chose hosting and domain and created the server;
 the detailed step 14 build plan comes next, for the owner's approval
 before any implementation.
 
+**Step 14 — worked through one step at a time with the owner
+(2026-11-06): each step is explained, approved, built, then the next.**
+
+- **Step 1 — built 2026-11-06 (PR into the project branch):** real
+  client IP + E1. New bootstrap settings `TRUSTED_PROXIES` (compose:
+  `10.203.20.10`, cloudflared's fixed address on the new `tunnel`
+  network `10.203.20.0/28`; others get `.0–.7`) and
+  `AUTH_ALLOWED_SIGN_IN` (default `google.com,apple.com,password`, `*` =
+  any). `api.WithClientIP` wraps the whole server; `remoteIP` now gives
+  the caller's address (admin per-IP limit, API key `ip_allow`, audit
+  log, and the request log's new `"ip"` field). Refused sign-in method →
+  `401 unauthorized` with a clear message; API keys and admin login not
+  affected. Tested: unit tests (header only from the trusted address,
+  faked / bad / missing header, IPv6, allow-list through the tunnel,
+  each sign-in method, settings parsing), race detector, and the stack
+  in Docker with a fake Firebase, a fake cloudflared at `10.203.20.10`
+  and an "intruder" on the tunnel network: tunnel → caller IP in log
+  and audit (`203.0.113.7`), intruder's and host port's fake header
+  ignored, anonymous `401`, password / Google accepted. Not run here:
+  `govulncheck`, store tests (CI runs them). Owner: review and merge the
+  PR; optional check on the PC (`docker compose up -d --build`, normal
+  login and test search still work).
+- **Next: step 2** (deployment plumbing: arm64 image, production compose
+  with cloudflared, VM setup and deploy scripts) — to explain first.
+
+Agreed in the plan review:
+- **Real client IP behind the tunnel:** behind `cloudflared` every
+  request comes from the tunnel's Docker address, which breaks the
+  admin per-IP limit, API key IP allow-lists and the audit log. Fix:
+  trust `CF-Connecting-IP` only from the `cloudflared` address (new
+  setting), else the connection address; one function replaces
+  `remoteIP` (`internal/api/admin.go`).
+- **Identity on every search** (owner's point): already required (app
+  users: Firebase login token, e.g. Google / Apple sign-in; agents and
+  partners: API key; else `401`). **E1, in step 14:** refuse Firebase
+  anonymous accounts (allowed sign-in methods setting, default Google,
+  Apple, email/password). **E2, in phase 5:** daily free-search limit
+  per IP address on top of the per-account limit.
+- **Two-factor admin login:** the server check exists; the panel needs
+  a second-factor code screen and an authenticator-app (TOTP)
+  enrollment screen, QR code with a small QR library + key as text
+  (option a). Order: build screens → verify the admin email → enroll →
+  `ADMIN_REQUIRE_2FA=true` + `ADMIN_REQUIRE_VERIFIED_EMAIL=true`.
+  Lost phone: set `ADMIN_REQUIRE_2FA=false` on the VM over SSH, restart.
+- Still to review: the stages (plumbing, VM setup, tunnel, `/admin`
+  lock, backups, monitoring, production test, docs) and questions
+  Q1–Q8 (deploy trigger, repo private, new or copied database,
+  two-factor method, backup days, monitoring size, Access login,
+  deploy branch).
+
 - **D6 hosting: Oracle Cloud Always Free.** Home region **UAE East
   (Dubai)** (cannot change). VM `VM.Standard.A1.Flex` (Ampere Arm,
   aarch64), **2 OCPUs, 12 GB**, Canonical Ubuntu 24.04, default boot
@@ -62,17 +112,22 @@ before any implementation.
     Hetzner (€6–8/month, PayPal) stays the fallback; the compose stack
     moves in about an hour. Oracle sign-up needs a physical bank card
     (virtual / prepaid refused).
-- **D7 domain: `dealcoon.com`** (brand **DealCoon**, raccoon logo),
-  bought 2026-11-01 at Cloudflare Registrar ($11.17 / year,
-  auto-renew on), in the owner's existing Cloudflare account. "Deal
-  Scout" was dropped: an app of that name exists (`dealscout.app`).
-  Addresses: **`api.dealcoon.com`** for the API, `/docs`, `/admin` and
-  the agents (`https://api.dealcoon.com/mcp`); `dealcoon.com` / `www`
-  free for the app website (e.g. the owner's Cloudflare Pages project).
-  Owner to do: verify the registrant email (within 14 days),
-  two-factor login on the Cloudflare account. DNS not changed yet.
+- **D7 domain: `dawirli.com`** (changed by the owner 2026-11-06;
+  replaces `dealcoon.com`, bought 2026-11-01 with the brand DealCoon,
+  now dropped). Bought at **Cloudflare Registrar** (DNS already on
+  Cloudflare, as the tunnel needs). `dawirli.com` / `www.dawirli.com`
+  are used by the owner's **Dawirli app**, which will later call this
+  service. This service is **"Global Product Search"** (the external
+  product search behind Dawirli) at its own subdomain
+  **`globalprodsearch.dawirli.com`**: API, `/docs`, `/admin` and the
+  agents (`https://globalprodsearch.dawirli.com/mcp`); name final
+  (owner, 2026-11-06). DNS not changed yet. When the Dawirli app calls the API from a browser:
+  `CORS_ALLOWED_ORIGINS=https://dawirli.com,https://www.dawirli.com`.
+  `dealcoon.com`: left to expire (owner, 2026-11-06); owner to turn
+  off its auto-renew in Cloudflare. Owner to do: verify the registrant email, two-factor login on the
+  Cloudflare account.
 - **HTTPS: permanent Cloudflare Tunnel** (`cloudflared` next to the
-  stack) for `api.dealcoon.com`: no web port open on the VM, only SSH.
+  stack) for `globalprodsearch.dawirli.com`: no web port open on the VM, only SSH.
   Turn off Cloudflare bot blocking for `/api` and `/mcp` (agents and
   apps must get through); Cloudflare's 100 s limit is above the 60 s
   live search.
@@ -809,7 +864,8 @@ instant); label scraper prices as approximate in the app.
 
 D5 answered: $5 per month (free plans). D6 and D7 answered 2026-11-01:
 **D6** Oracle Cloud Always Free (Dubai, Arm A1, 2 OCPUs / 12 GB),
-**D7** `dealcoon.com` (API at `api.dealcoon.com`) — details in "Where
+**D7** `dawirli.com` (service at `globalprodsearch.dawirli.com`; changed from
+`dealcoon.com` 2026-11-06) — details in "Where
 we are". Later: D8 paid Apify / SerpApi plans (before real users).
 
 ## To resume in a new Claude Code session
@@ -963,7 +1019,8 @@ Please report:
 
 ## Open decisions (owner)
 
-- Hosting and domain: decided 2026-11-01 (D6 Oracle, D7 `dealcoon.com`).
+- Hosting and domain: decided 2026-11-01 (D6 Oracle, D7 `dawirli.com`,
+  changed from `dealcoon.com` 2026-11-06).
 - Oracle Pay-As-You-Go upgrade — before the 30-day trial ends.
 - D8 paid Apify / SerpApi plans — before real users.
 - Payment provider for paid plans — phase 2.

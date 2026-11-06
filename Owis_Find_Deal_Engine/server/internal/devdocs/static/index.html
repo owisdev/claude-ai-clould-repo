@@ -194,7 +194,7 @@ function verify(secret, header, rawBody, tolerance = 300) {
   <tr><td>400</td><td><code>invalid_request</code></td><td>Bad JSON, an unknown field, a title not 2–200 characters, a bad webhook URL.</td></tr>
   <tr><td>400</td><td><code>unsupported_country</code></td><td>Not a code from <code>/api/v1/countries</code>.</td></tr>
   <tr><td>400</td><td><code>webhook_not_configured</code></td><td>The API client has no webhook secret yet.</td></tr>
-  <tr><td>401</td><td><code>unauthorized</code></td><td>Missing, invalid, expired or revoked token or key.</td></tr>
+  <tr><td>401</td><td><code>unauthorized</code></td><td>Missing, invalid, expired or revoked token or key, or an app account from a sign-in method that is not accepted (e.g. anonymous).</td></tr>
   <tr><td>402</td><td><code>payment_required</code></td><td>An app user's free searches are used up (never for API keys).</td></tr>
   <tr><td>403</td><td><code>forbidden</code></td><td>The key lacks the scope, or may not be used from this address.</td></tr>
   <tr><td>403</td><td><code>country_not_allowed</code></td><td>The key may not search in this country.</td></tr>
