@@ -538,7 +538,19 @@ Redis, Postgres)
 14. **Turn on two-factor admin login** (`ADMIN_REQUIRE_2FA=true`, Firebase
     Identity Platform, admins enrolled; disabled since 2026-10-11) **and
     admin email verification** (`ADMIN_REQUIRE_VERIFIED_EMAIL=true`, real
-    admin emails, verified; disabled since 2026-10-11).
+    admin emails, verified; disabled since 2026-10-11). Needs two new
+    admin panel screens first (owner, 2026-11-06): the second-factor
+    code at sign-in and enrolling an authenticator app (TOTP, QR code
+    drawn by a small QR library + the key as text).
+    **Real client IP behind the tunnel** (owner, 2026-11-06): the
+    server reads `CF-Connecting-IP` only from the trusted `cloudflared`
+    address (new setting), else the connection address; used by the
+    admin per-IP limit, API key IP allow-lists and the audit log.
+    **E1: refuse Firebase anonymous accounts** (owner, 2026-11-06):
+    app-user tokens must come from an allowed sign-in method (new
+    setting with a default list: Google, Apple, email/password; check
+    of `firebase.sign_in_provider`); every search already needs a
+    login token or an API key.
     Hosting choice (section 10: **Oracle Always Free, Dubai**), domain
     (**`dawirli.com`**, service at `globalprodsearch.dawirli.com`), HTTPS (**Cloudflare
     Tunnel**; **Cloudflare Access** on `/admin`), arm64 image,
@@ -568,6 +580,12 @@ Redis, Postgres)
 **Phase 5 — users** (old phase 2, after deployment)
 
 15. `users` table, `/me` (Firebase email-link reminder in section 5.6).
+    **E2 (owner, 2026-11-06): daily free-search limit per IP address**
+    on top of the per-account limit (stops many Gmail accounts from one
+    person; needs the real client IP from step 14; the number with care,
+    many people share one address on mobile networks and offices).
+    Optional end-user id sent by partners / agents, for per-person
+    limits inside one API client.
 16. Plans in the database + payment webhook.
 17. Saved cart + saved-item price tracker (section 4b).
 18. Clicks + purchase reports.

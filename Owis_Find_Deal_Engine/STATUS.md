@@ -40,6 +40,32 @@ built yet.** The owner chose hosting and domain and created the server;
 the detailed step 14 build plan comes next, for the owner's approval
 before any implementation.
 
+**Step 14 build plan — under review with the owner, part by part
+(2026-11-06), not approved yet.** Agreed so far:
+- **Real client IP behind the tunnel:** behind `cloudflared` every
+  request comes from the tunnel's Docker address, which breaks the
+  admin per-IP limit, API key IP allow-lists and the audit log. Fix:
+  trust `CF-Connecting-IP` only from the `cloudflared` address (new
+  setting), else the connection address; one function replaces
+  `remoteIP` (`internal/api/admin.go`).
+- **Identity on every search** (owner's point): already required (app
+  users: Firebase login token, e.g. Google / Apple sign-in; agents and
+  partners: API key; else `401`). **E1, in step 14:** refuse Firebase
+  anonymous accounts (allowed sign-in methods setting, default Google,
+  Apple, email/password). **E2, in phase 5:** daily free-search limit
+  per IP address on top of the per-account limit.
+- **Two-factor admin login:** the server check exists; the panel needs
+  a second-factor code screen and an authenticator-app (TOTP)
+  enrollment screen, QR code with a small QR library + key as text
+  (option a). Order: build screens → verify the admin email → enroll →
+  `ADMIN_REQUIRE_2FA=true` + `ADMIN_REQUIRE_VERIFIED_EMAIL=true`.
+  Lost phone: set `ADMIN_REQUIRE_2FA=false` on the VM over SSH, restart.
+- Still to review: the stages (plumbing, VM setup, tunnel, `/admin`
+  lock, backups, monitoring, production test, docs) and questions
+  Q1–Q8 (deploy trigger, repo private, new or copied database,
+  two-factor method, backup days, monitoring size, Access login,
+  deploy branch).
+
 - **D6 hosting: Oracle Cloud Always Free.** Home region **UAE East
   (Dubai)** (cannot change). VM `VM.Standard.A1.Flex` (Ampere Arm,
   aarch64), **2 OCPUs, 12 GB**, Canonical Ubuntu 24.04, default boot
