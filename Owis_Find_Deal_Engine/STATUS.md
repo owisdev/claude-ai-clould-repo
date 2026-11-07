@@ -149,7 +149,18 @@ before any implementation.
   → image `b1647fc` (PR #18, the newest commit that changed the
   server; later `main` commits are docs only), tunnel off; postgres,
   redis, searxng, server all healthy; health `{"status":"ok"}`.
-  Next: 3.5 check from the PC through `ssh -L 3012:127.0.0.1:3002`.
+  **3.5 check through `ssh -L 3012:127.0.0.1:3002` (owner,
+  2026-11-07):** log shows the runtime settings imported (all Apify,
+  SerpApi, cache, plan keys) and `first admin added admin@dawirli.com`,
+  only the two expected warnings. Admin login as `admin@dawirli.com`,
+  dashboard and settings fine. Test search `USB-C power banks`: 4
+  source calls, 24 s — Amazon (SerpApi) 13 results 1.7 s, AliExpress
+  (Apify) 3 in 24 s, Temu (Apify) 10 in 21 s, **SHEIN (Apify) no
+  results in 5.7 s** (to look at in its log line). Estimated cost
+  shows $0.00 everywhere: `SERPAPI_SEARCH_COST_USD=0` and no
+  `APIFY_*_RUN_COST_USD` in the `.env`, so the budget figures stay 0
+  until these cost settings are set in the panel. `/docs/` not yet
+  reported.
 - **Admin email steps as planned (owner's to-do, 2026-11-06).** Cloudflare checked: `dawirli.com` is active in the
   account and has **no MX records**, so Email Routing breaks nothing.
   Owner, in this order:
