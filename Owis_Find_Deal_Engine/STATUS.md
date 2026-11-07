@@ -129,7 +129,21 @@ before any implementation.
   repo at `8c05f70`; `.env` made (600). Listening on all addresses:
   22 and **111 (`rpcbind`, part of Oracle's Ubuntu image, not needed:
   owner to turn it off with `sudo systemctl disable --now rpcbind.socket
-  rpcbind.service`; to add to `bootstrap-vm.sh`)**.
+  rpcbind.service`; to add to `bootstrap-vm.sh`)**. Owner turned it
+  off: only 22 left on all addresses. `docker ps` works after a new
+  login.
+  **3.3 production `.env`: done 2026-11-07. ✅** Local `.env` copied
+  with `scp`, mode 600; new `POSTGRES_PASSWORD`, `REDIS_PASSWORD`,
+  `SEARXNG_SECRET`, `SETTINGS_ENCRYPTION_KEY` (`openssl rand -hex 32`;
+  encryption key saved offline by the owner); `ADMIN_EMAIL=admin@dawirli.com`,
+  2FA and verified email `false`, `API_BIND=127.0.0.1`, CORS empty, no
+  `WEBHOOK_ALLOW_PRIVATE`, no `TUNNEL_TOKEN`; Firebase `AUTH_*` and
+  `ADMIN_FIREBASE_API_KEY`, SerpApi key, Apify token and
+  `APIFY_MARKETS=aliexpress,temu,shein` from the local `.env`.
+  `SEARCH_PROVIDERS=serpapi,searxng` (owner's local choice: SerpApi
+  first, so a live search uses one SerpApi search when it answers).
+  `AUTH_ALLOWED_SIGN_IN` not in the file: default
+  `google.com,apple.com,password`.
 - **Admin email steps as planned (owner's to-do, 2026-11-06).** Cloudflare checked: `dawirli.com` is active in the
   account and has **no MX records**, so Email Routing breaks nothing.
   Owner, in this order:
