@@ -118,8 +118,11 @@ before any implementation.
   needed: we only receive Firebase and Cloudflare Access mails).
   `admin@dawirli.com` is the production admin (new Firebase user,
   `ADMIN_EMAIL` in the production `.env`, made during step 3).
-  Still to confirm: two-factor login on the Cloudflare account and the
-  Gmail (steps 1–2 below).
+  Two-factor login on the Cloudflare account and the Gmail: on
+  (owner, 2026-11-07). **Q3 decided (owner, 2026-11-07): new empty
+  database** in production (API clients made again in the panel;
+  search sources copied once from the `.env` at the first start).
+  Step 3 started 2026-11-07.
 - **Admin email steps as planned (owner's to-do, 2026-11-06).** Cloudflare checked: `dawirli.com` is active in the
   account and has **no MX records**, so Email Routing breaks nothing.
   Owner, in this order:
