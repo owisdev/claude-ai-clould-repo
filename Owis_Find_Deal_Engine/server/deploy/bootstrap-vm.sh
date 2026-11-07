@@ -13,7 +13,8 @@
 #   4. Docker log rotation; lets the login user run docker
 #   5. clones the repository to /opt/ofd/repo and makes the server's .env
 #      (from .env.example, readable by the login user only) to fill in
-#   6. shows the open ports (only SSH should listen to the outside)
+#   6. turns off rpcbind (port 111, in Oracle's image) and shows the open
+#      ports (only SSH should listen to the outside)
 set -euo pipefail
 
 REPO_URL=${OFD_REPO_URL:-https://github.com/owisdev/claude-ai-clould-repo.git}
@@ -110,6 +111,12 @@ else
 fi
 
 say "6/6 Listening ports"
+# Oracle's Ubuntu image runs rpcbind (NFS helper) on port 111 of all
+# addresses; nothing here needs it.
+if systemctl list-unit-files rpcbind.socket rpcbind.service >/dev/null 2>&1; then
+  systemctl disable --now rpcbind.socket rpcbind.service >/dev/null 2>&1 || true
+  echo "rpcbind: $(systemctl is-active rpcbind.service 2>/dev/null || true) (turned off)"
+fi
 # Only sshd (22) should listen on all addresses; Docker publishes the API
 # on 127.0.0.1:3002 only. Oracle's own firewall (security list) should
 # also allow only port 22 in.

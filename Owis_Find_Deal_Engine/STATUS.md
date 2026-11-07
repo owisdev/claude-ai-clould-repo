@@ -1,10 +1,11 @@
 # Project status and handoff
 
-Last updated: 2026-11-06 · Project branch: **`main`** from step 14,
+Last updated: 2026-11-07 · Project branch: **`main`** from step 14,
 step 2 on (owner, 2026-11-06, Q8: the old project branch
 `claude/cloud-vs-local-7xi988` goes into `main` with PR #8 and stays
 frozen; new step PRs target `main`). Steps 7–12: PRs #9–#11, step 13:
-#12, step 14 step 1: #17.
+#12, step 14 step 1: #17, step 2: #18, step 3: see the PR from
+`claude/peaceful-meitner-wml0f0`.
 
 Read first:
 - [docs/step13_guide.pdf](docs/step13_guide.pdf) — **step 13**: what the
@@ -37,10 +38,13 @@ Regenerate the PDFs: `python3 docs/build_step13_guide_pdf.py`,
 
 ## Where we are
 
-**Phase 4, step 14 — deployment: decisions taken (2026-11-01), nothing
-built yet.** The owner chose hosting and domain and created the server;
-the detailed step 14 build plan comes next, for the owner's approval
-before any implementation.
+**Phase 4, step 14 — deployment, steps 1–3 done (2026-11-07):
+production runs on the Oracle VM, reachable only through SSH.**
+**Start of the next session: step 4 — Cloudflare Tunnel and
+`globalprodsearch.dawirli.com`** (owner, 2026-11-07: in a new session),
+explained and run one command at a time like step 3 (details at the
+end of the step 3 entry below). Before production: SHEIN scraper and
+cost settings (see the entries below).
 
 **Step 14 — worked through one step at a time with the owner
 (2026-11-06): each step is explained, approved, built, then the next.**
@@ -108,8 +112,92 @@ before any implementation.
   - **Done by the owner 2026-11-06:** PR #8 (project branch → `main`)
     and PR #18 merged; CI published the image; package made public
     (checked: anonymous pull of `:main` lists `amd64` and `arm64`).
-- **Start of the next session — admin email first (owner's to-do,
-  2026-11-06).** Cloudflare checked: `dawirli.com` is active in the
+- **Admin email — done by the owner 2026-11-07. ✅** Email Routing on
+  for `dawirli.com`; Cloudflare added MX `route1/2/3.mx.cloudflare.net`
+  (priorities chosen by Cloudflare), DKIM TXT `cf2024-1._domainkey` and
+  SPF `v=spf1 include:_spf.mx.cloudflare.net ~all`. Rule
+  `admin@dawirli.com` → the owner's Gmail; test mail from another
+  account arrived. No catch-all (spam), no sending from `@dawirli.com`
+  (Gmail "Send mail as" would need an outside SMTP provider; not
+  needed: we only receive Firebase and Cloudflare Access mails).
+  `admin@dawirli.com` is the production admin (new Firebase user,
+  `ADMIN_EMAIL` in the production `.env`, made during step 3).
+  Two-factor login on the Cloudflare account and the Gmail: on
+  (owner, 2026-11-07). **Q3 decided (owner, 2026-11-07): new empty
+  database** in production (API clients made again in the panel;
+  search sources copied once from the `.env` at the first start).
+  Step 3 started 2026-11-07.
+  **3.2 `bootstrap-vm.sh` run by the owner 2026-11-07: done. ✅**
+  Docker 29.9.3, Compose v5.7.0 (arm64); unattended-upgrades active;
+  SSH keys only (password, keyboard-interactive and root login off);
+  repo at `8c05f70`; `.env` made (600). Listening on all addresses:
+  22 and **111 (`rpcbind`, part of Oracle's Ubuntu image, not needed:
+  owner to turn it off with `sudo systemctl disable --now rpcbind.socket
+  rpcbind.service`; to add to `bootstrap-vm.sh`)**. Owner turned it
+  off: only 22 left on all addresses. `docker ps` works after a new
+  login.
+  **3.3 production `.env`: done 2026-11-07. ✅** Local `.env` copied
+  with `scp`, mode 600; new `POSTGRES_PASSWORD`, `REDIS_PASSWORD`,
+  `SEARXNG_SECRET`, `SETTINGS_ENCRYPTION_KEY` (`openssl rand -hex 32`;
+  encryption key saved offline by the owner); `ADMIN_EMAIL=admin@dawirli.com`,
+  2FA and verified email `false`, `API_BIND=127.0.0.1`, CORS empty, no
+  `WEBHOOK_ALLOW_PRIVATE`, no `TUNNEL_TOKEN`; Firebase `AUTH_*` and
+  `ADMIN_FIREBASE_API_KEY`, SerpApi key, Apify token and
+  `APIFY_MARKETS=aliexpress,temu,shein` from the local `.env`.
+  `SEARCH_PROVIDERS=serpapi,searxng` (owner's local choice: SerpApi
+  first, so a live search uses one SerpApi search when it answers).
+  `AUTH_ALLOWED_SIGN_IN` not in the file: default
+  `google.com,apple.com,password`. Firebase user `admin@dawirli.com`
+  made by the owner (Authentication → Users → Add user).
+  **3.4 first deploy: done 2026-11-07. ✅** `deploy.sh` (no argument)
+  → image `b1647fc` (PR #18, the newest commit that changed the
+  server; later `main` commits are docs only), tunnel off; postgres,
+  redis, searxng, server all healthy; health `{"status":"ok"}`.
+  **3.5 check through `ssh -L 3012:127.0.0.1:3002` (owner,
+  2026-11-07):** log shows the runtime settings imported (all Apify,
+  SerpApi, cache, plan keys) and `first admin added admin@dawirli.com`,
+  only the two expected warnings. Admin login as `admin@dawirli.com`,
+  dashboard and settings fine. Test search `USB-C power banks`: 4
+  source calls, 24 s — Amazon (SerpApi) 13 results 1.7 s, AliExpress
+  (Apify) 3 in 24 s, Temu (Apify) 10 in 21 s, **SHEIN (Apify) no
+  results in 5.7 s** (to look at in its log line). Estimated cost
+  shows $0.00 everywhere: `SERPAPI_SEARCH_COST_USD=0` and no
+  `APIFY_*_RUN_COST_USD` in the `.env`, so the budget figures stay 0
+  until these cost settings are set in the panel. `/docs/` opens.
+  SHEIN: the log has only the start line (`apify scraper enabled`,
+  `clearpath/shein-product-scraper`, 5 items, timeout 1m30s), no line
+  for the empty result — to look at later (Apify console → Runs shows
+  whether the run returned nothing or failed); not blocking.
+  **3.6 restart test: passed. ✅** After `sudo reboot` all four
+  containers `Up … (healthy)` by themselves.
+  **3.7 Oracle security list: ✅** ingress only TCP 22 from
+  `0.0.0.0/0` plus Oracle's default ICMP 3/4 rules.
+  `bootstrap-vm.sh` now also turns off `rpcbind` (part 6).
+- **Step 3 — done 2026-11-07. ✅** Production runs on the VM, reachable
+  only through SSH. **Next: step 4 — Cloudflare Tunnel and
+  `globalprodsearch.dawirli.com`** (tunnel in Zero Trust → Networks →
+  Tunnels, service `http://server:3002`, `TUNNEL_TOKEN` in the VM
+  `.env`, `deploy.sh`; Cloudflare bot blocking off for `/api` and
+  `/mcp`). Also open: cost settings (`SERPAPI_SEARCH_COST_USD`,
+  `APIFY_*_RUN_COST_USD`) in the panel; SHEIN (below).
+- **SHEIN — to check before production (owner, 2026-11-07).** In the
+  VM test search the SHEIN scraper (`clearpath/shein-product-scraper`,
+  now build 0.0.84) ran 4 s and returned 0 results for `USB-C power
+  banks`, charged $0.016; its log shows only "Initializing Actor" →
+  "Exiting Actor", no search activity. The input we send is still the
+  scraper's current format (Apify form shows the same fields:
+  `searchTerms`, `site`, `maxItemsPerSearch`, `sortBy`, `enrichDetails`,
+  `category`, `quickShip`, plus `productUrls: []`), so the input is not
+  the cause. Open: run it by hand in Apify (`summer dress`, 5 items)
+  to see whether the scraper is broken or SHEIN just has nothing for
+  electronics; then look for a better SHEIN scraper. Seen in the store:
+  `native_emblem/shein-product-scraper` ($5 / 1,000 search results,
+  charged only per product returned, start fee ~$0; fields
+  `productUrls`, `maxProductsPerTerm`, `country`, `sort`,
+  `proxyConfiguration`; keyword field not confirmed yet). Until
+  decided, SHEIN can be taken out of `APIFY_MARKETS` in the panel to
+  avoid paying for empty runs.
+- **Admin email steps as planned (owner's to-do, 2026-11-06).** Cloudflare checked: `dawirli.com` is active in the
   account and has **no MX records**, so Email Routing breaks nothing.
   Owner, in this order:
   1. Two-factor login on the Cloudflare account (profile → My Profile →
