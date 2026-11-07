@@ -143,7 +143,13 @@ before any implementation.
   `SEARCH_PROVIDERS=serpapi,searxng` (owner's local choice: SerpApi
   first, so a live search uses one SerpApi search when it answers).
   `AUTH_ALLOWED_SIGN_IN` not in the file: default
-  `google.com,apple.com,password`.
+  `google.com,apple.com,password`. Firebase user `admin@dawirli.com`
+  made by the owner (Authentication → Users → Add user).
+  **3.4 first deploy: done 2026-11-07. ✅** `deploy.sh` (no argument)
+  → image `b1647fc` (PR #18, the newest commit that changed the
+  server; later `main` commits are docs only), tunnel off; postgres,
+  redis, searxng, server all healthy; health `{"status":"ok"}`.
+  Next: 3.5 check from the PC through `ssh -L 3012:127.0.0.1:3002`.
 - **Admin email steps as planned (owner's to-do, 2026-11-06).** Cloudflare checked: `dawirli.com` is active in the
   account and has **no MX records**, so Email Routing breaks nothing.
   Owner, in this order:
