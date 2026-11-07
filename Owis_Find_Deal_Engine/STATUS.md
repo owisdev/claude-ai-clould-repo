@@ -175,7 +175,24 @@ before any implementation.
   Tunnels, service `http://server:3002`, `TUNNEL_TOKEN` in the VM
   `.env`, `deploy.sh`; Cloudflare bot blocking off for `/api` and
   `/mcp`). Also open: cost settings (`SERPAPI_SEARCH_COST_USD`,
-  `APIFY_*_RUN_COST_USD`) in the panel; SHEIN empty result.
+  `APIFY_*_RUN_COST_USD`) in the panel; SHEIN (below).
+- **SHEIN — to check before production (owner, 2026-11-07).** In the
+  VM test search the SHEIN scraper (`clearpath/shein-product-scraper`,
+  now build 0.0.84) ran 4 s and returned 0 results for `USB-C power
+  banks`, charged $0.016; its log shows only "Initializing Actor" →
+  "Exiting Actor", no search activity. The input we send is still the
+  scraper's current format (Apify form shows the same fields:
+  `searchTerms`, `site`, `maxItemsPerSearch`, `sortBy`, `enrichDetails`,
+  `category`, `quickShip`, plus `productUrls: []`), so the input is not
+  the cause. Open: run it by hand in Apify (`summer dress`, 5 items)
+  to see whether the scraper is broken or SHEIN just has nothing for
+  electronics; then look for a better SHEIN scraper. Seen in the store:
+  `native_emblem/shein-product-scraper` ($5 / 1,000 search results,
+  charged only per product returned, start fee ~$0; fields
+  `productUrls`, `maxProductsPerTerm`, `country`, `sort`,
+  `proxyConfiguration`; keyword field not confirmed yet). Until
+  decided, SHEIN can be taken out of `APIFY_MARKETS` in the panel to
+  avoid paying for empty runs.
 - **Admin email steps as planned (owner's to-do, 2026-11-06).** Cloudflare checked: `dawirli.com` is active in the
   account and has **no MX records**, so Email Routing breaks nothing.
   Owner, in this order:
