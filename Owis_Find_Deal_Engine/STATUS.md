@@ -123,6 +123,13 @@ before any implementation.
   database** in production (API clients made again in the panel;
   search sources copied once from the `.env` at the first start).
   Step 3 started 2026-11-07.
+  **3.2 `bootstrap-vm.sh` run by the owner 2026-11-07: done. ✅**
+  Docker 29.9.3, Compose v5.7.0 (arm64); unattended-upgrades active;
+  SSH keys only (password, keyboard-interactive and root login off);
+  repo at `8c05f70`; `.env` made (600). Listening on all addresses:
+  22 and **111 (`rpcbind`, part of Oracle's Ubuntu image, not needed:
+  owner to turn it off with `sudo systemctl disable --now rpcbind.socket
+  rpcbind.service`; to add to `bootstrap-vm.sh`)**.
 - **Admin email steps as planned (owner's to-do, 2026-11-06).** Cloudflare checked: `dawirli.com` is active in the
   account and has **no MX records**, so Email Routing breaks nothing.
   Owner, in this order:
