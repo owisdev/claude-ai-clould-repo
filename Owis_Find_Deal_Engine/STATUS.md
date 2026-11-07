@@ -4,7 +4,8 @@ Last updated: 2026-11-07 · Project branch: **`main`** from step 14,
 step 2 on (owner, 2026-11-06, Q8: the old project branch
 `claude/cloud-vs-local-7xi988` goes into `main` with PR #8 and stays
 frozen; new step PRs target `main`). Steps 7–12: PRs #9–#11, step 13:
-#12, step 14 step 1: #17.
+#12, step 14 step 1: #17, step 2: #18, step 3: see the PR from
+`claude/peaceful-meitner-wml0f0`.
 
 Read first:
 - [docs/step13_guide.pdf](docs/step13_guide.pdf) — **step 13**: what the
@@ -37,10 +38,13 @@ Regenerate the PDFs: `python3 docs/build_step13_guide_pdf.py`,
 
 ## Where we are
 
-**Phase 4, step 14 — deployment: decisions taken (2026-11-01), nothing
-built yet.** The owner chose hosting and domain and created the server;
-the detailed step 14 build plan comes next, for the owner's approval
-before any implementation.
+**Phase 4, step 14 — deployment, steps 1–3 done (2026-11-07):
+production runs on the Oracle VM, reachable only through SSH.**
+**Start of the next session: step 4 — Cloudflare Tunnel and
+`globalprodsearch.dawirli.com`** (owner, 2026-11-07: in a new session),
+explained and run one command at a time like step 3 (details at the
+end of the step 3 entry below). Before production: SHEIN scraper and
+cost settings (see the entries below).
 
 **Step 14 — worked through one step at a time with the owner
 (2026-11-06): each step is explained, approved, built, then the next.**
