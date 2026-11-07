@@ -159,8 +159,23 @@ before any implementation.
   results in 5.7 s** (to look at in its log line). Estimated cost
   shows $0.00 everywhere: `SERPAPI_SEARCH_COST_USD=0` and no
   `APIFY_*_RUN_COST_USD` in the `.env`, so the budget figures stay 0
-  until these cost settings are set in the panel. `/docs/` not yet
-  reported.
+  until these cost settings are set in the panel. `/docs/` opens.
+  SHEIN: the log has only the start line (`apify scraper enabled`,
+  `clearpath/shein-product-scraper`, 5 items, timeout 1m30s), no line
+  for the empty result — to look at later (Apify console → Runs shows
+  whether the run returned nothing or failed); not blocking.
+  **3.6 restart test: passed. ✅** After `sudo reboot` all four
+  containers `Up … (healthy)` by themselves.
+  **3.7 Oracle security list: ✅** ingress only TCP 22 from
+  `0.0.0.0/0` plus Oracle's default ICMP 3/4 rules.
+  `bootstrap-vm.sh` now also turns off `rpcbind` (part 6).
+- **Step 3 — done 2026-11-07. ✅** Production runs on the VM, reachable
+  only through SSH. **Next: step 4 — Cloudflare Tunnel and
+  `globalprodsearch.dawirli.com`** (tunnel in Zero Trust → Networks →
+  Tunnels, service `http://server:3002`, `TUNNEL_TOKEN` in the VM
+  `.env`, `deploy.sh`; Cloudflare bot blocking off for `/api` and
+  `/mcp`). Also open: cost settings (`SERPAPI_SEARCH_COST_USD`,
+  `APIFY_*_RUN_COST_USD`) in the panel; SHEIN empty result.
 - **Admin email steps as planned (owner's to-do, 2026-11-06).** Cloudflare checked: `dawirli.com` is active in the
   account and has **no MX records**, so Email Routing breaks nothing.
   Owner, in this order:
