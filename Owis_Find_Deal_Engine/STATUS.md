@@ -1,6 +1,6 @@
 # Project status and handoff
 
-Last updated: 2026-11-06 · Project branch: **`main`** from step 14,
+Last updated: 2026-11-07 · Project branch: **`main`** from step 14,
 step 2 on (owner, 2026-11-06, Q8: the old project branch
 `claude/cloud-vs-local-7xi988` goes into `main` with PR #8 and stays
 frozen; new step PRs target `main`). Steps 7–12: PRs #9–#11, step 13:
@@ -108,8 +108,19 @@ before any implementation.
   - **Done by the owner 2026-11-06:** PR #8 (project branch → `main`)
     and PR #18 merged; CI published the image; package made public
     (checked: anonymous pull of `:main` lists `amd64` and `arm64`).
-- **Start of the next session — admin email first (owner's to-do,
-  2026-11-06).** Cloudflare checked: `dawirli.com` is active in the
+- **Admin email — done by the owner 2026-11-07. ✅** Email Routing on
+  for `dawirli.com`; Cloudflare added MX `route1/2/3.mx.cloudflare.net`
+  (priorities chosen by Cloudflare), DKIM TXT `cf2024-1._domainkey` and
+  SPF `v=spf1 include:_spf.mx.cloudflare.net ~all`. Rule
+  `admin@dawirli.com` → the owner's Gmail; test mail from another
+  account arrived. No catch-all (spam), no sending from `@dawirli.com`
+  (Gmail "Send mail as" would need an outside SMTP provider; not
+  needed: we only receive Firebase and Cloudflare Access mails).
+  `admin@dawirli.com` is the production admin (new Firebase user,
+  `ADMIN_EMAIL` in the production `.env`, made during step 3).
+  Still to confirm: two-factor login on the Cloudflare account and the
+  Gmail (steps 1–2 below).
+- **Admin email steps as planned (owner's to-do, 2026-11-06).** Cloudflare checked: `dawirli.com` is active in the
   account and has **no MX records**, so Email Routing breaks nothing.
   Owner, in this order:
   1. Two-factor login on the Cloudflare account (profile → My Profile →
