@@ -224,7 +224,9 @@ entries below).
   API client `owner-test` (id 1, defaults) made in the panel through
   SSH; live search `USB-C power bank` / `jor` through the public address
   → `200` with Amazon (SerpApi) and AliExpress (Apify) results, 45.5 s,
-  log `"user":"client:1"`, no key in the log.
+  log `"user":"client:1"`, no key in the log. Same search again:
+  `cached:true`, `took_ms` 0; markets amazon / aliexpress / temu `ok`,
+  shein `no_results` (open SHEIN item).
   **Step 4 — done 2026-11-08. ✅** `https://globalprodsearch.dawirli.com`
   is public; the panel stays reachable only through SSH until step 6.
   **Open (seen in step 4): Cloudflare's 100 s limit.** On the Free plan
