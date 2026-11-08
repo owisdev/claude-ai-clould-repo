@@ -38,14 +38,14 @@ Regenerate the PDFs: `python3 docs/build_step13_guide_pdf.py`,
 
 ## Where we are
 
-**Phase 4, step 14 — deployment, steps 1–3 done (2026-11-07):
-production runs on the Oracle VM, reachable only through SSH.**
+**Phase 4, step 14 — deployment, steps 1–4 done (2026-11-08):
+production runs on the Oracle VM, public at
+`https://globalprodsearch.dawirli.com` through the Cloudflare Tunnel.**
 **Step 4 — Cloudflare Tunnel and `globalprodsearch.dawirli.com`: done
 2026-11-08. ✅** Next: MCP test with real agents, cost settings, SHEIN,
-then step 5 (details in the step 4 entry below),
-explained and run one command at a time like step 3 (details at the
-end of the step 3 entry below). Before production: SHEIN scraper and
-cost settings (see the entries below).
+then step 5 (details in the step 4 entry below). Before real users:
+SHEIN scraper, cost settings and Cloudflare's 100 s limit (see the
+entries below).
 
 **Step 14 — worked through one step at a time with the owner
 (2026-11-06): each step is explained, approved, built, then the next.**
