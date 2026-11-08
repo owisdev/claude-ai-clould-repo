@@ -1,6 +1,6 @@
 # Project status and handoff
 
-Last updated: 2026-11-07 · Project branch: **`main`** from step 14,
+Last updated: 2026-11-08 · Project branch: **`main`** from step 14,
 step 2 on (owner, 2026-11-06, Q8: the old project branch
 `claude/cloud-vs-local-7xi988` goes into `main` with PR #8 and stays
 frozen; new step PRs target `main`). Steps 7–12: PRs #9–#11, step 13:
@@ -38,13 +38,14 @@ Regenerate the PDFs: `python3 docs/build_step13_guide_pdf.py`,
 
 ## Where we are
 
-**Phase 4, step 14 — deployment, steps 1–3 done (2026-11-07):
-production runs on the Oracle VM, reachable only through SSH.**
-**Start of the next session: step 4 — Cloudflare Tunnel and
-`globalprodsearch.dawirli.com`** (owner, 2026-11-07: in a new session),
-explained and run one command at a time like step 3 (details at the
-end of the step 3 entry below). Before production: SHEIN scraper and
-cost settings (see the entries below).
+**Phase 4, step 14 — deployment, steps 1–4 done (2026-11-08):
+production runs on the Oracle VM, public at
+`https://globalprodsearch.dawirli.com` through the Cloudflare Tunnel.**
+**Step 4 — Cloudflare Tunnel and `globalprodsearch.dawirli.com`: done
+2026-11-08. ✅** Next: MCP test with real agents, cost settings, SHEIN,
+then step 5 (details in the step 4 entry below). Before real users:
+SHEIN scraper, cost settings and Cloudflare's 100 s limit (see the
+entries below).
 
 **Step 14 — worked through one step at a time with the owner
 (2026-11-06): each step is explained, approved, built, then the next.**
@@ -180,6 +181,61 @@ cost settings (see the entries below).
   `.env`, `deploy.sh`; Cloudflare bot blocking off for `/api` and
   `/mcp`). Also open: cost settings (`SERPAPI_SEARCH_COST_USD`,
   `APIFY_*_RUN_COST_USD`) in the panel; SHEIN (below).
+- **Step 4 — Cloudflare Tunnel and `globalprodsearch.dawirli.com`:
+  started 2026-11-08**, one step at a time (the owner runs each step,
+  Claude explains it). Nothing to build: `compose.prod.yml` and
+  `deploy.sh` already have the tunnel (step 2). Plan:
+  1. *Dashboard:* Zero Trust → Networks → Tunnels → Create a tunnel →
+     Cloudflared, name `ofd-prod`; copy only the token (do not run the
+     install command shown; the token is a secret).
+  2. *Dashboard:* public hostname `globalprodsearch` . `dawirli.com`,
+     path empty, service `HTTP` `server:3002` (Cloudflare adds the DNS
+     record).
+  3. *Before the tunnel is up:* WAF custom rule that blocks paths
+     starting with `/admin` (panel and `/admin/v1/`) until Cloudflare
+     Access (step 6); until then the panel only through SSH
+     (`ssh -L 3012:127.0.0.1:3002`). Bot Fight Mode off (on the Free
+     plan it cannot be skipped per path and would block API / MCP
+     clients). SSL/TLS: Always Use HTTPS on, minimum TLS 1.2.
+  4. *VM:* add `TUNNEL_TOKEN=` to the production `.env` (without
+     showing it on screen), `deploy/deploy.sh` → `tunnel: connected`.
+  5. *Checks from the PC:* `/api/v1/health` over HTTPS, `/docs/`,
+     `/admin/` blocked (403), tunnel *Healthy* in the dashboard, the
+     server log shows the PC's real IP (`"ip"`), a test search with an
+     API key (made in the panel through SSH).
+  6. Then: MCP test with real agents (PLAN step 14 note), step 5.
+  **Progress (owner, 2026-11-08):** 4.1 tunnel `ofd-prod` made (ID
+  `95782bdb-a236-4e1f-8949-04eb9f6bcfa8`; the dashboard's Continue
+  button stays disabled until the tunnel connects, so the route was
+  added from the tunnel's Routes tab → *Published application*). 4.2
+  route `globalprodsearch.dawirli.com` → `http://server:3002` (one
+  "Service URL" field), CNAME to `<id>.cfargotunnel.com` added by
+  Cloudflare. 4.3 WAF custom rule `Block admin until Access`
+  (`http.host eq "globalprodsearch.dawirli.com" and
+  starts_with(http.request.uri.path, "/admin")` → Block) deployed; Bot
+  Fight Mode was already off; Always Use HTTPS on, minimum TLS 1.2;
+  Universal certificate active (the "No access … CSRs" alert on that
+  page is about a paid add-on, harmless). 4.4 `TUNNEL_TOKEN` added with
+  `read -rs` (line length 197); `deploy.sh` → image `666ab78` (PR #22
+  merge), `tunnel: connected`, health ok.
+  4.5 checks from the owner's PC: HTTPS health ok (TLS 1.3), HTTP →
+  `301` to HTTPS, `/admin/` and `/admin/v1/` → `403`, Cloudflare sees
+  `176.28.142.103` (edge `AMM`) and the server log has the same `"ip"`.
+  API client `owner-test` (id 1, defaults) made in the panel through
+  SSH; live search `USB-C power bank` / `jor` through the public address
+  → `200` with Amazon (SerpApi) and AliExpress (Apify) results, 45.5 s,
+  log `"user":"client:1"`, no key in the log. Same search again:
+  `cached:true`, `took_ms` 0; markets amazon / aliexpress / temu `ok`,
+  shein `no_results` (open SHEIN item).
+  **Step 4 — done 2026-11-08. ✅** `https://globalprodsearch.dawirli.com`
+  is public; the panel stays reachable only through SSH until step 6.
+  **Open (seen in step 4): Cloudflare's 100 s limit.** On the Free plan
+  Cloudflare waits at most 100 s for an answer (then `524`). On the VM
+  the search timeout is `APIFY_TIMEOUT` (1m30s there) + 8 s + 2 s =
+  100 s, so a very slow live search could be cut by Cloudflare first.
+  To decide: `APIFY_TIMEOUT` ≤ 75s in the panel, and/or slow clients use
+  the asynchronous `POST /api/v1/searches` (step 12), which answers at
+  once.
 - **SHEIN — to check before production (owner, 2026-11-07).** In the
   VM test search the SHEIN scraper (`clearpath/shein-product-scraper`,
   now build 0.0.84) ran 4 s and returned 0 results for `USB-C power
