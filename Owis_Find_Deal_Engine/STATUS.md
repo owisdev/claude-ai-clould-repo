@@ -40,9 +40,9 @@ Regenerate the PDFs: `python3 docs/build_step13_guide_pdf.py`,
 
 **Phase 4, step 14 — deployment, steps 1–3 done (2026-11-07):
 production runs on the Oracle VM, reachable only through SSH.**
-**Now: step 4 — Cloudflare Tunnel and
-`globalprodsearch.dawirli.com`** (started 2026-11-08; plan in the step 4
-entry below),
+**Step 4 — Cloudflare Tunnel and `globalprodsearch.dawirli.com`: done
+2026-11-08. ✅** Next: MCP test with real agents, cost settings, SHEIN,
+then step 5 (details in the step 4 entry below),
 explained and run one command at a time like step 3 (details at the
 end of the step 3 entry below). Before production: SHEIN scraper and
 cost settings (see the entries below).
@@ -218,6 +218,22 @@ cost settings (see the entries below).
   page is about a paid add-on, harmless). 4.4 `TUNNEL_TOKEN` added with
   `read -rs` (line length 197); `deploy.sh` → image `666ab78` (PR #22
   merge), `tunnel: connected`, health ok.
+  4.5 checks from the owner's PC: HTTPS health ok (TLS 1.3), HTTP →
+  `301` to HTTPS, `/admin/` and `/admin/v1/` → `403`, Cloudflare sees
+  `176.28.142.103` (edge `AMM`) and the server log has the same `"ip"`.
+  API client `owner-test` (id 1, defaults) made in the panel through
+  SSH; live search `USB-C power bank` / `jor` through the public address
+  → `200` with Amazon (SerpApi) and AliExpress (Apify) results, 45.5 s,
+  log `"user":"client:1"`, no key in the log.
+  **Step 4 — done 2026-11-08. ✅** `https://globalprodsearch.dawirli.com`
+  is public; the panel stays reachable only through SSH until step 6.
+  **Open (seen in step 4): Cloudflare's 100 s limit.** On the Free plan
+  Cloudflare waits at most 100 s for an answer (then `524`). On the VM
+  the search timeout is `APIFY_TIMEOUT` (1m30s there) + 8 s + 2 s =
+  100 s, so a very slow live search could be cut by Cloudflare first.
+  To decide: `APIFY_TIMEOUT` ≤ 75s in the panel, and/or slow clients use
+  the asynchronous `POST /api/v1/searches` (step 12), which answers at
+  once.
 - **SHEIN — to check before production (owner, 2026-11-07).** In the
   VM test search the SHEIN scraper (`clearpath/shein-product-scraper`,
   now build 0.0.84) ran 4 s and returned 0 results for `USB-C power
