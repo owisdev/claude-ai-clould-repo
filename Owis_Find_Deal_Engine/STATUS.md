@@ -204,6 +204,20 @@ cost settings (see the entries below).
      server log shows the PC's real IP (`"ip"`), a test search with an
      API key (made in the panel through SSH).
   6. Then: MCP test with real agents (PLAN step 14 note), step 5.
+  **Progress (owner, 2026-11-08):** 4.1 tunnel `ofd-prod` made (ID
+  `95782bdb-a236-4e1f-8949-04eb9f6bcfa8`; the dashboard's Continue
+  button stays disabled until the tunnel connects, so the route was
+  added from the tunnel's Routes tab → *Published application*). 4.2
+  route `globalprodsearch.dawirli.com` → `http://server:3002` (one
+  "Service URL" field), CNAME to `<id>.cfargotunnel.com` added by
+  Cloudflare. 4.3 WAF custom rule `Block admin until Access`
+  (`http.host eq "globalprodsearch.dawirli.com" and
+  starts_with(http.request.uri.path, "/admin")` → Block) deployed; Bot
+  Fight Mode was already off; Always Use HTTPS on, minimum TLS 1.2;
+  Universal certificate active (the "No access … CSRs" alert on that
+  page is about a paid add-on, harmless). 4.4 `TUNNEL_TOKEN` added with
+  `read -rs` (line length 197); `deploy.sh` → image `666ab78` (PR #22
+  merge), `tunnel: connected`, health ok.
 - **SHEIN — to check before production (owner, 2026-11-07).** In the
   VM test search the SHEIN scraper (`clearpath/shein-product-scraper`,
   now build 0.0.84) ran 4 s and returned 0 results for `USB-C power
