@@ -1,6 +1,6 @@
 # Project status and handoff
 
-Last updated: 2026-11-07 · Project branch: **`main`** from step 14,
+Last updated: 2026-11-08 · Project branch: **`main`** from step 14,
 step 2 on (owner, 2026-11-06, Q8: the old project branch
 `claude/cloud-vs-local-7xi988` goes into `main` with PR #8 and stays
 frozen; new step PRs target `main`). Steps 7–12: PRs #9–#11, step 13:
@@ -40,8 +40,9 @@ Regenerate the PDFs: `python3 docs/build_step13_guide_pdf.py`,
 
 **Phase 4, step 14 — deployment, steps 1–3 done (2026-11-07):
 production runs on the Oracle VM, reachable only through SSH.**
-**Start of the next session: step 4 — Cloudflare Tunnel and
-`globalprodsearch.dawirli.com`** (owner, 2026-11-07: in a new session),
+**Now: step 4 — Cloudflare Tunnel and
+`globalprodsearch.dawirli.com`** (started 2026-11-08; plan in the step 4
+entry below),
 explained and run one command at a time like step 3 (details at the
 end of the step 3 entry below). Before production: SHEIN scraper and
 cost settings (see the entries below).
@@ -180,6 +181,29 @@ cost settings (see the entries below).
   `.env`, `deploy.sh`; Cloudflare bot blocking off for `/api` and
   `/mcp`). Also open: cost settings (`SERPAPI_SEARCH_COST_USD`,
   `APIFY_*_RUN_COST_USD`) in the panel; SHEIN (below).
+- **Step 4 — Cloudflare Tunnel and `globalprodsearch.dawirli.com`:
+  started 2026-11-08**, one step at a time (the owner runs each step,
+  Claude explains it). Nothing to build: `compose.prod.yml` and
+  `deploy.sh` already have the tunnel (step 2). Plan:
+  1. *Dashboard:* Zero Trust → Networks → Tunnels → Create a tunnel →
+     Cloudflared, name `ofd-prod`; copy only the token (do not run the
+     install command shown; the token is a secret).
+  2. *Dashboard:* public hostname `globalprodsearch` . `dawirli.com`,
+     path empty, service `HTTP` `server:3002` (Cloudflare adds the DNS
+     record).
+  3. *Before the tunnel is up:* WAF custom rule that blocks paths
+     starting with `/admin` (panel and `/admin/v1/`) until Cloudflare
+     Access (step 6); until then the panel only through SSH
+     (`ssh -L 3012:127.0.0.1:3002`). Bot Fight Mode off (on the Free
+     plan it cannot be skipped per path and would block API / MCP
+     clients). SSL/TLS: Always Use HTTPS on, minimum TLS 1.2.
+  4. *VM:* add `TUNNEL_TOKEN=` to the production `.env` (without
+     showing it on screen), `deploy/deploy.sh` → `tunnel: connected`.
+  5. *Checks from the PC:* `/api/v1/health` over HTTPS, `/docs/`,
+     `/admin/` blocked (403), tunnel *Healthy* in the dashboard, the
+     server log shows the PC's real IP (`"ip"`), a test search with an
+     API key (made in the panel through SSH).
+  6. Then: MCP test with real agents (PLAN step 14 note), step 5.
 - **SHEIN — to check before production (owner, 2026-11-07).** In the
   VM test search the SHEIN scraper (`clearpath/shein-product-scraper`,
   now build 0.0.84) ran 4 s and returned 0 results for `USB-C power
