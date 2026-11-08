@@ -42,10 +42,30 @@ Regenerate the PDFs: `python3 docs/build_step13_guide_pdf.py`,
 production runs on the Oracle VM, public at
 `https://globalprodsearch.dawirli.com` through the Cloudflare Tunnel.**
 **Step 4 — Cloudflare Tunnel and `globalprodsearch.dawirli.com`: done
-2026-11-08. ✅** Next: MCP test with real agents, cost settings, SHEIN,
-then step 5 (details in the step 4 entry below). Before real users:
-SHEIN scraper, cost settings and Cloudflare's 100 s limit (see the
-entries below).
+2026-11-08. ✅** GitHub `main`, the owner's PC and the VM in sync at
+`04da381` (VM server folder = `main`, image `666ab78`).
+
+**Start of the next session — owner picks from this list (2026-11-08):**
+1. **MCP test with real agents.** Connect Claude Code on the owner's PC
+   to `https://globalprodsearch.dawirli.com/mcp` with the `owner-test`
+   key, then a search from a chat (PLAN step 14 note).
+2. **Cost settings and scraper time limit** (admin panel through SSH):
+   - per-search costs (`SERPAPI_SEARCH_COST_USD`,
+     `APIFY_*_RUN_COST_USD`), so cost and budget figures stop showing
+     $0;
+   - `APIFY_TIMEOUT` to 75 s or less, so slow searches always finish
+     within Cloudflare's 100 s limit (see the step 4 entry).
+3. **Re-engineer the service's business rules (owner, 2026-11-08):**
+   which exact online shops to use, and for each the source, cost, time
+   and sync / async handling — "all this stuff" reviewed together
+   (builds on 2 and 4; to explain, decide with the owner, then build).
+4. **SHEIN.** No results three times now. Run its scraper by hand in
+   Apify to see whether it is broken; until then take SHEIN out of the
+   search (`APIFY_MARKETS`) to stop paying for empty runs.
+5. **Step 5:** admin two-factor login and verified email.
+
+Suggested order: **2 first** (a few minutes; removes the 100 s risk and
+makes cost numbers real before more test searches), then 3.
 
 **Step 14 — worked through one step at a time with the owner
 (2026-11-06): each step is explained, approved, built, then the next.**
