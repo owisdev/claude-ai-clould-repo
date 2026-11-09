@@ -1,18 +1,27 @@
 // Package cache puts a stale-while-revalidate cache in front of the search
 // service so repeated searches cost nothing and prices still stay current.
 //
-// Freshness of an entry, by age since it was fetched:
+// Each shop's results are stored on their own (step 14b), keyed by the
+// shop, its site, the setup of its source and the normalized title, so
+//   - a search only runs live for the shops it has no answer for;
+//   - countries share a shop's results when the request to the shop is the
+//     same (AliExpress and Temu in every country, amazon.com for USA and
+//     Jordan);
+//   - a shop whose live search fails shows its last known results.
+//
+// Freshness of a shop's results, by age since they were fetched:
 //
 //	0 ── FreshTTL ──────────► served from cache
 //	FreshTTL ── StaleTTL ───► served from cache (stale=true) and refreshed
 //	                          in the background for the next caller
-//	after StaleTTL ─────────► gone; fetched live
+//	StaleTTL ── LastKnownTTL► searched live; shown (status last_known, with
+//	                          their date) only when the live search fails
+//	after LastKnownTTL ─────► gone
 //
-// Results where a marketplace failed (PartialTTL) or nothing was found
-// (EmptyTTL) are fresh for a shorter time so they are retried sooner.
-// A client may force a live fetch (Request.Refresh), at most once per
-// MinRefresh per query. Identical concurrent fetches are merged into one
-// upstream call (singleflight).
+// A shop that found nothing (EmptyTTL) is fresh for a shorter time so it is
+// retried sooner; failures are never stored. A client may force a live
+// fetch (Request.Refresh), at most once per MinRefresh per shop. Identical
+// concurrent fetches are merged into one upstream call (singleflight).
 package cache
 
 import (
@@ -21,6 +30,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -37,10 +47,15 @@ type Searcher interface {
 	Search(ctx context.Context, req search.Request) (*search.Result, error)
 }
 
-// Entry is a stored search result.
+// Entry is one shop's stored results for one title.
 type Entry struct {
-	Result     search.Result `json:"result"`
-	FreshUntil time.Time     `json:"fresh_until"`
+	Market     string           `json:"market"`
+	Status     string           `json:"status"` // ok or no_results
+	Source     string           `json:"source"`
+	TookMS     int64            `json:"took_ms"`
+	Products   []search.Product `json:"products"`
+	FetchedAt  time.Time        `json:"fetched_at"`
+	FreshUntil time.Time        `json:"fresh_until"`
 }
 
 // Store persists entries; Redis when shared by several instances,
@@ -53,22 +68,35 @@ type Store interface {
 	Delete(ctx context.Context, key string) (bool, error)
 }
 
+// Shop describes what a shop's answers depend on besides its site and the
+// title. A shop missing from Options.Shops is never cached.
+type Shop struct {
+	// Setup describes the shop's source and its settings (source, actor,
+	// input, results kept, ...): changing it starts a new set of entries.
+	Setup string
+	// ByRegion is set when the source's answer depends on the country's
+	// region or language (web search, a scraper input with {{country}}):
+	// such entries are not shared between countries.
+	ByRegion bool
+}
+
 // Options tunes freshness.
 type Options struct {
-	FreshTTL   time.Duration // full results
-	PartialTTL time.Duration // some marketplaces failed
-	EmptyTTL   time.Duration // no results at all
-	StaleTTL   time.Duration // how long an entry may be served at all
-	MinRefresh time.Duration // forced refresh is ignored for younger entries
+	FreshTTL     time.Duration // a shop with results
+	EmptyTTL     time.Duration // a shop that found nothing
+	StaleTTL     time.Duration // how long results may be served at all
+	LastKnownTTL time.Duration // how long they are kept as the backup
+	MinRefresh   time.Duration // forced refresh is ignored for younger entries
 	// FetchTimeout bounds a fetch that runs detached from the caller
 	// (merged requests and background refreshes).
 	FetchTimeout time.Duration
 	// MaxBackgroundRefresh caps concurrent background refreshes.
 	MaxBackgroundRefresh int
-	// Variant describes the search setup (provider order, results per
-	// market, ...). It is part of every key, so answers cached under one
-	// setup are not served after the setup changes.
-	Variant string
+	// Generation is part of every key: changing it (admin tool "bump
+	// results version") makes every entry a miss.
+	Generation string
+	// Shops holds each cached shop's setup, by market id.
+	Shops map[string]Shop
 }
 
 func (o *Options) defaults() {
@@ -78,14 +106,15 @@ func (o *Options) defaults() {
 		}
 	}
 	set(&o.FreshTTL, 2*time.Hour)
-	set(&o.PartialTTL, 10*time.Minute)
 	set(&o.EmptyTTL, 30*time.Minute)
 	set(&o.StaleTTL, 24*time.Hour)
+	set(&o.LastKnownTTL, 7*24*time.Hour)
 	set(&o.MinRefresh, 10*time.Minute)
 	set(&o.FetchTimeout, 20*time.Second)
-	// Partial and empty results are never fresh for longer than full ones.
-	o.PartialTTL = min(o.PartialTTL, o.FreshTTL)
+	// Empty results are never fresh for longer than full ones, and the
+	// backup is kept at least as long as results are served.
 	o.EmptyTTL = min(o.EmptyTTL, o.FreshTTL)
+	o.LastKnownTTL = max(o.LastKnownTTL, o.StaleTTL)
 	if o.MaxBackgroundRefresh <= 0 {
 		o.MaxBackgroundRefresh = 4
 	}
@@ -124,110 +153,300 @@ func New(next Searcher, store Store, catalog *markets.Catalog, opts Options, log
 	}
 }
 
-// Lookup answers from the cache only; it never runs a live search for the
-// caller. ok is false when a live search is needed (not cached, expired,
-// or a refresh was asked for and is allowed). A stale answer is returned
-// and refreshed in the background.
-func (c *Cache) Lookup(ctx context.Context, req search.Request) (res *search.Result, ok bool) {
-	key, valid := c.key(req)
-	if !valid {
+// shopState is one shop of a search and what the cache has for it.
+type shopState struct {
+	target markets.Target
+	key    string // "" = not cached
+	entry  *Entry // stored results, nil if none (or too old to keep)
+	// serve: entry answers this search (fresh or stale); stale: it is
+	// past its fresh time and gets refreshed in the background.
+	serve, stale bool
+}
+
+// plan is one search as the cache sees it.
+type plan struct {
+	req     search.Request
+	country markets.Country
+	title   string
+	shops   []*shopState
+}
+
+// need returns the shops that must be searched live.
+func (p *plan) need() []*shopState {
+	var out []*shopState
+	for _, s := range p.shops {
+		if !s.serve && s.target.Provider != search.OffProvider {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func (p *plan) staleShops() []*shopState {
+	var out []*shopState
+	for _, s := range p.shops {
+		if s.serve && s.stale {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// newPlan reads the cache for every shop of the search. ok is false for
+// invalid input.
+func (c *Cache) newPlan(ctx context.Context, req search.Request) (*plan, bool) {
+	country, ok := c.catalog.Country(req.Country)
+	title := strings.ToLower(search.NormalizeTitle(req.Title))
+	if !ok || len([]rune(title)) < search.MinTitleLen || len([]rune(title)) > search.MaxTitleLen {
 		return nil, false
 	}
-	res, _, ok = c.lookup(ctx, key, req)
-	return res, ok
-}
-
-func (c *Cache) lookup(ctx context.Context, key string, req search.Request) (*search.Result, *Entry, bool) {
-	entry := c.get(ctx, key)
-	if entry == nil {
-		return nil, nil, false
-	}
+	p := &plan{req: req, country: country, title: title}
 	now := c.now()
-	if req.Refresh && now.Sub(entry.Result.FetchedAt) >= c.opts.MinRefresh {
-		return nil, entry, false
+	for _, t := range country.Targets {
+		if len(req.Markets) > 0 && !slices.Contains(req.Markets, t.Market) {
+			continue
+		}
+		s := &shopState{target: t}
+		p.shops = append(p.shops, s)
+		if t.Provider == search.OffProvider {
+			continue
+		}
+		s.key = c.key(country, t, title)
+		if s.key == "" {
+			continue
+		}
+		s.entry = c.get(ctx, s.key)
+		if s.entry == nil {
+			continue
+		}
+		age := now.Sub(s.entry.FetchedAt)
+		if age >= c.opts.StaleTTL || (req.Refresh && age >= c.opts.MinRefresh) {
+			continue // searched live; the entry stays as the backup
+		}
+		s.serve = true
+		s.stale = !now.Before(s.entry.FreshUntil)
 	}
-	if now.Before(entry.FreshUntil) {
-		c.hits.Add(1)
-		return entry.response(false), entry, true
-	}
-	c.stale.Add(1)
-	c.refreshInBackground(key, req)
-	return entry.response(true), entry, true
+	return p, true
 }
 
-// Search answers from the cache when possible, otherwise live.
+// Lookup answers from the cache only; it never runs a live search for the
+// caller. ok is false when a live search is needed for at least one shop
+// (not cached, too old, or a refresh was asked for and is allowed). Stale
+// shops are refreshed in the background.
+func (c *Cache) Lookup(ctx context.Context, req search.Request) (res *search.Result, ok bool) {
+	p, valid := c.newPlan(ctx, req)
+	if !valid || len(p.need()) > 0 {
+		return nil, false
+	}
+	return c.answerFromCache(p), true
+}
+
+func (c *Cache) answerFromCache(p *plan) *search.Result {
+	stale := p.staleShops()
+	if len(stale) > 0 {
+		c.stale.Add(1)
+		c.refreshInBackground(p, stale)
+	} else {
+		c.hits.Add(1)
+	}
+	return c.assemble(p, nil, time.Time{})
+}
+
+// Search answers from the cache when possible; the shops it has no answer
+// for are searched live.
 func (c *Cache) Search(ctx context.Context, req search.Request) (*search.Result, error) {
-	key, ok := c.key(req)
+	p, ok := c.newPlan(ctx, req)
 	if !ok {
 		// Invalid input: let the service produce the right error.
 		return c.next.Search(ctx, req)
 	}
-
-	res, entry, hit := c.lookup(ctx, key, req)
-	if hit {
-		return res, nil
+	need := p.need()
+	if len(need) == 0 {
+		return c.answerFromCache(p), nil
 	}
 
 	c.misses.Add(1)
-	res, err := c.fetch(ctx, key, req)
-	if err != nil && entry != nil && !errors.Is(err, context.Canceled) {
-		// Live fetch failed but we still have an answer: serve it stale
-		// rather than an error (stale-if-error).
-		c.log.WarnContext(ctx, "live search failed, serving cached result", "err", err)
-		return entry.response(true), nil
+	start := c.now()
+	if stale := p.staleShops(); len(stale) > 0 {
+		c.refreshInBackground(p, stale)
 	}
-	return res, err
+	live, err := c.fetch(ctx, p, need)
+	if err != nil && (errors.Is(err, context.Canceled) || ctx.Err() != nil) {
+		return nil, err
+	}
+	if err != nil && !errors.Is(err, search.ErrAllFailed) {
+		// Not an answer at all (e.g. a provider setup error): each shop
+		// falls back to its last known results, else is an error.
+		c.log.WarnContext(ctx, "live search failed", "err", err)
+		live = nil
+	}
+	res := c.assemble(p, live, start)
+	if search.AllFailed(res.Markets) {
+		return res, search.ErrAllFailed
+	}
+	return res, nil
 }
 
-// fetch runs one live search per key at a time; concurrent callers for the
-// same key share it. The search is detached from the first caller's
-// context so its cancellation does not fail everyone else, while each
-// caller can still stop waiting when its own context ends.
-func (c *Cache) fetch(ctx context.Context, key string, req search.Request) (*search.Result, error) {
-	ch := c.flights.DoChan(key, func() (any, error) {
+// fetched is a live search shared by a flight.
+type fetched struct {
+	res *search.Result
+	err error
+}
+
+// fetch searches the given shops live, one flight per set of shops at a
+// time; concurrent callers for the same shops share it (also callers from
+// other countries when the entries are shared). The search is detached
+// from the first caller's context so its cancellation does not fail
+// everyone else, while each caller can still stop waiting when its own
+// context ends. Results are stored per shop.
+func (c *Cache) fetch(ctx context.Context, p *plan, shops []*shopState) (*search.Result, error) {
+	ch := c.flights.DoChan(flightKey(p, shops), func() (any, error) {
 		fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.opts.FetchTimeout)
 		defer cancel()
-		return c.fetchAndStore(fctx, key, req)
+		return c.fetchAndStore(fctx, p, shops), nil
 	})
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case r := <-ch:
-		if r.Err != nil {
-			return nil, r.Err
+		f := r.Val.(fetched)
+		return f.res, f.err
+	}
+}
+
+// flightKey names a live search of some shops: their cache keys, or the
+// country and title for shops that are not cached.
+func flightKey(p *plan, shops []*shopState) string {
+	parts := make([]string, 0, len(shops))
+	for _, s := range shops {
+		k := s.key
+		if k == "" {
+			k = p.country.Code + "|" + s.target.Market + "|" + p.title
 		}
-		// Every caller gets its own copy: they must not share flags.
-		res := *(r.Val.(*search.Result))
-		return &res, nil
+		parts = append(parts, k)
 	}
+	slices.Sort(parts)
+	return strings.Join(parts, ",")
 }
 
-func (c *Cache) fetchAndStore(ctx context.Context, key string, req search.Request) (*search.Result, error) {
-	req.Refresh = false
+func (c *Cache) fetchAndStore(ctx context.Context, p *plan, shops []*shopState) fetched {
+	req := search.Request{Title: p.req.Title, Country: p.country.Code}
+	for _, s := range shops {
+		req.Markets = append(req.Markets, s.target.Market)
+	}
 	res, err := c.next.Search(ctx, req)
-	if err != nil {
-		return nil, err // never cache failures
+	if res == nil {
+		return fetched{err: err}
 	}
-	ttl := c.opts.FreshTTL
-	switch {
-	case len(res.Results) == 0:
-		ttl = c.opts.EmptyTTL
-	case res.Partial():
-		ttl = c.opts.PartialTTL
+	for _, s := range shops {
+		info, ok := res.Shops[s.target.Market]
+		if s.key == "" || !ok || (info.Status != search.StatusOK && info.Status != search.StatusNoResults) {
+			continue // failures are never stored
+		}
+		e := &Entry{
+			Market:    s.target.Market,
+			Status:    info.Status,
+			Source:    info.Source,
+			TookMS:    info.TookMS,
+			Products:  productsOf(res.Results, s.target.Market),
+			FetchedAt: res.FetchedAt,
+		}
+		ttl := c.opts.FreshTTL
+		if info.Status == search.StatusNoResults {
+			ttl = c.opts.EmptyTTL
+		}
+		e.FreshUntil = e.FetchedAt.Add(ttl)
+		if err := c.store.Set(ctx, s.key, e, c.opts.LastKnownTTL); err != nil {
+			c.log.WarnContext(ctx, "cache write failed", "err", err)
+		}
 	}
-	stored := *res
-	stored.Cached, stored.Stale = false, false
-	entry := &Entry{Result: stored, FreshUntil: res.FetchedAt.Add(ttl)}
-	if err := c.store.Set(ctx, key, entry, c.opts.StaleTTL); err != nil {
-		c.log.WarnContext(ctx, "cache write failed", "err", err)
-	}
-	return res, nil
+	return fetched{res: res, err: err}
 }
 
-// refreshInBackground refreshes a stale entry without blocking the caller.
+// assemble builds the answer from the cached shops and the live search
+// (nil when nothing ran live). start is when the live search began.
+func (c *Cache) assemble(p *plan, live *search.Result, start time.Time) *search.Result {
+	res := &search.Result{
+		Query:   search.NormalizeTitle(p.req.Title),
+		Country: p.country.Code,
+		Results: []search.Product{},
+		Markets: make(map[string]string, len(p.shops)),
+		Shops:   make(map[string]search.ShopInfo, len(p.shops)),
+		Cached:  true,
+	}
+	var oldest time.Time
+	use := func(e *Entry) {
+		res.Results = append(res.Results, e.Products...)
+		if oldest.IsZero() || e.FetchedAt.Before(oldest) {
+			oldest = e.FetchedAt
+		}
+	}
+	for _, s := range p.shops {
+		m := s.target.Market
+		switch {
+		case s.target.Provider == search.OffProvider:
+			res.Markets[m] = search.StatusOff
+			res.Shops[m] = search.ShopInfo{Status: search.StatusOff}
+		case s.serve:
+			use(s.entry)
+			at := s.entry.FetchedAt
+			res.Markets[m] = s.entry.Status
+			res.Shops[m] = search.ShopInfo{Status: s.entry.Status, Source: s.entry.Source, FetchedAt: &at, Cached: true}
+			res.Stale = res.Stale || s.stale
+		default:
+			info, ok := search.ShopInfo{}, false
+			if live != nil {
+				info, ok = live.Shops[m]
+			}
+			if ok && (info.Status == search.StatusOK || info.Status == search.StatusNoResults) {
+				res.Results = append(res.Results, productsOf(live.Results, m)...)
+				if oldest.IsZero() || live.FetchedAt.Before(oldest) {
+					oldest = live.FetchedAt
+				}
+				res.Markets[m] = info.Status
+				res.Shops[m] = info
+				res.Cached = false
+				continue
+			}
+			if s.entry != nil {
+				// The live search failed: the last known results, dated.
+				use(s.entry)
+				at := s.entry.FetchedAt
+				res.Markets[m] = search.StatusLastKnown
+				res.Shops[m] = search.ShopInfo{Status: search.StatusLastKnown, Source: s.entry.Source,
+					FetchedAt: &at, TookMS: info.TookMS, Cached: true}
+				continue
+			}
+			info.Status = search.StatusError
+			res.Markets[m] = search.StatusError
+			res.Shops[m] = info
+		}
+	}
+	search.SortProducts(res.Results, p.country.Targets)
+	res.FetchedAt = oldest
+	if oldest.IsZero() {
+		res.FetchedAt = c.now().UTC()
+	}
+	if !start.IsZero() {
+		res.TookMS = c.now().Sub(start).Milliseconds()
+	}
+	return res
+}
+
+func productsOf(products []search.Product, market string) []search.Product {
+	out := []search.Product{}
+	for _, p := range products {
+		if p.Market == market {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// refreshInBackground refreshes stale shops without blocking the caller.
 // Refreshes are bounded; when all slots are busy the refresh is skipped
 // and a later request will trigger it.
-func (c *Cache) refreshInBackground(key string, req search.Request) {
+func (c *Cache) refreshInBackground(p *plan, shops []*shopState) {
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
@@ -247,23 +466,38 @@ func (c *Cache) refreshInBackground(key string, req search.Request) {
 		defer func() { <-c.sem }()
 		ctx, cancel := context.WithTimeout(context.Background(), c.opts.FetchTimeout)
 		defer cancel()
-		_, err, _ := c.flights.Do(key, func() (any, error) {
-			return c.fetchAndStore(ctx, key, req)
+		v, _, _ := c.flights.Do(flightKey(p, shops), func() (any, error) {
+			return c.fetchAndStore(ctx, p, shops), nil
 		})
-		if err != nil {
-			c.log.Warn("background refresh failed", "err", err)
+		if f := v.(fetched); f.err != nil {
+			c.log.Warn("background refresh failed", "err", f.err)
 		}
 	}()
 }
 
-// Forget removes the cached answer of one search (title and country), so
-// the next search for it is live. It reports whether one was cached.
+// Forget removes the cached results of one search (title and country) for
+// every shop of the country, so the next search for it is live. Shared
+// entries are gone for the other countries too. It reports whether
+// anything was cached.
 func (c *Cache) Forget(ctx context.Context, req search.Request) (bool, error) {
-	key, ok := c.key(req)
-	if !ok {
+	country, ok := c.catalog.Country(req.Country)
+	title := strings.ToLower(search.NormalizeTitle(req.Title))
+	if !ok || len([]rune(title)) < search.MinTitleLen || len([]rune(title)) > search.MaxTitleLen {
 		return false, search.ErrInvalidTitle
 	}
-	return c.store.Delete(ctx, key)
+	found := false
+	for _, t := range country.Targets {
+		key := c.key(country, t, title)
+		if key == "" {
+			continue
+		}
+		deleted, err := c.store.Delete(ctx, key)
+		if err != nil {
+			return found, err
+		}
+		found = found || deleted
+	}
+	return found, nil
 }
 
 // Close stops new background refreshes and waits for running ones until
@@ -298,41 +532,33 @@ func (c *Cache) get(ctx context.Context, key string) *Entry {
 		c.log.WarnContext(ctx, "cache read failed", "err", err)
 		return nil
 	}
-	if e != nil && c.now().Sub(e.Result.FetchedAt) >= c.opts.StaleTTL {
+	if e != nil && c.now().Sub(e.FetchedAt) >= c.opts.LastKnownTTL {
 		return nil
 	}
 	return e
 }
 
-func (e *Entry) response(stale bool) *search.Result {
-	res := e.Result
-	res.Cached = true
-	res.Stale = stale
-	res.TookMS = 0
-	return &res
-}
-
 // resultsVersion is part of every cache key. Bump it whenever the way
 // results are found or filtered changes (relevance, duplicates, links), so
 // answers cached by an older build are not served after an upgrade.
-const resultsVersion = "v6"
+// v7: results stored per shop (step 14b).
+const resultsVersion = "v7"
 
-// key identifies a search: country, the catalog version, the search setup
-// (Variant) and marketplace domains (so editing markets.json or changing
-// the providers invalidates old entries) and the normalized title. The title is hashed so
-// user input never ends up raw in Redis keys.
-func (c *Cache) key(req search.Request) (string, bool) {
-	country, ok := c.catalog.Country(req.Country)
-	title := strings.ToLower(search.NormalizeTitle(req.Title))
-	if !ok || len([]rune(title)) < search.MinTitleLen || len([]rune(title)) > search.MaxTitleLen {
-		return "", false
+// key identifies one shop's results for a title: the shop, its site, the
+// setup of its source (Options.Shops), the country's region when the
+// source depends on it, and the normalized title. The title is hashed so
+// user input never ends up raw in Redis keys. "" = the shop is not cached.
+func (c *Cache) key(country markets.Country, t markets.Target, title string) string {
+	shop, ok := c.opts.Shops[t.Market]
+	if !ok || t.Provider == search.OffProvider {
+		return ""
 	}
 	h := sha256.New()
-	h.Write([]byte(c.catalog.Version() + ";" + c.opts.Variant + ";"))
-	for _, t := range country.Targets {
-		h.Write([]byte(t.Market + "=" + t.Domain + ";"))
+	h.Write([]byte(c.opts.Generation + ";" + t.Market + "=" + t.Domain + ";" + shop.Setup + ";"))
+	if shop.ByRegion {
+		h.Write([]byte("region=" + country.Region + "/" + country.ShoppingRegion + "/" + country.Language + ";"))
 	}
 	h.Write([]byte{0})
 	h.Write([]byte(title))
-	return "search:" + resultsVersion + ":" + country.Code + ":" + hex.EncodeToString(h.Sum(nil)[:16]), true
+	return "shop:" + resultsVersion + ":" + t.Market + ":" + hex.EncodeToString(h.Sum(nil)[:16])
 }

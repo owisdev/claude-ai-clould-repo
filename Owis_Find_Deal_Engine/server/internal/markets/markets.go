@@ -358,6 +358,20 @@ func MatchTarget(host string, targets []Target) (Target, bool) {
 	return Target{}, false
 }
 
+// Markets returns the ids of the marketplaces some country lists, sorted.
+func (c *Catalog) Markets() []string {
+	var out []string
+	for _, country := range c.countries {
+		for _, t := range country.Targets {
+			if !slices.Contains(out, t.Market) {
+				out = append(out, t.Market)
+			}
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 // HasMarket reports whether some country lists the marketplace id.
 func (c *Catalog) HasMarket(id string) bool {
 	for _, country := range c.countries {

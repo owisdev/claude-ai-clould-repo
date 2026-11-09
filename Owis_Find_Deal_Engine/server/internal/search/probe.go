@@ -29,7 +29,7 @@ type SourceAnswer struct {
 	// Fallback is set for a source that users only reach when the ones
 	// before it fail.
 	Fallback bool      `json:"fallback,omitempty"`
-	Status   string    `json:"status"` // ok, no_results, error
+	Status   string    `json:"status"` // ok, no_results, error, off
 	Error    string    `json:"error,omitempty"`
 	TookMS   int64     `json:"took_ms"`
 	CostUSD  float64   `json:"cost_usd"` // estimated, from the cost settings
@@ -54,7 +54,7 @@ const probeConcurrency = 8
 // Probe asks the sources of a country's shops directly: no cache, no
 // quota, no circuit breaker and no fallback, so an admin sees what each
 // source answers, how long it takes and what it costs. Each call is
-// bounded by the search timeout.
+// bounded by the shop's time limit (else the search timeout).
 func (s *Service) Probe(ctx context.Context, req ProbeRequest, cost CostFunc) (*ProbeResult, error) {
 	start := time.Now()
 	title := NormalizeTitle(req.Title)
@@ -84,6 +84,10 @@ func (s *Service) Probe(ctx context.Context, req ProbeRequest, cost CostFunc) (*
 	}
 	var calls []call
 	for _, t := range targets {
+		if t.Provider == OffProvider {
+			calls = append(calls, call{target: t})
+			continue
+		}
 		chain := sources(s.providers[t.Provider])
 		if len(chain) == 0 {
 			calls = append(calls, call{target: t})
@@ -104,6 +108,10 @@ func (s *Service) Probe(ctx context.Context, req ProbeRequest, cost CostFunc) (*
 	for i, c := range calls {
 		ans := &res.Sources[i]
 		ans.Market, ans.Fallback, ans.Products = c.target.Market, c.fallback, []Product{}
+		if c.target.Provider == OffProvider {
+			ans.Provider, ans.Status = OffProvider, StatusOff
+			continue
+		}
 		if c.provider == nil {
 			ans.Provider, ans.Status, ans.Error = c.target.Provider, StatusError, "no provider configured"
 			continue
@@ -117,7 +125,11 @@ func (s *Service) Probe(ctx context.Context, req ProbeRequest, cost CostFunc) (*
 			defer func() { <-sem }()
 			cq := q
 			cq.Targets = []markets.Target{c.target}
-			callCtx, cancel := context.WithTimeout(ctx, s.opts.Timeout)
+			limit := s.opts.Timeout
+			if l := s.opts.Timeouts[c.target.Market]; l > 0 {
+				limit = l
+			}
+			callCtx, cancel := context.WithTimeout(ctx, limit)
 			defer cancel()
 			t0 := time.Now()
 			products, err := probeCall(callCtx, c.provider, cq)

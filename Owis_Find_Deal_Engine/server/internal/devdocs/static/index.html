@@ -65,14 +65,20 @@
     {"market": "amazon", "title": "Anker USB C Hub, 7-in-1", "link": "https://www.amazon.com/dp/…",
      "price": 29.99, "currency": "USD", "position": 1, "provider": "serpapi"}
   ],
-  "markets": {"amazon": "ok", "aliexpress": "ok", "temu": "ok", "shein": "no_results"},
-  "took_ms": 41250,
-  "fetched_at": "2026-10-26T09:12:03Z",
+  "markets": {"amazon": "ok", "aliexpress": "ok", "temu": "last_known", "shein": "off"},
+  "shops": {
+    "amazon":     {"status": "ok", "source": "serpapi-amazon", "fetched_at": "2026-10-26T09:12:03Z", "took_ms": 2140, "cached": false},
+    "aliexpress": {"status": "ok", "source": "apify", "fetched_at": "2026-10-25T17:40:11Z", "took_ms": 0, "cached": true},
+    "temu":       {"status": "last_known", "source": "apify", "fetched_at": "2026-10-22T08:05:47Z", "took_ms": 45002, "cached": true},
+    "shein":      {"status": "off", "took_ms": 0, "cached": false}
+  },
+  "took_ms": 45120,
+  "fetched_at": "2026-10-22T08:05:47Z",
   "cached": false,
   "stale": false
 }</code></pre>
 <p>Headers: <code>X-Cache</code> (<code>HIT</code>, <code>STALE</code>, <code>MISS</code>), <code>X-Plan</code> (<code>api</code> for keys), <code>X-RateLimit-Limit</code>, <code>X-RateLimit-Remaining</code>, <code>X-RateLimit-Reset</code> (Unix seconds), <code>X-Request-ID</code>.</p>
-<p><code>markets</code> gives each marketplace's status: <code>ok</code>, <code>no_results</code> or <code>error</code> (that source failed; the others still answer). A product whose <code>link_type</code> is <code>search</code> links to the marketplace's own search because no product page was found.</p>
+<p><code>markets</code> gives each marketplace's status: <code>ok</code>, <code>no_results</code>, <code>error</code> (that shop failed and has no recent results; the others still answer), <code>off</code> (the shop is turned off) or <code>last_known</code> (the live search of that shop failed or ran out of time, so its latest results from the last 7 days are shown). <code>shops</code> gives the details per marketplace: where its results come from (<code>source</code>), when they were fetched (<code>fetched_at</code> — show it for <code>last_known</code>, e.g. "prices from 3 days ago"), how long its live search took and whether they came from the cache. Each shop is cached on its own for 48 h, so one answer can mix shops of different ages; the top-level <code>fetched_at</code> is the oldest. A product whose <code>link_type</code> is <code>search</code> links to the marketplace's own search because no product page was found.</p>
 
 <h2 id="async">Asynchronous search</h2>
 <p>For live searches without holding a connection open for a minute:</p>

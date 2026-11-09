@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -130,9 +131,9 @@ func TestLoadApify(t *testing.T) {
 	if cfg.ApifyMarketMaxItems["shein"] != 5 || cfg.ApifyMarketMaxItems["temu"] != 10 {
 		t.Errorf("max items per market = %v, want shein 5, temu 10 (APIFY_MAX_ITEMS)", cfg.ApifyMarketMaxItems)
 	}
-	// 60s Apify + 8s web fallback + 2s margin.
-	if cfg.SearchTimeout != 70*time.Second {
-		t.Errorf("search timeout = %v, want raised to 70s", cfg.SearchTimeout)
+	// The slowest shop (Temu, 45s by default) + 2s margin.
+	if cfg.SearchTimeout != 47*time.Second {
+		t.Errorf("search timeout = %v, want raised to 47s", cfg.SearchTimeout)
 	}
 
 	t.Setenv("SERPAPI_ENGINE", "bing")
@@ -213,5 +214,87 @@ func TestLoadSignInAndProxies(t *testing.T) {
 		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "TRUSTED_PROXIES") {
 			t.Errorf("%q: err = %v", bad, err)
 		}
+	}
+}
+
+func TestLoadShopRules(t *testing.T) {
+	t.Setenv("AUTH_JWKS_URL", "https://example.com/jwks")
+	t.Setenv("AUTH_ISSUER", "i")
+	t.Setenv("AUTH_AUDIENCE", "a")
+	t.Setenv("SEARCH_PROVIDERS", "serpapi,searxng")
+	t.Setenv("SEARXNG_URL", "http://s")
+	t.Setenv("SERPAPI_KEY", "k")
+	t.Setenv("APIFY_TOKEN", "tok")
+	t.Setenv("APIFY_MARKETS", "aliexpress,temu")
+	t.Setenv("APIFY_TIMEOUT", "90s")
+	for _, m := range []string{"ALIEXPRESS", "TEMU", "SHEIN"} {
+		t.Setenv("APIFY_"+m+"_ACTOR", "someone~"+m)
+		t.Setenv("APIFY_"+m+"_INPUT", `{"q":"{{query}}"}`)
+	}
+
+	// Defaults: the old lists decide the source, the agreed time limits
+	// apply; shein (in no list) goes to the web providers.
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := map[string]ShopRule{
+		"amazon":     {SourceSerpAPI, 15 * time.Second, GroupFast},
+		"ebay":       {SourceSerpAPI, 15 * time.Second, GroupFast},
+		"aliexpress": {SourceApify, 60 * time.Second, GroupSlow},
+		"temu":       {SourceApify, 45 * time.Second, GroupSlow},
+		"shein":      {SourceWeb, 33 * time.Second, GroupSlow}, // SerpApi 25s + SearXNG 8s
+	}
+	for m, w := range want {
+		if got := cfg.Shops[m]; got != w {
+			t.Errorf("%s = %+v, want %+v", m, got, w)
+		}
+	}
+	if cfg.SearchTimeout != 62*time.Second {
+		t.Errorf("search timeout = %v, want 62s (aliexpress 60s + 2s)", cfg.SearchTimeout)
+	}
+	if !slices.Equal(cfg.ApifyMarkets, []string{"aliexpress", "temu"}) || !slices.Equal(cfg.SerpAPIMarkets, []string{"amazon", "ebay"}) {
+		t.Errorf("apify %v serpapi %v", cfg.ApifyMarkets, cfg.SerpAPIMarkets)
+	}
+
+	// SHOP_* settings win over the old lists.
+	t.Setenv("SHOP_SHEIN_SOURCE", "off")
+	t.Setenv("SHOP_AMAZON_SOURCE", "web")
+	t.Setenv("SHOP_TEMU_TIMEOUT", "20s")
+	t.Setenv("SHOP_TEMU_GROUP", "fast")
+	t.Setenv("SHOP_ALIEXPRESS_SOURCE", "Off")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if r := cfg.Shops["shein"]; r.Source != SourceOff {
+		t.Errorf("shein = %+v, want off", r)
+	}
+	if r := cfg.Shops["temu"]; r.Timeout != 20*time.Second || r.Group != GroupFast {
+		t.Errorf("temu = %+v", r)
+	}
+	if !slices.Equal(cfg.ApifyMarkets, []string{"temu"}) || !slices.Equal(cfg.SerpAPIMarkets, []string{"ebay"}) {
+		t.Errorf("apify %v serpapi %v", cfg.ApifyMarkets, cfg.SerpAPIMarkets)
+	}
+	// amazon on the web chain (33s) is now the slowest shop.
+	if cfg.SearchTimeout != 35*time.Second {
+		t.Errorf("search timeout = %v, want 35s", cfg.SearchTimeout)
+	}
+
+	for key, bad := range map[string]string{
+		"SHOP_TEMU_SOURCE":  "scraper",
+		"SHOP_TEMU_TIMEOUT": "0s",
+		"SHOP_TEMU_GROUP":   "medium",
+		"SHOP_SHEIN_SOURCE": "serpapi", // no SerpApi engine for SHEIN
+	} {
+		t.Run(key, func(t *testing.T) {
+			t.Setenv(key, bad)
+			if _, err := Load(); err == nil {
+				t.Errorf("%s=%s accepted", key, bad)
+			}
+		})
+	}
+	if !Runtime("SHOP_TEMU_SOURCE") || !Runtime("CACHE_LAST_KNOWN_TTL") || Runtime("SHOP_TEMU_COLOR") {
+		t.Error("SHOP_* runtime keys not recognised as expected")
 	}
 }

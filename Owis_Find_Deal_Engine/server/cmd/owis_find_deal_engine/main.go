@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -432,6 +434,20 @@ func buildApp(ctx context.Context, cfg config.Config, settingsVersion int64, sh 
 	if err != nil {
 		return nil, err
 	}
+	catalog, err = turnOffShops(cfg, catalog, log)
+	if err != nil {
+		return nil, err
+	}
+	timeouts := make(map[string]time.Duration, len(cfg.Shops))
+	for _, m := range slices.Sorted(maps.Keys(cfg.Shops)) {
+		r := cfg.Shops[m]
+		timeouts[m] = r.Timeout
+		if r.Source == config.SourceOff {
+			log.Info("shop rules", "market", m, "source", r.Source)
+			continue
+		}
+		log.Info("shop rules", "market", m, "source", r.Source, "timeout", r.Timeout.String(), "group", r.Group)
+	}
 	plans, err := usage.ParsePlans(cfg.Plans, cfg.DefaultPlan)
 	if err != nil {
 		return nil, err
@@ -439,7 +455,7 @@ func buildApp(ctx context.Context, cfg config.Config, settingsVersion int64, sh 
 
 	searcher := search.NewService(catalog,
 		providers,
-		search.Options{Timeout: cfg.SearchTimeout, MaxConcurrency: cfg.MaxConcurrency,
+		search.Options{Timeout: cfg.SearchTimeout, Timeouts: timeouts, MaxConcurrency: cfg.MaxConcurrency,
 			PerMarket: cfg.ResultsPerMarket},
 		log)
 
@@ -455,18 +471,18 @@ func buildApp(ctx context.Context, cfg config.Config, settingsVersion int64, sh 
 	if cfg.CacheEnabled {
 		a.cache = cache.New(searcher, sh.cacheStore, catalog, cache.Options{
 			FreshTTL:             cfg.CacheFreshTTL,
-			PartialTTL:           cfg.CachePartialTTL,
 			EmptyTTL:             cfg.CacheEmptyTTL,
 			StaleTTL:             cfg.CacheStaleTTL,
+			LastKnownTTL:         cfg.CacheLastKnownTTL,
 			MinRefresh:           cfg.CacheMinRefresh,
 			FetchTimeout:         cfg.SearchTimeout + 5*time.Second,
 			MaxBackgroundRefresh: cfg.CacheMaxBackgroundRefresh,
-			Variant: fmt.Sprintf("providers=%s;apify=%s;apify_empty_fallback=%t;serpapi_markets=%s;per_market=%d;searxng_one_query=%t;serpapi=%s;gen=%d",
-				web.Name(), strings.Join(cfg.ApifyMarkets, ","), cfg.ApifyEmptyFallback, strings.Join(cfg.SerpAPIMarkets, ","),
-				cfg.ResultsPerMarket, cfg.SearXNGOneQuery, cfg.SerpAPIEngine, cfg.CacheGeneration),
+			Generation:           strconv.Itoa(cfg.CacheGeneration),
+			Shops:                cacheShops(cfg, web.Name()),
 		}, log)
 		cacheOrLive = a.cache
-		log.Info("search cache enabled", "fresh", cfg.CacheFreshTTL.String(), "stale", cfg.CacheStaleTTL.String())
+		log.Info("search cache enabled", "fresh", cfg.CacheFreshTTL.String(), "stale", cfg.CacheStaleTTL.String(),
+			"last_known", cfg.CacheLastKnownTTL.String())
 	}
 
 	a.handler = api.NewRouter(api.Deps{
@@ -672,18 +688,18 @@ func buildWebProvider(cfg config.Config, rec search.Recorder, log *slog.Logger) 
 	}, log)
 }
 
-// addSerpAPIMarkets routes each marketplace in SERPAPI_MARKETS to its
-// dedicated SerpApi engine (Amazon / eBay Search API), with the web
-// providers as fallback when it fails.
+// addSerpAPIMarkets routes each shop whose source is serpapi to its
+// dedicated SerpApi engine (Amazon / eBay Search API). There is no backup
+// source: when it fails, the shop's last known results are shown.
 func addSerpAPIMarkets(cfg config.Config, catalog *markets.Catalog, providers map[string]search.Provider,
-	web search.Provider, rec search.Recorder, log *slog.Logger) (*markets.Catalog, error) {
+	_ search.Provider, rec search.Recorder, log *slog.Logger) (*markets.Catalog, error) {
 	if len(cfg.SerpAPIMarkets) == 0 {
 		return catalog, nil
 	}
 	overrides := make(map[string]string, len(cfg.SerpAPIMarkets))
 	for _, m := range cfg.SerpAPIMarkets {
 		sc := serpapi.Config{APIKey: cfg.SerpAPIKey, BaseURL: cfg.SerpAPIBaseURL,
-			Combined: cfg.SearchCombined, HTTPClient: &http.Client{Timeout: cfg.SerpAPITimeout}}
+			Combined: cfg.SearchCombined, HTTPClient: &http.Client{Timeout: cfg.Shops[m].Timeout + 5*time.Second}}
 		var (
 			engine search.Provider
 			err    error
@@ -694,35 +710,23 @@ func addSerpAPIMarkets(cfg config.Config, catalog *markets.Catalog, providers ma
 		case "ebay":
 			engine, err = serpapi.NewEbay(sc)
 		default:
-			err = fmt.Errorf("SERPAPI_MARKETS: no dedicated engine for %q", m)
+			err = fmt.Errorf("SHOP_%s_SOURCE: no dedicated SerpApi engine for %q", strings.ToUpper(m), m)
 		}
-		if err != nil {
-			return nil, err
-		}
-		engine = search.Instrument(engine, rec, callCost(cfg, engine.Name()))
-		chain, err := search.NewFallback([]search.Provider{engine, web}, search.FallbackOptions{
-			AttemptTimeout:   cfg.SerpAPITimeout,
-			Timeouts:         map[string]time.Duration{web.Name(): cfg.SearchTimeout},
-			FailureThreshold: cfg.ProviderFailThreshold,
-			Cooldown:         cfg.ProviderCooldown,
-			Recorder:         rec,
-		}, log)
 		if err != nil {
 			return nil, err
 		}
 		name := engine.Name()
-		providers[name] = chain
+		providers[name] = search.Instrument(engine, rec, callCost(cfg, name))
 		overrides[m] = name
-		log.Info("dedicated SerpApi engine enabled", "market", m, "provider", name)
 	}
 	return catalog.WithProviders(overrides)
 }
 
-// addApifyProviders routes each marketplace in APIFY_MARKETS to its Apify
-// scraper, with the web providers as fallback when the scraper fails or is
-// too slow. Other marketplaces keep using the web providers.
+// addApifyProviders routes each shop whose source is apify to its Apify
+// scraper. There is no backup source: when it fails or runs out of time,
+// the shop's last known results are shown.
 func addApifyProviders(cfg config.Config, catalog *markets.Catalog, providers map[string]search.Provider,
-	web search.Provider, rec search.Recorder, log *slog.Logger) (*markets.Catalog, error) {
+	_ search.Provider, rec search.Recorder, log *slog.Logger) (*markets.Catalog, error) {
 	if len(cfg.ApifyMarkets) == 0 {
 		return catalog, nil
 	}
@@ -733,7 +737,7 @@ func addApifyProviders(cfg config.Config, catalog *markets.Catalog, providers ma
 			Actor:         cfg.ApifyActors[m],
 			InputTemplate: cfg.ApifyInputs[m],
 			MaxItems:      cfg.ApifyMarketMaxItems[m],
-			Timeout:       cfg.ApifyTimeout,
+			Timeout:       cfg.Shops[m].Timeout,
 			MaxChargeUSD:  cfg.ApifyMaxChargeUSD,
 			Currency:      cfg.ApifyCurrencies[m],
 			Combined:      cfg.SearchCombined,
@@ -743,24 +747,54 @@ func addApifyProviders(cfg config.Config, catalog *markets.Catalog, providers ma
 		if err != nil {
 			return nil, fmt.Errorf("APIFY_%s: %w", strings.ToUpper(m), err)
 		}
-		source := search.Instrument(scraper, rec, callCost(cfg, scraper.Name()))
-		chain, err := search.NewFallback([]search.Provider{source, web}, search.FallbackOptions{
-			AttemptTimeout: cfg.ApifyTimeout,
-			// The web chain has its own per-provider timeouts; the search
-			// timeout still bounds the whole search.
-			Timeouts:         map[string]time.Duration{web.Name(): cfg.SearchTimeout},
-			FailureThreshold: cfg.ProviderFailThreshold,
-			Cooldown:         cfg.ProviderCooldown,
-			Recorder:         rec,
-		}, log)
-		if err != nil {
-			return nil, err
-		}
 		name := "apify-" + m
-		providers[name] = chain
+		providers[name] = search.Instrument(scraper, rec, callCost(cfg, scraper.Name()))
 		overrides[m] = name
 		log.Info("apify scraper enabled", "market", m, "actor", cfg.ApifyActors[m], "max_items", cfg.ApifyMarketMaxItems[m],
-			"timeout", cfg.ApifyTimeout.String(), "search_timeout", cfg.SearchTimeout.String())
+			"timeout", cfg.Shops[m].Timeout.String(), "group", cfg.Shops[m].Group, "search_timeout", cfg.SearchTimeout.String())
 	}
 	return catalog.WithProviders(overrides)
+}
+
+// turnOffShops marks the shops whose source is off: they are not searched
+// and show the status "off".
+func turnOffShops(cfg config.Config, catalog *markets.Catalog, log *slog.Logger) (*markets.Catalog, error) {
+	overrides := map[string]string{}
+	for m, r := range cfg.Shops {
+		if r.Source == config.SourceOff {
+			overrides[m] = search.OffProvider
+		}
+	}
+	if len(overrides) == 0 {
+		return catalog, nil
+	}
+	return catalog.WithProviders(overrides)
+}
+
+// cacheShops describes, per shop, what its cached results depend on: the
+// source and its settings. Changing any of them starts new entries for
+// that shop only.
+func cacheShops(cfg config.Config, webChain string) map[string]cache.Shop {
+	out := make(map[string]cache.Shop, len(cfg.Shops))
+	for m, r := range cfg.Shops {
+		setup := fmt.Sprintf("source=%s;per_market=%d", r.Source, cfg.ResultsPerMarket)
+		var byRegion bool
+		switch r.Source {
+		case config.SourceOff:
+			continue
+		case config.SourceSerpAPI:
+			setup += ";engine=serpapi-" + m
+		case config.SourceApify:
+			in := cfg.ApifyInputs[m]
+			setup += fmt.Sprintf(";actor=%s;input=%s;max=%d;currency=%s",
+				cfg.ApifyActors[m], in, cfg.ApifyMarketMaxItems[m], cfg.ApifyCurrencies[m])
+			byRegion = strings.Contains(in, "{{country}}")
+		case config.SourceWeb:
+			setup += fmt.Sprintf(";chain=%s;serpapi=%s;searxng_one_query=%t;combined=%t",
+				webChain, cfg.SerpAPIEngine, cfg.SearXNGOneQuery, cfg.SearchCombined)
+			byRegion = true
+		}
+		out[m] = cache.Shop{Setup: setup, ByRegion: byRegion}
+	}
+	return out
 }

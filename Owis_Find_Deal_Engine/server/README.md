@@ -264,7 +264,7 @@ never secret values). Answers carry `Cache-Control: no-store`.
 | `GET /admin/v1/admins`, `POST /admin/v1/admins` `{"email"}` | admin list, add one |
 | `POST /admin/v1/admins/{email}/disable\|enable\|unlink` | not yourself; never the last active admin |
 | `GET /admin/v1/audit?actor=&action=&before=&limit=` | audit log, newest first (`before` = id for paging) |
-| `POST /admin/v1/tools/test-search` | `{"title", "country", "markets": [..], "all_sources": false}` — asks each shop's source directly (no cache, quota, breaker or fallback): its products, time, error, estimated cost. `all_sources: true` also asks the fallbacks (each paid one is charged) |
+| `POST /admin/v1/tools/test-search` | `{"title", "country", "markets": [..], "all_sources": false}` — asks each shop's source directly (no cache, quota or breaker), within the shop's time limit: its products, time, error, estimated cost; a shop that is off shows `off`. `all_sources: true` also asks every web provider of a shop on the web source (each paid one is charged) |
 | `POST /admin/v1/tools/cache/forget` | `{"title", "country"}` — next search for it is live |
 | `POST /admin/v1/tools/cache/bump` | raises `CACHE_GENERATION`: every cached answer becomes a miss |
 | `GET /admin/v1/tools/providers` | circuit breaker per source: `closed`, `open` (skipped until …), `half_open` |
@@ -552,45 +552,64 @@ per shop, how many results were dropped and why.
   `SERPAPI_KEY` is set): Amazon is searched with SerpApi's Amazon Search
   API on the country's Amazon (amazon.com for usa/jor, amazon.sa for ksa):
   real results with price, rating, image and direct `/dp/<ASIN>` links. No
-  Amazon account needed; one SerpApi search per live search. If it fails,
-  Amazon falls back to the providers above.
-- **Apify** (optional, per marketplace): `APIFY_MARKETS=temu,shein` sends
-  those shops to a scraper from the Apify store (real prices and images);
-  if it fails or exceeds `APIFY_TIMEOUT`, that shop falls back to the
-  providers above. Setup steps are in [`.env.example`](.env.example).
+  Amazon account needed; one SerpApi search per live search.
+- **Apify** (optional, per marketplace): `APIFY_MARKETS=aliexpress,temu`
+  (or `SHOP_<SHOP>_SOURCE=apify`) sends those shops to a scraper from the
+  Apify store (real prices and images). Setup steps are in
+  [`.env.example`](.env.example).
+
+**Rules per shop (step 14b).** Every shop has exactly one source, a time
+limit and a group (`SHOP_<SHOP>_SOURCE` = `serpapi` / `apify` / `web` /
+`off`, `SHOP_<SHOP>_TIMEOUT`, `SHOP_<SHOP>_GROUP` = `fast` / `slow`).
+There is **no backup source** any more: a shop that fails or runs out of
+time shows its **last known results** (up to 7 days old, status
+`last_known`), else `error`. A shop that is `off` is not searched and
+shows `off`. Production (2026-11-09):
 
 ```
-amazon                   ──► SerpApi Amazon engine ──► web providers
-aliexpress, ebay         ──► web providers (SEARCH_PROVIDERS order)
-temu, shein (if Apify)   ──► Apify scraper ──► web providers
+amazon, ebay     ──► SerpApi engine   15 s  fast
+aliexpress       ──► Apify scraper    60 s  slow
+temu             ──► Apify scraper    45 s  slow
+shein            ──► off
+(a shop with source web ──► web providers, SEARCH_PROVIDERS order)
 ```
 
-Each provider gets `PROVIDER_ATTEMPT_TIMEOUT` (Apify: `APIFY_TIMEOUT`);
-after `PROVIDER_FAILURE_THRESHOLD` failures in a row it is skipped for
-`PROVIDER_COOLDOWN` (circuit breaker), so a broken source adds no delay.
-Every result carries `"provider"` (`searxng`, `serpapi`, `apify`).
+A waiting search ends at the slowest shop's limit + 2 s (62 s). The web
+providers give each one `PROVIDER_ATTEMPT_TIMEOUT` (SerpApi:
+`SERPAPI_TIMEOUT`); after `PROVIDER_FAILURE_THRESHOLD` failures in a row
+one is skipped for `PROVIDER_COOLDOWN` (circuit breaker). Every result
+carries `"provider"` (`searxng`, `serpapi`, `apify`). The server log has
+one `shop rules` line per shop at start and after each settings change.
 
 ## Cache and price freshness
 
-Searches are cached per country + normalized title (case and spacing do
-not matter), in Redis when `REDIS_URL` is set:
+Each **shop's** results are cached on their own (step 14b), keyed by the
+shop, its site, the setup of its source and the normalized title (case
+and spacing do not matter), in Redis when `REDIS_URL` is set:
 
-| Age of the cached answer | What happens | `X-Cache` |
+| Age of a shop's results | What happens | `X-Cache` |
 |---|---|---|
 | < `CACHE_FRESH_TTL` (48h) | served from cache | `HIT` |
 | up to `CACHE_STALE_TTL` (72h) | served instantly, refreshed in the background for the next user | `STALE` |
-| older / not cached | fetched live | `MISS` |
+| older / not cached | that shop is searched live | `MISS` |
+| up to `CACHE_LAST_KNOWN_TTL` (7 days) | shown only when the shop's live search fails: status `last_known`, with its date | |
 
-- Results with a failed shop are fresh only 10 min, empty results 30 min.
+- A search runs live **only for the shops without an answer**; the others
+  come from the cache.
+- **Countries share** a shop's results when the request to the shop is the
+  same: AliExpress and Temu in every country, `amazon.com` for usa and
+  jor. Shops on the web providers (and scrapers whose input has
+  `{{country}}`) are cached per region.
+- A shop that found nothing is fresh only 30 min; a failed shop is never
+  stored.
 - `"refresh": true` in the request forces a live fetch (pull to refresh),
-  at most once per `CACHE_MIN_REFRESH` (10 min) per query.
-- If a live fetch fails but an older answer exists, the older answer is
-  returned (`stale: true`) instead of an error.
+  at most once per `CACHE_MIN_REFRESH` (10 min) per shop.
 - Identical searches arriving together make one upstream call.
-- Editing `markets.json` changes the cache keys, so old answers are not
-  served for a changed shop list.
-- Responses carry `fetched_at`, `cached`, `stale`: show "prices updated 3h
-  ago" in the app. The shop's page always has the live price.
+- Changing a shop's source or its settings starts new entries for that
+  shop only; `CACHE_GENERATION` (admin tool) drops all of them.
+- Responses carry `fetched_at` (the oldest shop's date), `cached`, `stale`
+  and per shop `shops.<market>.fetched_at`: show "prices updated 3h ago"
+  in the app. The shop's page always has the live price.
 - **Cached answers are free**: only live searches count against the daily
   allowance, and cached answers are served even when it is used up.
 

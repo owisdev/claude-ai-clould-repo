@@ -52,9 +52,69 @@ the server, webhooks `first_results` / `completed`), the admin test
 search stays synchronous. Decisions: A keep `POST /api/v1/search`,
 B last known results up to 7 days, C MCP waits 15 s, D queue in the
 same program; cache 48 h per shop; SHEIN off; paid Google Shopping
-backup removed. **Next: build part 1** (SHEIN out of `APIFY_MARKETS`
-in the panel; owner makes the eBay Production keyset), **then part 2**
-(rules per shop + cache per shop + last-known backup).
+backup removed.
+- **Part 1 — done by the owner 2026-11-09. ✅** `APIFY_MARKETS=aliexpress,temu`
+  (settings version 42; log: scrapers for aliexpress and temu only, still
+  `timeout 1m30s`). eBay **Production** keyset made (no account-deletion
+  question was asked); App ID + Cert ID stay with the owner until part 5.
+  Found while building part 2: a shop in no list goes to the web
+  providers, so since part 1 **SHEIN is searched through SerpApi Google
+  Shopping** (one extra SerpApi search per live search) until
+  `SHOP_SHEIN_SOURCE=off` is set after the part 2 deploy.
+- **Part 2 — built 2026-11-09 (branch `claude/dreamy-edison-wma6qw`):
+  rules per shop, cache per shop, last known results.** Owner decisions:
+  new status `last_known` + per-shop details (yes), countries share a
+  shop's results (yes), time limits amazon 15 s / ebay 15 s / aliexpress
+  60 s / temu 45 s (ok), SearXNG keeps running.
+  - *Rules per shop:* new runtime settings `SHOP_<SHOP>_SOURCE`
+    (`serpapi` / `apify` / `web` / `off`), `SHOP_<SHOP>_TIMEOUT`,
+    `SHOP_<SHOP>_GROUP` (`fast` / `slow`, used in part 3). Without
+    `_SOURCE` the old lists decide (`APIFY_MARKETS` → apify,
+    `SERPAPI_MARKETS` → serpapi, else web), so the deploy changes no
+    source by itself. Defaults: the agreed limits, shein 30 s; amazon and
+    ebay fast, others slow. Each shop has its own time limit; the waiting
+    search ends at the slowest + 2 s (production: 62 s instead of 100 s).
+    No backup source behind serpapi / apify shops any more (no paid
+    Google Shopping, no SearXNG). A shop that is `off` is not searched,
+    status `off`. Start log: one `shop rules` line per shop.
+  - *Cache per shop* (key `shop:v7:<shop>:…` = shop + site + source
+    setup + title; per region only for web shops and scrapers with
+    `{{country}}`): only shops without an answer are searched live;
+    countries share AliExpress, Temu and `amazon.com` (usa / jor). Fresh
+    48 h, stale 72 h, empty 30 min, failures never stored. New
+    `CACHE_LAST_KNOWN_TTL` (default 168h = 7 days): a shop whose live
+    search fails or runs out of time shows its latest results, status
+    `last_known`, with their date. A search where nothing new was fetched
+    counts as cached (free). `CACHE_PARTIAL_TTL` and
+    `APIFY_EMPTY_FALLBACK` have no effect any more. Old whole-search
+    entries are not read (each product's next search is live once, then
+    expire by themselves).
+  - *Response:* `markets` statuses `ok`, `no_results`, `error`, `off`,
+    `last_known`; new `shops` block per shop: `status`, `source`,
+    `fetched_at`, `took_ms`, `cached`; top `fetched_at` = oldest shop.
+    OpenAPI, MCP tool description / output schema, developer page,
+    README, `.env.example`, admin settings page (new "Shops" group, help
+    texts) updated. Admin test search: each shop within its own limit,
+    `off` shown.
+  - *Tested here:* unit tests (rules, defaults, wrong values; per-shop
+    time limit, off shops, part of the shops; cache: hit, shared between
+    countries, per-region not shared, only missing shops live,
+    last_known and its 7-day end, stale refresh of only the stale shop,
+    forced refresh, errors not stored, merged identical searches,
+    Redis store), race detector, admin web app build. End to end: the
+    real server binary with Redis and fake Firebase keys / SerpApi /
+    Apify: first search live (3 shops, shein `off`), again `HIT` with no
+    calls, `usa` searched only eBay live, Temu failing → `last_known`
+    with the first date, Temu too slow → cut at its limit (5 s in the
+    test) → `last_known`, new title with Temu slow → `error`, next search
+    only Temu live. Not run here: Docker build, Postgres store tests (CI
+    runs them).
+  - **Owner, next:** review and merge the PR → CI publishes the image →
+    on the VM `deploy/deploy.sh` → `settings set -by owner
+    SHOP_SHEIN_SOURCE off` → check the `shop rules` log lines → two test
+    searches through the public address (commands in the chat of
+    2026-11-09). Then **part 3** (jobs filled per shop + queue +
+    fast answer first).
 
 Next-session list (2026-11-08), updated 2026-11-09:
 1. **MCP test with real agents.** Connect Claude Code on the owner's PC
