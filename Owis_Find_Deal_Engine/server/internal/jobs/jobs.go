@@ -3,10 +3,15 @@
 // once and asks for the result later, or is called back by a signed
 // webhook when it is done.
 //
+// Since step 14b part 3 a job is filled per shop: it is saved with the
+// answer so far each time a shop finishes (the shops still searched are
+// "pending"), so the caller sees the fast shops first.
+//
 // Jobs are kept in Redis when configured (any server instance answers
 // GET /api/v1/searches/{id}), otherwise in memory. A job runs on the
-// instance that accepted it; if that instance stops, the job is reported
-// as lost once its deadline has passed.
+// instance that accepted it. With Redis, a job cut off by a server stop
+// stays "running" and is resumed by the next server start (Resume); one
+// nobody resumes is reported as lost once its deadline has passed.
 package jobs
 
 import (
@@ -65,6 +70,10 @@ type Job struct {
 	Error      *Error         `json:"error,omitempty"`
 	Quota      *Quota         `json:"quota,omitempty"`
 	Webhook    *Webhook       `json:"webhook,omitempty"`
+	// Plan and DailyLimit are the caller's allowance (to resume the job);
+	// never shown.
+	Plan       string `json:"plan,omitempty"`
+	DailyLimit int64  `json:"daily_limit,omitempty"`
 }
 
 // Request is what was searched.
@@ -90,13 +99,53 @@ type Quota struct {
 	Reset     time.Time `json:"reset"`
 }
 
-// Webhook is the callback of a job and how its delivery went.
+// Webhook events a client can ask for (webhook_events).
+const (
+	EventFirstResults = "first_results" // the fast shops are done, slow ones still searched
+	EventCompleted    = "completed"     // the job is done or failed
+)
+
+// Webhook delivery states beyond webhook.StatusPending / Delivered /
+// Failed.
+const (
+	DeliveryNotRequested = "not_requested" // the client did not ask for this event
+	DeliverySkipped      = "skipped"       // first_results: nothing was left to wait for
+)
+
+// Webhook is the callback of a job and how its delivery went. Status,
+// Attempts, HTTPStatus and Error are those of the "completed" event.
 type Webhook struct {
-	URL        string `json:"url"`
-	Status     string `json:"status"` // pending, delivered, failed
+	URL        string    `json:"url"`
+	Events     []string  `json:"events,omitempty"`
+	Status     string    `json:"status"` // pending, delivered, failed, not_requested
+	Attempts   int       `json:"attempts"`
+	HTTPStatus int       `json:"http_status,omitempty"`
+	Error      string    `json:"error,omitempty"`
+	First      *Delivery `json:"first_results,omitempty"`
+}
+
+// Delivery is how one webhook event's delivery went.
+type Delivery struct {
+	Status     string `json:"status"` // pending, delivered, failed, skipped
 	Attempts   int    `json:"attempts"`
 	HTTPStatus int    `json:"http_status,omitempty"`
 	Error      string `json:"error,omitempty"`
+}
+
+// Wants reports whether the webhook asks for event.
+func (w *Webhook) Wants(event string) bool {
+	if w == nil {
+		return false
+	}
+	if len(w.Events) == 0 {
+		return event == EventCompleted
+	}
+	for _, e := range w.Events {
+		if e == event {
+			return true
+		}
+	}
+	return false
 }
 
 // Lost reports whether a running job's server stopped before finishing it.
@@ -109,8 +158,13 @@ var ErrNotFound = errors.New("no search job with this id")
 
 // Store keeps jobs for a time.
 type Store interface {
+	// Save stores j for ttl and keeps the list of running jobs.
 	Save(ctx context.Context, j Job, ttl time.Duration) error
 	Get(ctx context.Context, id string) (Job, error)
+	// Running lists the ids of the jobs saved as running.
+	Running(ctx context.Context) ([]string, error)
+	// Persistent reports whether jobs outlive the server (Redis).
+	Persistent() bool
 }
 
 var idEncoding = base32.NewEncoding("abcdefghijklmnopqrstuvwxyz234567").WithPadding(base32.NoPadding)
@@ -178,6 +232,25 @@ func (m *MemoryStore) Get(_ context.Context, id string) (Job, error) {
 	return j, err
 }
 
+// Running lists the running jobs (of this server: memory is not shared).
+func (m *MemoryStore) Running(context.Context) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []string
+	for id, e := range m.jobs {
+		var j struct {
+			Status string `json:"status"`
+		}
+		if json.Unmarshal(e.data, &j) == nil && j.Status == StatusRunning && m.now().Before(e.until) {
+			out = append(out, id)
+		}
+	}
+	return out, nil
+}
+
+// Persistent is false: memory jobs end with the server.
+func (m *MemoryStore) Persistent() bool { return false }
+
 // Cleanup deletes expired jobs every interval until ctx ends.
 func (m *MemoryStore) Cleanup(ctx context.Context, interval time.Duration) {
 	t := time.NewTicker(interval)
@@ -209,14 +282,51 @@ func NewRedisStore(rdb redis.UniversalClient) *RedisStore { return &RedisStore{r
 
 func redisKey(id string) string { return "owis:job:" + id }
 
+// redisRunning is the set of running job ids.
+const redisRunning = "owis:jobs:running"
+
 // Save stores j for ttl.
 func (s *RedisStore) Save(ctx context.Context, j Job, ttl time.Duration) error {
 	b, err := json.Marshal(j)
 	if err != nil {
 		return err
 	}
-	return s.rdb.Set(ctx, redisKey(j.ID), b, ttl).Err()
+	_, err = s.rdb.TxPipelined(ctx, func(p redis.Pipeliner) error {
+		p.Set(ctx, redisKey(j.ID), b, ttl)
+		if j.Status == StatusRunning {
+			p.SAdd(ctx, redisRunning, j.ID)
+		} else {
+			p.SRem(ctx, redisRunning, j.ID)
+		}
+		return nil
+	})
+	return err
 }
+
+// Running lists the running jobs of every server; ids whose job expired
+// are dropped from the list.
+func (s *RedisStore) Running(ctx context.Context) ([]string, error) {
+	ids, err := s.rdb.SMembers(ctx, redisRunning).Result()
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, id := range ids {
+		n, err := s.rdb.Exists(ctx, redisKey(id)).Result()
+		if err != nil {
+			return out, err
+		}
+		if n == 0 {
+			s.rdb.SRem(ctx, redisRunning, id)
+			continue
+		}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
+// Persistent is true: jobs outlive the server.
+func (s *RedisStore) Persistent() bool { return true }
 
 // Get returns the job with id.
 func (s *RedisStore) Get(ctx context.Context, id string) (Job, error) {
@@ -240,11 +350,14 @@ var (
 )
 
 // Work runs a job's search and returns the job finished (status done or
-// failed, with result or error). It must respect ctx.
-type Work func(ctx context.Context, j Job) Job
+// failed, with result or error). It must respect ctx. save stores the job
+// as it is so far (the answer of the shops done); it may be called from
+// one goroutine at a time.
+type Work func(ctx context.Context, j Job, save func(Job)) Job
 
-// Notify delivers a finished job's webhook.
-type Notify func(ctx context.Context, j Job) webhook.Result
+// Notify delivers a finished job's webhook and returns the job with the
+// delivery recorded in j.Webhook.
+type Notify func(ctx context.Context, j Job) Job
 
 // Runner runs jobs in the background. It outlives settings changes; the
 // search itself is given per job. Safe for concurrent use.
@@ -254,7 +367,7 @@ type Runner struct {
 	now   func() time.Time
 
 	ctx    context.Context // cancelled when Close gives up waiting
-	cancel context.CancelFunc
+	cancel context.CancelCauseFunc
 	wg     sync.WaitGroup
 
 	mu      sync.Mutex
@@ -265,7 +378,7 @@ type Runner struct {
 
 // NewRunner returns a Runner saving jobs in store.
 func NewRunner(store Store, log *slog.Logger) *Runner {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancelCause(context.Background())
 	return &Runner{store: store, log: log, now: time.Now, ctx: ctx, cancel: cancel, running: map[string]int{}}
 }
 
@@ -314,8 +427,29 @@ func (r *Runner) Start(values context.Context, j Job, timeout, wait time.Duratio
 	case done := <-finished:
 		return done, nil
 	case <-t.C:
+		// The answer so far.
+		if cur, err := r.store.Get(values, j.ID); err == nil {
+			return cur, nil
+		}
 		return j, nil
 	}
+}
+
+// Resume runs a job again that was saved as running by a server that
+// stopped (its search was cut off): work goes on until the job's
+// deadline. It does not count against MaxPerOwner.
+func (r *Runner) Resume(values context.Context, j Job, work Work, notify Notify) error {
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return ErrClosed
+	}
+	r.running[j.Owner]++
+	r.total++
+	r.wg.Add(1)
+	r.mu.Unlock()
+	go r.run(values, j, time.Until(j.Deadline), work, notify, make(chan Job, 1))
+	return nil
 }
 
 func (r *Runner) finish(owner string) {
@@ -333,6 +467,12 @@ func (r *Runner) run(values context.Context, j Job, timeout time.Duration, work 
 	defer r.finish(j.Owner)
 	ctx, cancel := context.WithTimeout(mergeValues(r.ctx, values), timeout)
 	defer cancel()
+	// Progress saves keep the job readable until its deadline has passed.
+	progressTTL := time.Until(j.Deadline) + lostGrace + ResultTTL
+	save := func(p Job) {
+		p.Status = StatusRunning
+		r.saveFor(ctx, p, progressTTL)
+	}
 	j = func() (out Job) {
 		defer func() {
 			if p := recover(); p != nil {
@@ -340,8 +480,14 @@ func (r *Runner) run(values context.Context, j Job, timeout time.Duration, work 
 				out = Fail(j, 500, "internal_error", "internal server error", r.now())
 			}
 		}()
-		return work(ctx, j)
+		return work(ctx, j, save)
 	}()
+	if r.ctx.Err() != nil && r.store.Persistent() {
+		// The server is stopping: the job stays "running" with the answer
+		// so far, and the next server start resumes it.
+		r.log.InfoContext(ctx, "search job left for the next server start", "job", j.ID)
+		return
+	}
 	if j.Status == StatusRunning { // work must finish it; be safe
 		j = Fail(j, 500, "internal_error", "internal server error", r.now())
 	}
@@ -354,32 +500,39 @@ func (r *Runner) run(values context.Context, j Job, timeout time.Duration, work 
 	// The webhook gets its own time: the search may have used all of it.
 	wctx, wcancel := context.WithTimeout(mergeValues(r.ctx, values), 2*time.Minute)
 	defer wcancel()
-	res := notify(wctx, j)
 	// A copy: the job sent on finished (and maybe being written as the
 	// HTTP answer right now) shares the old Webhook.
 	hook := *j.Webhook
-	hook.Status, hook.Attempts, hook.HTTPStatus, hook.Error = res.Status, res.Attempts, res.HTTPStatus, res.Error
 	j.Webhook = &hook
+	j = notify(wctx, j)
 	r.save(wctx, j)
-	if res.Status != webhook.StatusDelivered {
-		r.log.WarnContext(wctx, "webhook not delivered", "job", j.ID, "attempts", res.Attempts, "http_status", res.HTTPStatus, "err", res.Error)
+	if j.Webhook != nil && j.Webhook.Status == webhook.StatusFailed {
+		r.log.WarnContext(wctx, "webhook not delivered", "job", j.ID, "attempts", j.Webhook.Attempts,
+			"http_status", j.Webhook.HTTPStatus, "err", j.Webhook.Error)
 	}
 }
 
-func (r *Runner) save(ctx context.Context, j Job) {
+func (r *Runner) save(ctx context.Context, j Job) { r.saveFor(ctx, j, ResultTTL) }
+
+func (r *Runner) saveFor(ctx context.Context, j Job, ttl time.Duration) {
 	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	if err := r.store.Save(sctx, j, ResultTTL); err != nil {
+	if err := r.store.Save(sctx, j, ttl); err != nil {
 		r.log.ErrorContext(ctx, "saving search job failed", "job", j.ID, "err", err)
 	}
 }
 
-// Close stops accepting jobs and waits for the running ones until ctx
-// ends; then cancels them (they are saved as failed) and waits for that.
+// Close stops accepting jobs. With a persistent store the running jobs
+// are stopped at once and left for the next server start (Resume);
+// otherwise Close waits for them until ctx ends, then cancels them (they
+// are saved as failed) and waits for that.
 func (r *Runner) Close(ctx context.Context) {
 	r.mu.Lock()
 	r.closed = true
 	r.mu.Unlock()
+	if r.store.Persistent() {
+		r.cancel(search.ErrResumeLater) // stays counted: it goes on after the restart
+	}
 	done := make(chan struct{})
 	go func() {
 		r.wg.Wait()
@@ -388,10 +541,10 @@ func (r *Runner) Close(ctx context.Context) {
 	select {
 	case <-done:
 	case <-ctx.Done():
-		r.cancel()
+		r.cancel(nil)
 		<-done
 	}
-	r.cancel()
+	r.cancel(nil)
 }
 
 // Fail returns j finished with an error.
@@ -412,7 +565,10 @@ func Done(j Job, res *search.Result, now time.Time) Job {
 // mergeValues is a context cancelled with parent that carries the values
 // of values (not its cancellation or deadline).
 func mergeValues(parent, values context.Context) context.Context {
-	return valueCtx{Context: parent, values: values}
+	// WithoutCancel: values' own cancellation (a finished HTTP request)
+	// must not show through Value, or context.Cause of the job would
+	// report the request's end instead of the job's.
+	return valueCtx{Context: parent, values: context.WithoutCancel(values)}
 }
 
 type valueCtx struct {

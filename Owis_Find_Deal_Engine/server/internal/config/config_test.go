@@ -298,3 +298,53 @@ func TestLoadShopRules(t *testing.T) {
 		t.Error("SHOP_* runtime keys not recognised as expected")
 	}
 }
+
+func TestLoadQueueAndApifyRun(t *testing.T) {
+	t.Setenv("AUTH_JWKS_URL", "https://example.com/jwks")
+	t.Setenv("AUTH_ISSUER", "i")
+	t.Setenv("AUTH_AUDIENCE", "a")
+	t.Setenv("SEARCH_PROVIDERS", "searxng")
+	t.Setenv("SEARXNG_URL", "http://s")
+	t.Setenv("APIFY_TOKEN", "tok")
+	t.Setenv("APIFY_MARKETS", "aliexpress,temu")
+	for _, m := range []string{"ALIEXPRESS", "TEMU"} {
+		t.Setenv("APIFY_"+m+"_ACTOR", "someone~"+m)
+		t.Setenv("APIFY_"+m+"_INPUT", `{"q":"{{query}}"}`)
+	}
+	t.Setenv("SHOP_ALIEXPRESS_TIMEOUT", "90s")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.QueueApifyMaxRuns != 4 || cfg.QueueSerpAPIMaxRuns != 10 || cfg.QueueWebMaxRuns != 10 || cfg.QueueMaxWait != time.Minute {
+		t.Errorf("queue defaults = %d %d %d %v", cfg.QueueApifyMaxRuns, cfg.QueueSerpAPIMaxRuns, cfg.QueueWebMaxRuns, cfg.QueueMaxWait)
+	}
+	if got := cfg.ApifyRunTimeout("aliexpress"); got != 85*time.Second {
+		t.Errorf("apify run timeout = %v, want 85s (90s - 5s)", got)
+	}
+	if cfg.ApifyMemoryMB["aliexpress"] != 0 || cfg.LongestShopTimeout() != 90*time.Second {
+		t.Errorf("memory %v longest %v", cfg.ApifyMemoryMB, cfg.LongestShopTimeout())
+	}
+
+	t.Setenv("APIFY_ALIEXPRESS_MEMORY_MB", "4096")
+	t.Setenv("APIFY_STOP_MARGIN", "10s")
+	if cfg, err = Load(); err != nil || cfg.ApifyMemoryMB["aliexpress"] != 4096 || cfg.ApifyRunTimeout("aliexpress") != 80*time.Second {
+		t.Errorf("memory / margin = %v %v %v", cfg.ApifyMemoryMB, cfg.ApifyRunTimeout("aliexpress"), err)
+	}
+	for key, bad := range map[string]string{
+		"APIFY_ALIEXPRESS_MEMORY_MB": "3000",
+		"QUEUE_APIFY_MAX_RUNS":       "0",
+		"QUEUE_MAX_WAIT":             "0s",
+		"APIFY_STOP_MARGIN":          "-1s",
+	} {
+		t.Run(key, func(t *testing.T) {
+			t.Setenv(key, bad)
+			if _, err := Load(); err == nil {
+				t.Errorf("%s=%s accepted", key, bad)
+			}
+		})
+	}
+	if !Runtime("QUEUE_MAX_WAIT") || !Runtime("APIFY_TEMU_MEMORY_MB") || !Runtime("APIFY_STOP_MARGIN") {
+		t.Error("new runtime keys not recognised")
+	}
+}

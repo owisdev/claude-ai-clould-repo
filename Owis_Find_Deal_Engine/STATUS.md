@@ -1,11 +1,12 @@
 # Project status and handoff
 
-Last updated: 2026-11-08 · Project branch: **`main`** from step 14,
+Last updated: 2026-11-09 (step 14b parts 3 + 4 built) · Project branch: **`main`** from step 14,
 step 2 on (owner, 2026-11-06, Q8: the old project branch
 `claude/cloud-vs-local-7xi988` goes into `main` with PR #8 and stays
 frozen; new step PRs target `main`). Steps 7–12: PRs #9–#11, step 13:
 #12, step 14 step 1: #17, step 2: #18, step 3: see the PR from
-`claude/peaceful-meitner-wml0f0`.
+`claude/peaceful-meitner-wml0f0`; step 14b part 2: #25; parts 3 + 4:
+branch `claude/sweet-archimedes-vxsy2x`.
 
 Read first:
 - [docs/step13_guide.pdf](docs/step13_guide.pdf) — **step 13**: what the
@@ -109,12 +110,181 @@ backup removed.
     test) → `last_known`, new title with Temu slow → `error`, next search
     only Temu live. Not run here: Docker build, Postgres store tests (CI
     runs them).
-  - **Owner, next:** review and merge the PR → CI publishes the image →
-    on the VM `deploy/deploy.sh` → `settings set -by owner
-    SHOP_SHEIN_SOURCE off` → check the `shop rules` log lines → two test
-    searches through the public address (commands in the chat of
-    2026-11-09). Then **part 3** (jobs filled per shop + queue +
-    fast answer first).
+  - **Merged (PR #25) and deployed by the owner 2026-11-09. ✅**
+    `SHOP_SHEIN_SOURCE=off` set (log 14:20 UTC: shein `off`; before it
+    `web`, i.e. SerpApi Google Shopping). `shop rules`: aliexpress apify
+    60s, amazon / ebay serpapi 15s fast, temu apify 45s.
+    Test searches `usb c hub` through the public address:
+    `jor` live — amazon ok 2.2 s, temu ok 25 s, **aliexpress error at
+    60.0 s** (log: `context deadline exceeded`), search 60 s; `usa` —
+    amazon and temu **from the `jor` cache** (shared), ebay live 3.4 s,
+    aliexpress again error at 60 s. Apify console: the AliExpress run
+    *Timed out* at 60 s, $0.000 (no results yet).
+    **`SHOP_ALIEXPRESS_TIMEOUT=90s`** set by the owner (the old limit).
+    Retest: aliexpress **ok in 85 s** (Apify: Succeeded, 10 results,
+    1 m 23 s, $0.025, memory 2048 MB, build 0.0.37); amazon and temu
+    from the cache. **The AliExpress scraper is now about twice as slow
+    as in October (24–40 s → ~83 s)**; 90 s leaves ~7 s margin, and more
+    than ~120 s would bring the waiting search near Cloudflare's 125 s.
+    Ideas: (1) owner test in the Apify console with memory 4096 MB — if
+    clearly faster, a per-shop memory setting (`APIFY_<SHOP>_MEMORY_MB`)
+    in part 3 (for per-result scrapers the extra memory should not cost
+    more; to confirm on Apify's pricing page); (2) part 3: slow shops no
+    longer hold up the first answer; (3) send Apify a run limit a few
+    seconds below the shop's limit, so results gathered before a stop
+    still reach the server (part 3); (4) AliExpress affiliate API later.
+    Noted: Amazon and Temu give `"currency":"$"`, AliExpress `"USD"` —
+    to make consistent (`USD`) in a later part.
+    **Next: part 3** (jobs filled per shop + queue + fast answer first),
+    explained to the owner before building.
+- **Parts 3 + 4 — built 2026-11-09 (branch
+  `claude/sweet-archimedes-vxsy2x`): jobs filled per shop, queue in
+  Redis, fast answer first; MCP 15 s wait + `get_search_results`.**
+  Explained first; owner: **all recommended** (11 decisions): webhook
+  field `webhook_events` (default `completed`, so old clients see no
+  change; `first_results` skipped when nothing is left to wait for);
+  partial `result` while `running`; `Retry-After: 2` for everyone;
+  caps Apify 4 / SerpApi 10 / web 10 runs at once, a shop's time limit
+  starts when its run starts, at most 60 s in the queue; a run cut off by
+  a restart is run again once if under 3 min; the waiting search and MCP
+  use the same queue (admin test search stays direct); charging
+  unchanged (one search counted, joined runs counted too); Apify told to
+  stop 5 s before the shop's limit; memory setting added (optional);
+  MCP built with part 3; `$` → `USD`.
+  - *Queue* (`internal/queue`): each shop of a search is one task, keyed
+    by the shop's cache key; the same shop + title already queued or
+    running (or just finished well, < 10 s) is **joined**. Worker pool in
+    the server, runs at once per source class (`QUEUE_APIFY_MAX_RUNS` 4,
+    `QUEUE_SERPAPI_MAX_RUNS` 10, `QUEUE_WEB_MAX_RUNS` 10), searches go
+    before background refreshes (a search joining a queued refresh moves
+    it to the front), a task waiting longer than `QUEUE_MAX_WAIT` (60s)
+    ends as an error (→ `last_known`). Redis keys `owis:q:*` (Lua scripts
+    for claim / take / orphan), heartbeat every 5 s; a running task whose
+    heartbeat stops (crash) or that is cut off at shutdown is queued
+    again once if younger than 3 min (attempt 2), else ends as an error.
+    Memory version without Redis. Start log: `search queue` line.
+  - *Cache* (`internal/cache`): live shops go through the queue
+    (`RunTask` searches one shop and stores it); `SearchProgress` reports
+    the answer so far (shops not done = `pending`) at the start and after
+    each shop. The waiting search waits up to the search timeout + 5 s as
+    before; a shop not done by then shows `last_known` / `error` and is
+    still stored when it finishes.
+  - *Jobs* (`internal/jobs`, `internal/api/jobwork.go`): a job is saved
+    each time a shop finishes; `GET /api/v1/searches/{id}` shows it at
+    once. Job time limit = slowest shop + queue wait + 15 s (production
+    90 + 60 + 15 = 165 s). With Redis, a server stop leaves running jobs
+    `running` (list `owis:jobs:running`) and the next start resumes them
+    (`api.ResumeJobs`: only the pending shops, not counted again, webhook
+    secret derived again from the client's salt). Fix found in the end to
+    end test: a job stopped for the restart was refunded (free); now it
+    stays counted (`search.ErrResumeLater` as the cancel cause; the job's
+    context no longer reports the HTTP request's end as its cause).
+  - *Webhooks:* `webhook_events` (`first_results`, `completed`), event
+    `search.first_results` with delivery id `<job>.first_results`, sent
+    when the fast shops (`SHOP_<SHOP>_GROUP=fast`) are done and others are
+    pending (no fast shop: the first shop done); always before
+    `completed`. Job view: `webhook.events`, `webhook.first_results`
+    (`pending` / `delivered` / `failed` / `skipped`), `webhook.status`
+    `not_requested` when only `first_results` was asked for.
+  - *MCP:* `search_products` starts a job, waits up to 15 s and returns
+    what is ready + `status` (`done` / `running`), `pending`, `job_id`,
+    `quota`; new tool `get_search_results` (`job_id`, scope `search`,
+    free, waits up to 15 s; only the key that started it can read it).
+    Tool descriptions, output schema and server instructions updated.
+  - *Apify:* run `timeout` = shop limit − `APIFY_STOP_MARGIN` (5s;
+    AliExpress 90 → 85 s); `APIFY_<SHOP>_MEMORY_MB` (power of 2, empty =
+    the Actor's default) sent as `memory`. Start log: `apify_run_timeout`,
+    `memory`. **Not known yet:** whether Apify's synchronous endpoint
+    returns the items a run found when the run hits its own timeout
+    (owner test 7 below).
+  - *Currency:* `$`, `US$` → `USD`, `€` → `EUR`, `£` → `GBP`, also for
+    answers already in the cache.
+  - Docs: OpenAPI, developer page `/docs/`, server README, `.env.example`,
+    admin settings page (new group "Queue", help texts).
+  - *Tested here:* unit tests for every part (queue on memory and Redis:
+    join, cap, queue wait, search before refresh, promotion, restart run
+    again once, crash recovery, too old; cache progress, slow shop missing
+    the wait then stored, currency; jobs progress saves, running list,
+    stop and resume, cause; API: job filled per shop for an app user,
+    both webhooks in order with the partial body, only `first_results`,
+    validation, MCP wait + `get_search_results` + foreign / unknown job,
+    resume with a lost job; metering: stopped for resume stays counted),
+    race detector, admin web app build. **End to end:** the real server
+    binary with Postgres, Redis and fake Firebase / SerpApi / Apify
+    (Temu 3 s, AliExpress 6 s, "slow" titles 18 s): app user — amazon at
+    once, temu 3 s, aliexpress 6 s, `Retry-After: 2`, prices `USD`; Apify
+    got `timeout=20` (25 s − 5 s) and `memory=4096`; two users with the
+    same new title → **one** Apify run per shop; cap 2 → at most 2 Apify
+    runs at once; API key webhooks: `first_results` after 0.3 s, then
+    `completed` after 6 s; MCP `search_products` 15 s → `running`,
+    pending `[aliexpress]`, `get_search_results` → `done` at 18 s;
+    **restart during a search** (SIGTERM, start again): job resumed,
+    AliExpress run again once (attempt 2), Temu not run again, job
+    `done`, counted once. Not run here: Docker build, real Apify /
+    SerpApi.
+  - **Next: owner test in production** (steps below), then part 5 (new
+    sources when ready), part 6 (empty guard + shop-rules page), part 7
+    (guide PDF).
+
+  **Owner test — step 14b parts 3 + 4 (Git Bash on your PC).** After the
+  PR is merged, deploy on the VM with `deploy/deploy.sh`. Nothing to set:
+  the defaults are the agreed values.
+
+  ```
+  export BASE=https://globalprodsearch.dawirli.com
+  export KEY=ofd_live_<owner-test key>
+  export TOKEN=<Firebase idToken, see "Get a test token" below>
+  ```
+
+  0. VM log after the deploy:
+     `docker logs owis_find_deal_engine-server-1 2>&1 | grep -E '"search queue"|apify scraper enabled'`
+     → `search queue` with `apify_max_runs 4`, `serpapi_max_runs 10`,
+     `max_wait 1m0s`; aliexpress `timeout 1m30s`, `apify_run_timeout 1m25s`,
+     `memory default`.
+  1. **App user, filled per shop** (a title not searched before):
+     ```
+     ID=$(curl -s -X POST $BASE/api/v1/searches -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"title":"wireless mouse","country":"usa"}' | grep -o 'srch_[a-z2-7]*' | head -1); echo $ID
+     for i in $(seq 1 60); do curl -s $BASE/api/v1/searches/$ID -H "Authorization: Bearer $TOKEN" | grep -o '"status":"[a-z]*","request\|"markets":{[^}]*}' | tr '\n' ' '; echo; sleep 2; done
+     ```
+     Expected: `running` with amazon / ebay `ok` after a few seconds and
+     aliexpress / temu `pending`; temu `ok` after ~25 s; aliexpress after
+     ~85 s; then `done` (Ctrl+C). Prices show `"currency":"USD"`.
+  2. Same title again: the `202` is already `done`, `cached:true`, free.
+  3. **Webhooks** (API key; webhook.site as in step 12, `$HOOK` = your
+     URL), a new title:
+     ```
+     curl -s -X POST $BASE/api/v1/searches -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -d '{"title":"usb c cable","country":"jor","webhook_url":"'$HOOK'","webhook_events":["first_results","completed"]}'; echo
+     ```
+     webhook.site shows two POSTs: first `x-ofd-event:
+     search.first_results` (body `"status":"running"`, amazon `ok`, the
+     others `pending`), later `search.completed`. Bad value check:
+     `"webhook_events":["x"]` → `400 invalid_request`.
+  4. **MCP** (Claude Code on your PC, connected in step 13): ask "search
+     a wireless keyboard in Jordan". The first answer comes after ≤ 15 s
+     with Amazon and the slow shops pending; the agent calls
+     `get_search_results` for the rest (or answers with what it has).
+     Claude Code may need `/mcp` → reconnect to see the new tool.
+  5. **Restart during a search:** start a new title (step 1 command), and
+     when amazon is `ok`, on the VM: `docker restart
+     owis_find_deal_engine-server-1`. Keep polling: the job goes on and
+     ends `done`. Log: `search job left for the next server start`,
+     `queue: task cut off, queued again`, `search jobs resumed after the
+     restart`. Apify console: the cut-off scraper run twice (≈ $0.025
+     extra for AliExpress, ≈ $0.10 for Temu).
+  6. **Joining:** run the step 1 POST with the same new title in two
+     terminals at once (or with `$TOKEN` and `$KEY`) → Apify console:
+     **one** run per shop.
+  7. **Apify stop (optional, one run ≈ $0.025):** set
+     `SHOP_ALIEXPRESS_TIMEOUT=60s` (Apify then stops at 55 s, before the
+     ~83 s it needs), search a new title, check aliexpress: `ok` with a
+     few products = Apify returns what it found before its stop; `error`
+     / `last_known` = it does not. Set `SHOP_ALIEXPRESS_TIMEOUT=90s`
+     again.
+  8. **Memory (optional):** `APIFY_ALIEXPRESS_MEMORY_MB=4096`, a new
+     title, compare `shops.aliexpress.took_ms` with ~83,000 and the run's
+     cost in the Apify console. Remove the setting if not clearly faster.
+  9. The waiting search still works:
+     `curl -s -X POST $BASE/api/v1/search -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -d '{"title":"wireless mouse","country":"usa"}' | head -c 300; echo`
 
 Next-session list (2026-11-08), updated 2026-11-09:
 1. **MCP test with real agents.** Connect Claude Code on the owner's PC
@@ -1217,12 +1387,31 @@ we are". Later: D8 paid Apify / SerpApi plans (before real users).
 Open the repository and say:
 
 > Continue the Owis_Find_Deal_Engine project from
-> `Owis_Find_Deal_Engine/STATUS.md` on branch `claude/cloud-vs-local-7xi988`.
-> Continue phase 4, step 14: lay out the detailed build plan for approval.
-> (Decisions D1–D7 are recorded in STATUS.md.)
+> `Owis_Find_Deal_Engine/STATUS.md`. Step 14b parts 3 + 4 are built
+> (branch `claude/sweet-archimedes-vxsy2x`); I tested them: <results>.
 
-(Step 13 is merged (PR #12) and tested up to step 7; its steps 8–10 are
-part of the production test, PLAN.md step 14.)
+**Handoff (2026-11-09).** Parts 3 + 4 built and tested here (see "Where
+we are"): owner test steps 0–9 in production after the PR is merged and
+deployed. Then, from [PLAN.md](PLAN.md) step 14b: part 5 (new sources
+when ready: eBay Browse API with the Production keyset, SHEIN source with
+D8, AliExpress affiliate API), part 6 (empty guard + shop-rules page in
+the admin panel; queue numbers could be shown there too), part 7 (docs:
+guide PDF of step 14b). Open questions for the owner test: does Apify
+return the products found before its own stop (test 7), is 4096 MB
+faster for AliExpress (test 8).
+
+Code map of part 3: `internal/queue` (queue, Redis / memory),
+`internal/cache/cache.go` (`SearchProgress`, `fetch`, `RunTask`),
+`internal/jobs/jobs.go` (progress saves, running list, `Resume`,
+shutdown), `internal/api/jobwork.go` (job work, webhooks
+`first_results` / `completed`, `ResumeJobs`), `internal/api/searches.go`
+(`webhook_events`), `internal/api/mcp.go` (`search_products` 15 s,
+`get_search_results`), `internal/metering/metering.go`
+(`SearchProgress`, `Continue`), `cmd/owis_find_deal_engine/main.go`
+(shared queue, `queueOptions`, `ResumeJobs`). Production: Oracle VM,
+`https://globalprodsearch.dawirli.com`, deploy by the owner with
+`deploy/deploy.sh` after the PR is merged; settings with `docker exec
+owis_find_deal_engine-server-1 /owis_find_deal_engine settings …`.
 
 ## Run it on your PC
 

@@ -21,10 +21,15 @@ const HELP: Record<string, string> = {
   APIFY_TIMEOUT: "Time limit of an Apify shop without a default or SHOP_<SHOP>_TIMEOUT",
   APIFY_MAX_CHARGE_USD: "Max cost of one pay-per-event run",
   APIFY_EMPTY_FALLBACK: "No effect since step 14b (no backup source any more)",
+  APIFY_STOP_MARGIN: "Apify stops a run this long before the shop's time limit, so its results still come back (default 5s)",
   SEARCH_COMBINED: "true: one provider call per search (cheapest)",
   RESULTS_PER_MARKET: "Results kept per shop",
   SEARCH_TIMEOUT: "Whole waiting search (raised automatically to the slowest shop's limit + 2s)",
   SEARCH_MAX_CONCURRENCY: "Provider calls in parallel per search",
+  QUEUE_APIFY_MAX_RUNS: "Apify runs at once (all searches; default 4 = free plan's 8 GB at 2048 MB)",
+  QUEUE_SERPAPI_MAX_RUNS: "SerpApi searches at once (default 10)",
+  QUEUE_WEB_MAX_RUNS: "Web provider searches at once (default 10)",
+  QUEUE_MAX_WAIT: "How long a shop's search may wait for a free run, then its last known results are shown (default 60s)",
   CACHE_ENABLED: "Search cache on / off",
   CACHE_FRESH_TTL: "A shop's results served as fresh, e.g. 48h",
   CACHE_PARTIAL_TTL: "No effect since step 14b (results are cached per shop, failures never)",
@@ -32,7 +37,7 @@ const HELP: Record<string, string> = {
   CACHE_LAST_KNOWN_TTL: "How long a shop's results are kept and shown, dated, when its live search fails (default 168h = 7 days)",
   CACHE_STALE_TTL: "Served (and refreshed in the background) until",
   CACHE_MIN_REFRESH: "Pull-to-refresh ignored for younger answers",
-  CACHE_MAX_BACKGROUND_REFRESH: "Parallel background refreshes",
+  CACHE_MAX_BACKGROUND_REFRESH: "Parallel background refreshes (queued behind searches)",
   CACHE_GENERATION: "Raise to drop every cached answer (Cache & sources page)",
   PLANS: "Daily live searches per plan, e.g. free:20,pro:500",
   DEFAULT_PLAN: "Plan of users without a plan claim",
@@ -48,6 +53,7 @@ const GROUPS: { title: string; match: (k: string) => boolean }[] = [
   { title: "Sources: SerpApi and web search", match: (k) => /^(SEARCH_PROVIDERS|SEARXNG_|SERPAPI_|PROVIDER_)/.test(k) },
   { title: "Sources: Apify scrapers", match: (k) => k.startsWith("APIFY_") },
   { title: "Search", match: (k) => /^(SEARCH_|RESULTS_PER_MARKET)/.test(k) },
+  { title: "Queue: runs at once", match: (k) => k.startsWith("QUEUE_") },
   { title: "Cache", match: (k) => k.startsWith("CACHE_") },
   { title: "Plans, limits and budget", match: (k) => /^(PLANS|DEFAULT_PLAN|RATE_LIMIT_|BUDGET_)/.test(k) },
   { title: "Other", match: () => true },
@@ -150,7 +156,7 @@ export function Settings() {
           Rules per shop: SHOP_&lt;SHOP&gt;_SOURCE (serpapi, apify, web or off), _TIMEOUT (e.g. 45s), _GROUP (fast or slow),
           e.g. SHOP_SHEIN_SOURCE = off.
           <br />
-          Per-shop Apify settings: APIFY_&lt;SHOP&gt;_ACTOR, _INPUT, _CURRENCY, _MAX_ITEMS, _RUN_COST_USD (e.g. APIFY_TEMU_RUN_COST_USD).
+          Per-shop Apify settings: APIFY_&lt;SHOP&gt;_ACTOR, _INPUT, _CURRENCY, _MAX_ITEMS, _RUN_COST_USD, _MEMORY_MB (e.g. APIFY_ALIEXPRESS_MEMORY_MB = 4096).
         </p>
         <div className="row">
           <input className="mono" placeholder="SETTING_NAME" value={newKey} onChange={(e) => setNewKey(e.target.value)} />

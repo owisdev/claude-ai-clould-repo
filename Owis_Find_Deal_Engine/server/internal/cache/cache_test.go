@@ -45,10 +45,11 @@ type upstream struct {
 	err   atomic.Pointer[error] // fails the whole call
 	price atomic.Int64          // changes between calls to simulate price updates
 
-	mu    sync.Mutex
-	asked [][]string
-	fail  map[string]bool
-	empty map[string]bool
+	mu     sync.Mutex
+	asked  [][]string
+	delays map[string]time.Duration // per shop (one-shop calls)
+	fail   map[string]bool
+	empty  map[string]bool
 }
 
 func (u *upstream) setErr(err error) { u.err.Store(&err) }
@@ -56,6 +57,34 @@ func (u *upstream) setErr(err error) { u.err.Store(&err) }
 func (u *upstream) set(fail, empty map[string]bool) {
 	u.mu.Lock()
 	u.fail, u.empty = fail, empty
+	u.mu.Unlock()
+}
+
+// allAsked returns every shop searched live since the last clearAsked.
+func (u *upstream) allAsked() []string {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	var out []string
+	for _, a := range u.asked {
+		for _, m := range a {
+			if !slices.Contains(out, m) {
+				out = append(out, m)
+			}
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+func (u *upstream) setDelays(d map[string]time.Duration) {
+	u.mu.Lock()
+	u.delays = d
+	u.mu.Unlock()
+}
+
+func (u *upstream) clearAsked() {
+	u.mu.Lock()
+	u.asked = nil
 	u.mu.Unlock()
 }
 
@@ -73,6 +102,19 @@ func (u *upstream) Search(ctx context.Context, req search.Request) (*search.Resu
 	if u.delay > 0 {
 		select {
 		case <-time.After(u.delay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	u.mu.Lock()
+	var d time.Duration
+	if len(req.Markets) == 1 {
+		d = u.delays[req.Markets[0]]
+	}
+	u.mu.Unlock()
+	if d > 0 {
+		select {
+		case <-time.After(d):
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
@@ -140,6 +182,7 @@ func newEnvCatalog(t *testing.T, cat *markets.Catalog, opts Options) *env {
 	store.now = clk.Now
 	c := New(up, store, cat, opts, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	c.now = clk.Now
+	c.queue.SetClock(clk.Now)
 	t.Cleanup(func() { _ = c.Close(context.Background()) })
 	return &env{cache: c, up: up, clock: clk, store: store}
 }
@@ -188,8 +231,8 @@ var jorShops = []string{"aliexpress", "amazon", "shein", "temu"}
 func TestMissThenHit(t *testing.T) {
 	e := newEnv(t, testOpts())
 	res := e.search(t, "S Pen", false)
-	if res.Cached || e.up.calls.Load() != 1 || !slices.Equal(e.up.lastAsked(), jorShops) {
-		t.Fatalf("first search cached=%v calls=%d asked=%v", res.Cached, e.up.calls.Load(), e.up.lastAsked())
+	if res.Cached || e.up.calls.Load() != 4 || !slices.Equal(e.up.allAsked(), jorShops) {
+		t.Fatalf("first search cached=%v calls=%d asked=%v", res.Cached, e.up.calls.Load(), e.up.allAsked())
 	}
 	if len(res.Results) != 4 || res.Shops["temu"].Cached {
 		t.Fatalf("first search = %+v", res)
@@ -197,7 +240,7 @@ func TestMissThenHit(t *testing.T) {
 
 	// Same query with different case and spacing hits the same entries.
 	res = e.search(t, "  s   PEN ", false)
-	if !res.Cached || res.Stale || e.up.calls.Load() != 1 || len(res.Results) != 4 || res.TookMS != 0 {
+	if !res.Cached || res.Stale || e.up.calls.Load() != 4 || len(res.Results) != 4 || res.TookMS != 0 {
 		t.Fatalf("second search cached=%v stale=%v calls=%d results=%d", res.Cached, res.Stale, e.up.calls.Load(), len(res.Results))
 	}
 	if s := res.Shops["amazon"]; !s.Cached || s.Status != search.StatusOK || s.FetchedAt == nil {
@@ -214,8 +257,9 @@ func TestSharedBetweenCountries(t *testing.T) {
 
 	// usa: amazon.com, aliexpress and temu are the same requests; ebay and
 	// us.shein.com are new.
+	e.up.clearAsked()
 	res := e.searchIn(t, "usa", "s pen", false)
-	if got := e.up.lastAsked(); !slices.Equal(got, []string{"ebay", "shein"}) {
+	if got := e.up.allAsked(); !slices.Equal(got, []string{"ebay", "shein"}) {
 		t.Errorf("usa searched %v live, want only ebay and shein", got)
 	}
 	if res.Cached || !res.Shops["amazon"].Cached || res.Shops["ebay"].Cached || len(res.Results) != 5 {
@@ -227,8 +271,9 @@ func TestSharedBetweenCountries(t *testing.T) {
 	opts.Shops = map[string]Shop{"amazon": {Setup: "a", ByRegion: true}}
 	e = newEnv(t, opts)
 	e.search(t, "s pen", false)
+	e.up.clearAsked()
 	e.searchIn(t, "usa", "s pen", false)
-	if got := e.up.lastAsked(); !slices.Contains(got, "amazon") {
+	if got := e.up.allAsked(); !slices.Contains(got, "amazon") {
 		t.Errorf("usa searched %v; amazon by region must not be shared", got)
 	}
 }
@@ -241,8 +286,9 @@ func TestOnlyMissingShopsSearchedLive(t *testing.T) {
 		t.Fatalf("temu = %q %+v, want error", res.Markets["temu"], res.Shops["temu"])
 	}
 	e.up.set(nil, nil)
+	e.up.clearAsked()
 	res = e.search(t, "s pen", false)
-	if got := e.up.lastAsked(); !slices.Equal(got, []string{"temu"}) {
+	if got := e.up.allAsked(); !slices.Equal(got, []string{"temu"}) {
 		t.Errorf("searched %v live, want only temu (the failure was not stored)", got)
 	}
 	if res.Cached || res.Markets["temu"] != search.StatusOK || !res.Shops["amazon"].Cached {
@@ -306,8 +352,8 @@ func TestStaleWhileRevalidate(t *testing.T) {
 		t.Fatalf("stale answer: cached=%v stale=%v price=%v", res.Cached, res.Stale, *res.Results[0].Price)
 	}
 	e.waitBackground(t)
-	if e.up.calls.Load() != 2 {
-		t.Fatalf("calls = %d, want 2 (background refresh)", e.up.calls.Load())
+	if e.up.calls.Load() != 8 {
+		t.Fatalf("calls = %d, want 8 (background refresh of the 4 shops)", e.up.calls.Load())
 	}
 	res = e.search(t, "s pen", false)
 	if res.Stale || *res.Results[0].Price != 12 {
@@ -336,7 +382,7 @@ func TestLookupNeverFetches(t *testing.T) {
 	if _, ok := e.cache.Lookup(context.Background(), search.Request{Title: "s pen", Country: "jor", Refresh: true}); ok {
 		t.Error("lookup hit although a refresh is allowed")
 	}
-	if e.up.calls.Load() != 1 {
+	if e.up.calls.Load() != 4 {
 		t.Errorf("calls = %d", e.up.calls.Load())
 	}
 }
@@ -349,12 +395,13 @@ func TestEmptyShopShortTTL(t *testing.T) {
 		t.Fatalf("shein = %q", res.Markets["shein"])
 	}
 	e.clock.Add(15 * time.Minute) // past EmptyTTL, within FreshTTL
+	e.up.clearAsked()
 	res = e.search(t, "s pen", false)
 	if !res.Stale || res.Shops["amazon"].Status != search.StatusOK {
 		t.Errorf("stale=%v; the empty shop should be stale after 15 min", res.Stale)
 	}
 	e.waitBackground(t)
-	if got := e.up.lastAsked(); !slices.Equal(got, []string{"shein"}) {
+	if got := e.up.allAsked(); !slices.Equal(got, []string{"shein"}) {
 		t.Errorf("refreshed %v, want only shein", got)
 	}
 }
@@ -363,13 +410,14 @@ func TestForcedRefresh(t *testing.T) {
 	e := newEnv(t, testOpts())
 	e.search(t, "s pen", false)
 	// Too soon: refresh ignored, cached answer returned.
-	if res := e.search(t, "s pen", true); !res.Cached || e.up.calls.Load() != 1 {
+	if res := e.search(t, "s pen", true); !res.Cached || e.up.calls.Load() != 4 {
 		t.Fatalf("early refresh: cached=%v calls=%d", res.Cached, e.up.calls.Load())
 	}
 	// Old enough: live fetch of every shop.
 	e.clock.Add(15 * time.Minute)
-	if res := e.search(t, "s pen", true); res.Cached || !slices.Equal(e.up.lastAsked(), jorShops) {
-		t.Fatalf("refresh: cached=%v asked=%v", res.Cached, e.up.lastAsked())
+	e.up.clearAsked()
+	if res := e.search(t, "s pen", true); res.Cached || !slices.Equal(e.up.allAsked(), jorShops) {
+		t.Fatalf("refresh: cached=%v asked=%v", res.Cached, e.up.allAsked())
 	}
 }
 
@@ -381,7 +429,7 @@ func TestErrorsNotCached(t *testing.T) {
 	}
 	e.up.setErr(nil)
 	e.search(t, "s pen", false)
-	if e.up.calls.Load() != 2 {
+	if e.up.calls.Load() != 8 {
 		t.Errorf("calls = %d, failure was cached", e.up.calls.Load())
 	}
 }
@@ -397,11 +445,11 @@ func TestOffShopsNotSearched(t *testing.T) {
 	}
 	e := newEnvCatalog(t, cat, testOpts())
 	res := e.search(t, "s pen", false)
-	if slices.Contains(e.up.lastAsked(), "shein") || res.Markets["shein"] != search.StatusOff || res.Shops["shein"].Status != search.StatusOff {
-		t.Fatalf("asked %v, shein %q", e.up.lastAsked(), res.Markets["shein"])
+	if slices.Contains(e.up.allAsked(), "shein") || res.Markets["shein"] != search.StatusOff || res.Shops["shein"].Status != search.StatusOff {
+		t.Fatalf("asked %v, shein %q", e.up.allAsked(), res.Markets["shein"])
 	}
 	res = e.search(t, "s pen", false)
-	if !res.Cached || e.up.calls.Load() != 1 || res.Markets["shein"] != search.StatusOff {
+	if !res.Cached || e.up.calls.Load() != 3 || res.Markets["shein"] != search.StatusOff {
 		t.Errorf("second search cached=%v calls=%d", res.Cached, e.up.calls.Load())
 	}
 }
@@ -421,8 +469,8 @@ func TestConcurrentMissesShareOneFetch(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	if e.up.calls.Load() != 1 {
-		t.Errorf("calls = %d, want 1", e.up.calls.Load())
+	if e.up.calls.Load() != 4 {
+		t.Errorf("calls = %d, want 4 (one per shop)", e.up.calls.Load())
 	}
 }
 
@@ -436,7 +484,7 @@ func TestCallerCancelDoesNotCancelSharedFetch(t *testing.T) {
 	}
 	// A second caller joins the same flight and still gets the result.
 	res, err := e.cache.Search(context.Background(), search.Request{Title: "s pen", Country: "jor"})
-	if err != nil || len(res.Results) != 4 || e.up.calls.Load() != 1 {
+	if err != nil || len(res.Results) != 4 || e.up.calls.Load() != 4 {
 		t.Fatalf("Search = %v, %v, calls %d", res, err, e.up.calls.Load())
 	}
 }
@@ -451,7 +499,8 @@ func TestForget(t *testing.T) {
 	if found, err := e.cache.Forget(context.Background(), req); !found || err != nil {
 		t.Fatalf("Forget = %v, %v", found, err)
 	}
-	if res := e.search(t, "s pen", false); res.Cached || e.up.calls.Load() != 2 {
+	e.clock.Add(time.Minute) // past the queue's "just finished, join it" window
+	if res := e.search(t, "s pen", false); res.Cached || e.up.calls.Load() != 8 {
 		t.Errorf("after Forget: cached=%v calls=%d", res.Cached, e.up.calls.Load())
 	}
 	if _, err := e.cache.Forget(context.Background(), search.Request{Title: "x", Country: "jor"}); !errors.Is(err, search.ErrInvalidTitle) {
@@ -513,7 +562,7 @@ func TestCloseStopsBackgroundRefresh(t *testing.T) {
 	_ = e.cache.Close(context.Background())
 	e.clock.Add(2 * time.Hour)
 	e.search(t, "s pen", false) // stale, but no refresh after Close
-	if e.up.calls.Load() != 1 {
+	if e.up.calls.Load() != 4 {
 		t.Errorf("refresh started after Close: calls = %d", e.up.calls.Load())
 	}
 }
@@ -570,5 +619,86 @@ func TestRedisStore(t *testing.T) {
 	mr.Set("bad", "not json")
 	if e, err := s.Get(ctx, "bad"); e != nil || err != nil {
 		t.Errorf("corrupt entry = %v, %v; want miss", e, err)
+	}
+}
+
+func TestSearchProgress(t *testing.T) {
+	e := newEnv(t, testOpts())
+	e.up.setDelays(map[string]time.Duration{"temu": 150 * time.Millisecond})
+	var updates []*search.Result
+	res, err := e.cache.SearchProgress(context.Background(), search.Request{Title: "s pen", Country: "jor"}, 0,
+		func(r *search.Result) { updates = append(updates, r) })
+	if err != nil || res.Markets["temu"] != search.StatusOK || len(res.Results) != 4 || len(res.Pending()) != 0 {
+		t.Fatalf("final = %v, %v", res, err)
+	}
+	if len(updates) != 4 { // at start + after 3 of the 4 shops
+		t.Fatalf("updates = %d, want 4", len(updates))
+	}
+	if got := updates[0].Pending(); !slices.Equal(got, jorShops) {
+		t.Errorf("first update pending %v, want all", got)
+	}
+	last := updates[3]
+	if !slices.Equal(last.Pending(), []string{"temu"}) || last.Markets["amazon"] != search.StatusOK ||
+		len(productsOf(last.Results, "amazon")) != 1 || last.Shops["temu"].Status != search.StatusPending || last.Cached {
+		t.Errorf("last update = %v %+v", last.Markets, last.Shops)
+	}
+
+	// Cached shops are in the first update already.
+	e.clock.Add(time.Minute)
+	e.up.clearAsked()
+	updates = nil
+	e.cache.SearchProgress(context.Background(), search.Request{Title: "s pen", Country: "usa"}, 0,
+		func(r *search.Result) { updates = append(updates, r) })
+	if len(updates) == 0 || updates[0].Markets["amazon"] != search.StatusOK || updates[0].Markets["ebay"] != search.StatusPending {
+		t.Errorf("usa first update = %v", updates[0].Markets)
+	}
+}
+
+// A slow shop that misses the wait shows its last known results; its
+// search goes on and is stored for the next caller.
+func TestSlowShopMissesTheWait(t *testing.T) {
+	opts := testOpts()
+	opts.FetchTimeout = 60 * time.Millisecond
+	e := newEnv(t, opts)
+	first := e.search(t, "s pen", false).FetchedAt
+
+	e.clock.Add(4 * time.Hour) // past stale: searched live again
+	e.up.setDelays(map[string]time.Duration{"temu": 200 * time.Millisecond})
+	res := e.search(t, "s pen", false)
+	if res.Markets["temu"] != search.StatusLastKnown || !res.Shops["temu"].FetchedAt.Equal(first) || res.Markets["amazon"] != search.StatusOK {
+		t.Fatalf("answer = %v", res.Markets)
+	}
+	time.Sleep(300 * time.Millisecond) // temu's task finishes and is stored
+	e.up.setDelays(nil)
+	calls := e.up.calls.Load()
+	res = e.search(t, "s pen", false)
+	if !res.Cached || e.up.calls.Load() != calls || res.Markets["temu"] != search.StatusOK {
+		t.Errorf("next search = cached %v, calls %d→%d, %v", res.Cached, calls, e.up.calls.Load(), res.Markets)
+	}
+
+	// No last known results: an error.
+	e.up.setDelays(map[string]time.Duration{"temu": 200 * time.Millisecond})
+	res = e.search(t, "new title", false)
+	if res.Markets["temu"] != search.StatusError {
+		t.Errorf("temu without last known = %q, want error", res.Markets["temu"])
+	}
+}
+
+func TestCurrencyNormalizedFromCache(t *testing.T) {
+	e := newEnv(t, testOpts())
+	e.search(t, "s pen", false)
+	cat, _ := markets.Load("")
+	jor, _ := cat.Country("jor")
+	key := e.cache.key(jor, jor.Targets[0], "s pen")
+	entry, _ := e.store.Get(context.Background(), key)
+	for i := range entry.Products {
+		entry.Products[i].Currency = "$"
+	}
+	e.store.Set(context.Background(), key, entry, time.Hour)
+	res := e.search(t, "s pen", false)
+	for _, p := range res.Results {
+		if p.Market == jor.Targets[0].Market && p.Currency != "USD" {
+			t.Errorf("currency = %q, want USD", p.Currency)
+		}
 	}
 }

@@ -86,17 +86,18 @@ func TestRunnerRunsAndNotifies(t *testing.T) {
 	values := context.WithValue(context.Background(), ctxKey{}, "req-1")
 	var sawValue atomic.Bool
 	release := make(chan struct{})
-	work := func(ctx context.Context, j Job) Job {
+	work := func(ctx context.Context, j Job, _ func(Job)) Job {
 		sawValue.Store(ctx.Value(ctxKey{}) == "req-1")
 		<-release
 		return Done(j, &search.Result{Query: j.Request.Title}, time.Now())
 	}
 	var notified atomic.Int32
-	notify := func(_ context.Context, j Job) webhook.Result {
+	notify := func(_ context.Context, j Job) Job {
 		if j.Status == StatusDone {
 			notified.Add(1)
 		}
-		return webhook.Result{Status: webhook.StatusDelivered, Attempts: 1, HTTPStatus: 200}
+		j.Webhook.Status, j.Webhook.Attempts, j.Webhook.HTTPStatus = webhook.StatusDelivered, 1, 200
+		return j
 	}
 	j, err := r.Start(values, Job{ID: NewID(), Owner: "u1", Request: Request{Title: "hub"},
 		Webhook: &Webhook{URL: "https://example.com", Status: webhook.StatusPending}}, time.Minute, 0, work, notify)
@@ -120,7 +121,7 @@ func TestRunnerRunsAndNotifies(t *testing.T) {
 func TestRunnerLimits(t *testing.T) {
 	r := NewRunner(NewMemoryStore(), discard)
 	block := make(chan struct{})
-	work := func(ctx context.Context, j Job) Job {
+	work := func(ctx context.Context, j Job, _ func(Job)) Job {
 		select {
 		case <-block:
 		case <-ctx.Done():
@@ -147,7 +148,7 @@ func TestRunnerLimits(t *testing.T) {
 
 func TestRunnerCloseCancels(t *testing.T) {
 	r := NewRunner(NewMemoryStore(), discard)
-	work := func(ctx context.Context, j Job) Job {
+	work := func(ctx context.Context, j Job, _ func(Job)) Job {
 		<-ctx.Done()
 		return Fail(j, 503, "service_unavailable", "the server restarted; please retry", time.Now())
 	}
@@ -163,7 +164,7 @@ func TestRunnerCloseCancels(t *testing.T) {
 
 func TestRunnerPanic(t *testing.T) {
 	r := NewRunner(NewMemoryStore(), discard)
-	j, _ := r.Start(context.Background(), Job{ID: NewID(), Owner: "u"}, time.Minute, 0, func(context.Context, Job) Job { panic("boom") }, nil)
+	j, _ := r.Start(context.Background(), Job{ID: NewID(), Owner: "u"}, time.Minute, 0, func(context.Context, Job, func(Job)) Job { panic("boom") }, nil)
 	r.Close(context.Background())
 	if got, _ := r.Store().Get(context.Background(), j.ID); got.Status != StatusFailed || got.Error.Code != "internal_error" {
 		t.Fatalf("panic job %+v", got)
@@ -188,16 +189,124 @@ func TestLost(t *testing.T) {
 func TestRunnerWait(t *testing.T) {
 	r := NewRunner(NewMemoryStore(), discard)
 	defer r.Close(context.Background())
-	quick := func(_ context.Context, j Job) Job { return Done(j, &search.Result{Cached: true}, time.Now()) }
+	quick := func(_ context.Context, j Job, _ func(Job)) Job {
+		return Done(j, &search.Result{Cached: true}, time.Now())
+	}
 	j, err := r.Start(context.Background(), Job{ID: NewID(), Owner: "u"}, time.Minute, time.Second, quick, nil)
 	if err != nil || j.Status != StatusDone || !j.Result.Cached {
 		t.Fatalf("waited: %+v %v", j, err)
 	}
-	slow := func(ctx context.Context, j Job) Job {
+	slow := func(ctx context.Context, j Job, _ func(Job)) Job {
 		<-ctx.Done()
 		return Fail(j, 503, "x", "y", time.Now())
 	}
 	if j, _ := r.Start(context.Background(), Job{ID: NewID(), Owner: "u"}, 50*time.Millisecond, time.Millisecond, slow, nil); j.Status != StatusRunning {
 		t.Fatalf("slow: %+v", j)
+	}
+}
+
+func TestProgressSavesAndRunningList(t *testing.T) {
+	for name, s := range testStores(t) {
+		t.Run(name, func(t *testing.T) {
+			r := NewRunner(s, discard)
+			defer r.Close(context.Background())
+			step := make(chan struct{})
+			work := func(ctx context.Context, j Job, save func(Job)) Job {
+				p := j
+				p.Result = &search.Result{Markets: map[string]string{"amazon": "ok", "temu": search.StatusPending}}
+				save(p)
+				<-step
+				return Done(j, &search.Result{Markets: map[string]string{"amazon": "ok", "temu": "ok"}}, time.Now())
+			}
+			j, err := r.Start(context.Background(), Job{ID: NewID(), Owner: "u"}, time.Minute, 200*time.Millisecond, work, nil)
+			if err != nil || j.Status != StatusRunning || j.Result == nil || j.Result.Markets["temu"] != search.StatusPending {
+				t.Fatalf("after wait: %+v %v (want the answer so far)", j, err)
+			}
+			if ids, _ := s.Running(context.Background()); len(ids) != 1 || ids[0] != j.ID {
+				t.Errorf("running = %v", ids)
+			}
+			close(step)
+			waitFor(t, s, j.ID, StatusDone)
+			if ids, _ := s.Running(context.Background()); len(ids) != 0 {
+				t.Errorf("running after done = %v", ids)
+			}
+		})
+	}
+}
+
+// With Redis, a server stop leaves the job running with its answer so far;
+// the next server resumes it.
+func TestStopAndResume(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+	store := NewRedisStore(rdb)
+
+	first := NewRunner(store, discard)
+	work := func(ctx context.Context, j Job, save func(Job)) Job {
+		p := j
+		p.Result = &search.Result{Markets: map[string]string{"amazon": "ok", "temu": search.StatusPending}}
+		save(p)
+		<-ctx.Done()
+		return Fail(j, 503, "service_unavailable", "stopped", time.Now())
+	}
+	j, _ := first.Start(context.Background(), Job{ID: NewID(), Owner: "u"}, time.Minute, 100*time.Millisecond, work, nil)
+	first.Close(context.Background()) // at once: the store is persistent
+	got, _ := store.Get(context.Background(), j.ID)
+	if got.Status != StatusRunning || got.Result.Markets["temu"] != search.StatusPending {
+		t.Fatalf("after stop: %+v", got)
+	}
+	ids, _ := store.Running(context.Background())
+	if len(ids) != 1 {
+		t.Fatalf("running = %v", ids)
+	}
+
+	second := NewRunner(store, discard)
+	defer second.Close(context.Background())
+	resumed := func(ctx context.Context, j Job, save func(Job)) Job {
+		if j.Result == nil || j.Result.Markets["amazon"] != "ok" {
+			t.Errorf("resumed without the answer so far: %+v", j.Result)
+		}
+		return Done(j, &search.Result{Markets: map[string]string{"amazon": "ok", "temu": "ok"}}, time.Now())
+	}
+	if err := second.Resume(context.Background(), got, resumed, nil); err != nil {
+		t.Fatal(err)
+	}
+	if done := waitFor(t, store, j.ID, StatusDone); done.Result.Markets["temu"] != "ok" {
+		t.Errorf("resumed = %+v", done.Result)
+	}
+}
+
+func TestWebhookWants(t *testing.T) {
+	var none *Webhook
+	if none.Wants(EventCompleted) {
+		t.Error("nil webhook wants completed")
+	}
+	if w := (&Webhook{}); !w.Wants(EventCompleted) || w.Wants(EventFirstResults) {
+		t.Error("default events must be completed only")
+	}
+	if w := (&Webhook{Events: []string{EventFirstResults}}); w.Wants(EventCompleted) || !w.Wants(EventFirstResults) {
+		t.Error("events not respected")
+	}
+}
+
+// The job's context reports the runner's cause, not the request's.
+func TestCauseThroughRequestValues(t *testing.T) {
+	r := NewRunner(NewRedisStore(redis.NewClient(&redis.Options{Addr: miniredis.RunT(t).Addr()})), discard)
+	req, cancelReq := context.WithCancel(context.WithValue(context.Background(), ctxKey{}, "v"))
+	got := make(chan error, 1)
+	work := func(ctx context.Context, j Job, _ func(Job)) Job {
+		<-ctx.Done()
+		got <- context.Cause(ctx)
+		return Fail(j, 503, "x", "y", time.Now())
+	}
+	if _, err := r.Start(req, Job{ID: NewID(), Owner: "u"}, time.Minute, 0, work, nil); err != nil {
+		t.Fatal(err)
+	}
+	cancelReq() // the HTTP request is over
+	time.Sleep(20 * time.Millisecond)
+	r.Close(context.Background())
+	if c := <-got; !errors.Is(c, search.ErrResumeLater) {
+		t.Errorf("cause = %v, want ErrResumeLater", c)
 	}
 }

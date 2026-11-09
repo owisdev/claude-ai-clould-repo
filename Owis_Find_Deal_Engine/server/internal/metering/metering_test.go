@@ -261,3 +261,23 @@ func TestCheck(t *testing.T) {
 		t.Fatal("unauthenticated check accepted")
 	}
 }
+
+// A search stopped to go on after a server restart stays counted; one
+// stopped for any other reason is given back.
+func TestStoppedForResumeStaysCounted(t *testing.T) {
+	for name, cause := range map[string]error{"resume later": search.ErrResumeLater, "client gone": nil} {
+		t.Run(name, func(t *testing.T) {
+			m, q := newService(t, &fakeSearcher{err: context.Canceled}, "free:2")
+			ctx, cancel := context.WithCancelCause(context.Background())
+			cancel(cause)
+			m.Search(ctx, alice, req)
+			want := int64(2)
+			if cause != nil {
+				want = 1
+			}
+			if got := remaining(t, q, alice); got != want {
+				t.Errorf("remaining = %d, want %d", got, want)
+			}
+		})
+	}
+}

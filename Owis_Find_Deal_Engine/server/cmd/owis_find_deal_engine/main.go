@@ -32,6 +32,7 @@ import (
 	"owis_find_deal_engine/internal/providers/apify"
 	"owis_find_deal_engine/internal/providers/searxng"
 	"owis_find_deal_engine/internal/providers/serpapi"
+	"owis_find_deal_engine/internal/queue"
 	"owis_find_deal_engine/internal/ratelimit"
 	"owis_find_deal_engine/internal/search"
 	"owis_find_deal_engine/internal/settings"
@@ -145,7 +146,7 @@ func run() error {
 
 	// Redis (when configured) holds usage counters and the search cache so
 	// several instances share them; otherwise both live in memory.
-	sh := shared{log: log, verifier: verifier}
+	sh := shared{log: log, verifier: verifier, db: db}
 	if db != nil {
 		// Usage counters for the dashboard: saved every 30 s, the last ones
 		// after shutdown (before the database closes).
@@ -179,7 +180,8 @@ func run() error {
 		sh.usageStore = usage.NewRedisStore(rdb)
 		sh.cacheStore = cache.NewRedisStore(rdb)
 		sh.jobs = jobs.NewRunner(jobs.NewRedisStore(rdb), log)
-		log.Info("usage counters, search cache and search jobs in redis")
+		sh.queue = queue.NewRedis(rdb, queueOptions(cfg), log)
+		log.Info("usage counters, search cache, search jobs and the shops' search queue in redis")
 	} else {
 		mem := usage.NewMemoryStore()
 		go mem.Cleanup(ctx, 10*time.Minute)
@@ -188,7 +190,8 @@ func run() error {
 		jobStore := jobs.NewMemoryStore()
 		go jobStore.Cleanup(ctx, time.Minute)
 		sh.jobs = jobs.NewRunner(jobStore, log)
-		log.Warn("REDIS_URL not set: usage counters, search cache and search jobs in memory, reset on restart")
+		sh.queue = queue.NewMemory(queueOptions(cfg), log)
+		log.Warn("REDIS_URL not set: usage counters, search cache, search jobs and the search queue in memory, reset on restart")
 	}
 
 	// Webhooks of the asynchronous search (API clients, so a database):
@@ -217,6 +220,18 @@ func run() error {
 		retiring sync.WaitGroup
 	)
 	current.Store(first)
+	// The queue runs each shop's live search with the current setup.
+	sh.queue.SetRunner(func(ctx context.Context, t queue.Task) queue.Outcome {
+		a := current.Load()
+		if a.cache == nil {
+			return queue.Failed("the search cache is off")
+		}
+		return a.cache.RunTask(ctx, t)
+	})
+	sh.queue.Start()
+	logQueue(log, cfg)
+	// Jobs a stopped server left running (Redis) go on.
+	api.ResumeJobs(ctx, first.deps)
 	if mgr != nil {
 		// A settings change builds a new provider chain, cache front and
 		// router and swaps them in at once. Requests already running finish
@@ -227,7 +242,9 @@ func run() error {
 				return err
 			}
 			old := current.Swap(a)
+			sh.queue.SetOptions(queueOptions(next))
 			log.Info("settings applied", "settings_version", v)
+			logQueue(log, next)
 			retiring.Go(func() {
 				closeCtx, cancel := context.WithTimeout(context.Background(), old.cfg.SearchTimeout+15*time.Second)
 				defer cancel()
@@ -334,9 +351,12 @@ func run() error {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
 	}
-	// Running search jobs get the rest of the shutdown time; then they are
-	// stopped and saved as failed (the caller can start them again).
+	// Running search jobs: with Redis they stop at once and the next start
+	// resumes them; in memory they get the rest of the shutdown time, then
+	// are saved as failed (the caller can start them again).
 	sh.jobs.Close(shutdownCtx)
+	// Shop searches still running are queued again for the next start.
+	sh.queue.Close(shutdownCtx)
 	current.Load().close(shutdownCtx)
 	retiring.Wait()
 	log.Info("server stopped cleanly")
@@ -401,7 +421,9 @@ type shared struct {
 	usageStore usage.Store
 	cacheStore cache.Store
 	jobs       *jobs.Runner // asynchronous searches
+	queue      *queue.Queue // the shops' live searches
 	webhooks   api.Webhooks // webhooks of the jobs; no Sender without a database
+	db         *store.DB    // nil without a database
 }
 
 // app is everything built from the runtime settings: providers, search
@@ -412,6 +434,7 @@ type app struct {
 	handler         http.Handler
 	searcher        *search.Service
 	cache           *cache.Cache // nil when the cache is off
+	deps            api.Deps     // what the router was built with
 	stop            context.CancelFunc
 	log             *slog.Logger
 }
@@ -479,13 +502,18 @@ func buildApp(ctx context.Context, cfg config.Config, settingsVersion int64, sh 
 			MaxBackgroundRefresh: cfg.CacheMaxBackgroundRefresh,
 			Generation:           strconv.Itoa(cfg.CacheGeneration),
 			Shops:                cacheShops(cfg, web.Name()),
+			Queue:                sh.queue,
 		}, log)
 		cacheOrLive = a.cache
 		log.Info("search cache enabled", "fresh", cfg.CacheFreshTTL.String(), "stale", cfg.CacheStaleTTL.String(),
 			"last_known", cfg.CacheLastKnownTTL.String())
 	}
 
-	a.handler = api.NewRouter(api.Deps{
+	groups := make(map[string]string, len(cfg.Shops))
+	for m, r := range cfg.Shops {
+		groups[m] = r.Group
+	}
+	a.deps = api.Deps{
 		Catalog:       catalog,
 		Searcher:      metering.New(cacheOrLive, usage.NewQuota(sh.usageStore, plans), log).WithRecorder(sh.searchRecorder()),
 		Verifier:      sh.verifier,
@@ -496,13 +524,42 @@ func buildApp(ctx context.Context, cfg config.Config, settingsVersion int64, sh 
 		WriteTimeout:  cfg.SearchTimeout + 10*time.Second,
 		Log:           log,
 		Jobs:          sh.jobs,
-		// The cache waits up to the search timeout + 5 s for a live search.
-		JobTimeout:  cfg.SearchTimeout + 15*time.Second,
+		// A job may wait for a free run in the queue, then the slowest
+		// shop's time limit.
+		JobTimeout:  cfg.LongestShopTimeout() + cfg.QueueMaxWait + 15*time.Second,
 		Webhooks:    sh.webhooks,
 		PollLimiter: pollLimiter,
 		Version:     version,
-	})
+		ShopGroups:  groups,
+		ClientSalt:  sh.clientSalt(),
+	}
+	a.handler = api.NewRouter(a.deps)
 	return a, nil
+}
+
+// clientSalt reads an API client's webhook salt (nil without a database).
+func (sh shared) clientSalt() func(ctx context.Context, id int64) ([]byte, error) {
+	if sh.db == nil {
+		return nil
+	}
+	return func(ctx context.Context, id int64) ([]byte, error) {
+		c, err := sh.db.Client(ctx, id)
+		return c.WebhookSalt, err
+	}
+}
+
+// queueOptions are the queue's caps and waits from the settings.
+func queueOptions(cfg config.Config) queue.Options {
+	return queue.Options{
+		Limits: map[string]int{queue.ClassApify: cfg.QueueApifyMaxRuns, queue.ClassSerpAPI: cfg.QueueSerpAPIMaxRuns,
+			queue.ClassWeb: cfg.QueueWebMaxRuns},
+		MaxWait: cfg.QueueMaxWait,
+	}
+}
+
+func logQueue(log *slog.Logger, cfg config.Config) {
+	log.Info("search queue", "apify_max_runs", cfg.QueueApifyMaxRuns, "serpapi_max_runs", cfg.QueueSerpAPIMaxRuns,
+		"web_max_runs", cfg.QueueWebMaxRuns, "max_wait", cfg.QueueMaxWait.String())
 }
 
 // adminRuntime gives the admin API the running search setup.
@@ -737,7 +794,8 @@ func addApifyProviders(cfg config.Config, catalog *markets.Catalog, providers ma
 			Actor:         cfg.ApifyActors[m],
 			InputTemplate: cfg.ApifyInputs[m],
 			MaxItems:      cfg.ApifyMarketMaxItems[m],
-			Timeout:       cfg.Shops[m].Timeout,
+			Timeout:       cfg.ApifyRunTimeout(m),
+			MemoryMB:      cfg.ApifyMemoryMB[m],
 			MaxChargeUSD:  cfg.ApifyMaxChargeUSD,
 			Currency:      cfg.ApifyCurrencies[m],
 			Combined:      cfg.SearchCombined,
@@ -750,8 +808,13 @@ func addApifyProviders(cfg config.Config, catalog *markets.Catalog, providers ma
 		name := "apify-" + m
 		providers[name] = search.Instrument(scraper, rec, callCost(cfg, scraper.Name()))
 		overrides[m] = name
+		memory := "default"
+		if mb := cfg.ApifyMemoryMB[m]; mb > 0 {
+			memory = strconv.Itoa(mb) + "MB"
+		}
 		log.Info("apify scraper enabled", "market", m, "actor", cfg.ApifyActors[m], "max_items", cfg.ApifyMarketMaxItems[m],
-			"timeout", cfg.Shops[m].Timeout.String(), "group", cfg.Shops[m].Group, "search_timeout", cfg.SearchTimeout.String())
+			"timeout", cfg.Shops[m].Timeout.String(), "apify_run_timeout", cfg.ApifyRunTimeout(m).String(), "memory", memory,
+			"group", cfg.Shops[m].Group, "search_timeout", cfg.SearchTimeout.String())
 	}
 	return catalog.WithProviders(overrides)
 }

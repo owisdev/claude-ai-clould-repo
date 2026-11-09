@@ -198,7 +198,8 @@ Later (phase 2+):
 
 **Changed by step 14b (owner, 2026-11-09):** searches from the app and
 agents become asynchronous, one queue task per shop, fast shops first;
-only the admin test search stays synchronous. The text below is the
+only the admin test search stays synchronous (built in part 3, see the
+server README "Asynchronous search and webhooks"). The text below is the
 earlier choice.
 
 The search request itself stays **synchronous**: the user waits for
@@ -638,8 +639,14 @@ clear rules per shop: source, cost, time limit, fast / slow group.
    2. Rules per shop + cache per shop + last-known backup; paid backup
       removed.
    3. Jobs filled per shop + Redis queue + worker pool; async for app
-      users; webhook events `first_results` / `completed`.
-   4. MCP: `search_products` 15 s wait + `get_search_results`.
+      users; webhook events `first_results` / `completed`. **Built
+      2026-11-09 together with part 4** (owner: all recommended): caps
+      Apify 4 / SerpApi 10 / web 10 runs at once (`QUEUE_*`), queue wait
+      60 s, a cut-off run is run again once if under 3 min, Apify told
+      to stop 5 s before the shop's limit (`APIFY_STOP_MARGIN`),
+      optional `APIFY_<SHOP>_MEMORY_MB`, `$` shown as `USD`.
+   4. MCP: `search_products` 15 s wait + `get_search_results`. **Built
+      2026-11-09 with part 3.**
    5. New sources when ready: eBay Browse API, SHEIN source,
       AliExpress affiliate API.
    6. Empty guard + shop-rules page in the admin panel.

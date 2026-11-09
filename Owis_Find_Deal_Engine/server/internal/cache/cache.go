@@ -20,8 +20,12 @@
 //
 // A shop that found nothing (EmptyTTL) is fresh for a shorter time so it is
 // retried sooner; failures are never stored. A client may force a live
-// fetch (Request.Refresh), at most once per MinRefresh per shop. Identical
-// concurrent fetches are merged into one upstream call (singleflight).
+// fetch (Request.Refresh), at most once per MinRefresh per shop.
+//
+// Each shop that needs a live search is one task of the queue (step 14b
+// part 3): the same shop and title already queued or running is joined,
+// runs at once are capped per source, and a search can report its answer
+// so far each time a shop finishes (SearchProgress).
 package cache
 
 import (
@@ -36,9 +40,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/sync/singleflight"
-
 	"owis_find_deal_engine/internal/markets"
+	"owis_find_deal_engine/internal/queue"
 	"owis_find_deal_engine/internal/search"
 )
 
@@ -97,6 +100,9 @@ type Options struct {
 	Generation string
 	// Shops holds each cached shop's setup, by market id.
 	Shops map[string]Shop
+	// Queue runs the live search of each shop. Nil: the cache makes its
+	// own queue in memory (tests, one server).
+	Queue *queue.Queue
 }
 
 func (o *Options) defaults() {
@@ -129,8 +135,9 @@ type Cache struct {
 	log     *slog.Logger
 	now     func() time.Time
 
-	flights singleflight.Group
-	sem     chan struct{} // background refresh slots
+	queue *queue.Queue
+	ownQ  bool          // the queue is the cache's own: closed with it
+	sem   chan struct{} // background refresh slots
 
 	mu     sync.Mutex // guards closed + wg.Add
 	closed bool
@@ -142,15 +149,22 @@ type Cache struct {
 // New returns a Cache in front of next.
 func New(next Searcher, store Store, catalog *markets.Catalog, opts Options, log *slog.Logger) *Cache {
 	opts.defaults()
-	return &Cache{
+	c := &Cache{
 		next:    next,
 		store:   store,
 		catalog: catalog,
 		opts:    opts,
 		log:     log,
 		now:     time.Now,
+		queue:   opts.Queue,
 		sem:     make(chan struct{}, opts.MaxBackgroundRefresh),
 	}
+	if c.queue == nil {
+		c.queue, c.ownQ = queue.NewMemory(queue.Options{}, log), true
+		c.queue.SetRunner(c.RunTask)
+		c.queue.Start()
+	}
+	return c
 }
 
 // shopState is one shop of a search and what the cache has for it.
@@ -249,12 +263,24 @@ func (c *Cache) answerFromCache(p *plan) *search.Result {
 	} else {
 		c.hits.Add(1)
 	}
-	return c.assemble(p, nil, time.Time{})
+	return c.assemble(p, nil, time.Time{}, true)
 }
 
 // Search answers from the cache when possible; the shops it has no answer
-// for are searched live.
+// for are searched live, waiting up to FetchTimeout for them (a shop not
+// done by then shows its last known results, else an error, and is still
+// stored when it finishes).
 func (c *Cache) Search(ctx context.Context, req search.Request) (*search.Result, error) {
+	return c.SearchProgress(ctx, req, c.opts.FetchTimeout, nil)
+}
+
+// SearchProgress is Search with a longer wait (wait <= 0: until ctx ends)
+// that calls progress with the answer so far, the shops not done yet
+// marked pending: once when the live search starts and each time a shop
+// finishes, except the last (the returned answer). progress runs on the
+// caller's goroutine, one call at a time.
+func (c *Cache) SearchProgress(ctx context.Context, req search.Request, wait time.Duration,
+	progress func(*search.Result)) (*search.Result, error) {
 	p, ok := c.newPlan(ctx, req)
 	if !ok {
 		// Invalid input: let the service produce the right error.
@@ -270,102 +296,134 @@ func (c *Cache) Search(ctx context.Context, req search.Request) (*search.Result,
 	if stale := p.staleShops(); len(stale) > 0 {
 		c.refreshInBackground(p, stale)
 	}
-	live, err := c.fetch(ctx, p, need)
-	if err != nil && (errors.Is(err, context.Canceled) || ctx.Err() != nil) {
-		return nil, err
+	live := c.fetch(ctx, p, need, wait, func(live map[string]*queue.Outcome) {
+		if progress != nil {
+			progress(c.assemble(p, live, start, false))
+		}
+	})
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
 	}
-	if err != nil && !errors.Is(err, search.ErrAllFailed) {
-		// Not an answer at all (e.g. a provider setup error): each shop
-		// falls back to its last known results, else is an error.
-		c.log.WarnContext(ctx, "live search failed", "err", err)
-		live = nil
-	}
-	res := c.assemble(p, live, start)
+	res := c.assemble(p, live, start, true)
 	if search.AllFailed(res.Markets) {
 		return res, search.ErrAllFailed
 	}
 	return res, nil
 }
 
-// fetched is a live search shared by a flight.
-type fetched struct {
-	res *search.Result
-	err error
-}
-
-// fetch searches the given shops live, one flight per set of shops at a
-// time; concurrent callers for the same shops share it (also callers from
-// other countries when the entries are shared). The search is detached
-// from the first caller's context so its cancellation does not fail
-// everyone else, while each caller can still stop waiting when its own
-// context ends. Results are stored per shop.
-func (c *Cache) fetch(ctx context.Context, p *plan, shops []*shopState) (*search.Result, error) {
-	ch := c.flights.DoChan(flightKey(p, shops), func() (any, error) {
-		fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.opts.FetchTimeout)
-		defer cancel()
-		return c.fetchAndStore(fctx, p, shops), nil
-	})
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case r := <-ch:
-		f := r.Val.(fetched)
-		return f.res, f.err
+// fetch searches the given shops live, one queue task per shop (joined
+// with the same task already queued or running, also from other
+// countries when the entries are shared), and waits for them until ctx
+// ends or wait is up. A shop not answered in time is an error outcome.
+// update gets the outcomes so far: first with none, then after each shop
+// but the last.
+func (c *Cache) fetch(ctx context.Context, p *plan, shops []*shopState, wait time.Duration,
+	update func(map[string]*queue.Outcome)) map[string]*queue.Outcome {
+	wctx, cancel := ctx, context.CancelFunc(func() {})
+	if wait > 0 {
+		wctx, cancel = context.WithTimeout(ctx, wait)
 	}
-}
+	defer cancel()
 
-// flightKey names a live search of some shops: their cache keys, or the
-// country and title for shops that are not cached.
-func flightKey(p *plan, shops []*shopState) string {
-	parts := make([]string, 0, len(shops))
+	type done struct {
+		market string
+		out    queue.Outcome
+	}
+	ch := make(chan done, len(shops))
 	for _, s := range shops {
-		k := s.key
-		if k == "" {
-			k = p.country.Code + "|" + s.target.Market + "|" + p.title
+		t := c.task(p, s, false)
+		go func() {
+			o, err := c.queue.Do(wctx, t)
+			if err != nil {
+				msg := "the shop did not answer in time"
+				if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+					msg = err.Error()
+				}
+				o = queue.Failed(msg)
+			}
+			ch <- done{s.target.Market, o}
+		}()
+	}
+	live := make(map[string]*queue.Outcome, len(shops))
+	update(live)
+	for i := range shops {
+		d := <-ch
+		live[d.market] = &d.out
+		if d.out.Status == search.StatusError && d.out.Error != "" && ctx.Err() == nil {
+			c.log.WarnContext(ctx, "shop search failed", "market", d.market, "err", d.out.Error)
 		}
-		parts = append(parts, k)
+		if i < len(shops)-1 {
+			update(live)
+		}
 	}
-	slices.Sort(parts)
-	return strings.Join(parts, ",")
+	return live
 }
 
-func (c *Cache) fetchAndStore(ctx context.Context, p *plan, shops []*shopState) fetched {
-	req := search.Request{Title: p.req.Title, Country: p.country.Code}
-	for _, s := range shops {
-		req.Markets = append(req.Markets, s.target.Market)
+// task is the queue task of one shop's live search.
+func (c *Cache) task(p *plan, s *shopState, background bool) queue.Task {
+	id := s.key
+	if id == "" {
+		h := sha256.Sum256([]byte(p.country.Code + "|" + s.target.Market + "|" + p.title))
+		id = "nocache:" + s.target.Market + ":" + hex.EncodeToString(h[:16])
 	}
-	res, err := c.next.Search(ctx, req)
+	return queue.Task{ID: id, Market: s.target.Market, Country: p.country.Code, Title: search.NormalizeTitle(p.req.Title),
+		Class: queue.ClassOf(s.target.Provider), Background: background}
+}
+
+// RunTask is the queue's work: search one shop live and store its results
+// (failures are never stored).
+func (c *Cache) RunTask(ctx context.Context, t queue.Task) queue.Outcome {
+	res, err := c.next.Search(ctx, search.Request{Title: t.Title, Country: t.Country, Markets: []string{t.Market}})
 	if res == nil {
-		return fetched{err: err}
+		msg := "search failed"
+		if err != nil {
+			msg = err.Error()
+		}
+		return queue.Failed(msg)
 	}
-	for _, s := range shops {
-		info, ok := res.Shops[s.target.Market]
-		if s.key == "" || !ok || (info.Status != search.StatusOK && info.Status != search.StatusNoResults) {
-			continue // failures are never stored
+	info, ok := res.Shops[t.Market]
+	if !ok || (info.Status != search.StatusOK && info.Status != search.StatusNoResults) {
+		o := queue.Failed("the shop's search failed")
+		if err != nil && !errors.Is(err, search.ErrAllFailed) {
+			o.Error = err.Error()
 		}
-		e := &Entry{
-			Market:    s.target.Market,
-			Status:    info.Status,
-			Source:    info.Source,
-			TookMS:    info.TookMS,
-			Products:  productsOf(res.Results, s.target.Market),
-			FetchedAt: res.FetchedAt,
-		}
+		o.Source, o.TookMS = info.Source, info.TookMS
+		return o
+	}
+	o := queue.Outcome{Status: info.Status, Source: info.Source, TookMS: info.TookMS,
+		Products: productsOf(res.Results, t.Market), FetchedAt: res.FetchedAt}
+	if key := c.keyOf(t); key != "" {
+		e := &Entry{Market: t.Market, Status: o.Status, Source: o.Source, TookMS: o.TookMS, Products: o.Products, FetchedAt: o.FetchedAt}
 		ttl := c.opts.FreshTTL
-		if info.Status == search.StatusNoResults {
+		if o.Status == search.StatusNoResults {
 			ttl = c.opts.EmptyTTL
 		}
 		e.FreshUntil = e.FetchedAt.Add(ttl)
-		if err := c.store.Set(ctx, s.key, e, c.opts.LastKnownTTL); err != nil {
+		if err := c.store.Set(ctx, key, e, c.opts.LastKnownTTL); err != nil {
 			c.log.WarnContext(ctx, "cache write failed", "err", err)
 		}
 	}
-	return fetched{res: res, err: err}
+	return o
 }
 
-// assemble builds the answer from the cached shops and the live search
-// (nil when nothing ran live). start is when the live search began.
-func (c *Cache) assemble(p *plan, live *search.Result, start time.Time) *search.Result {
+// keyOf is the cache key of a task's shop with the current setup.
+func (c *Cache) keyOf(t queue.Task) string {
+	country, ok := c.catalog.Country(t.Country)
+	if !ok {
+		return ""
+	}
+	for _, tg := range country.Targets {
+		if tg.Market == t.Market {
+			return c.key(country, tg, strings.ToLower(search.NormalizeTitle(t.Title)))
+		}
+	}
+	return ""
+}
+
+// assemble builds the answer from the cached shops and the live outcomes
+// (nil when nothing ran live). start is when the live search began. When
+// final is false, a live shop without an outcome yet is pending.
+func (c *Cache) assemble(p *plan, live map[string]*queue.Outcome, start time.Time, final bool) *search.Result {
 	res := &search.Result{
 		Query:   search.NormalizeTitle(p.req.Title),
 		Country: p.country.Code,
@@ -394,16 +452,25 @@ func (c *Cache) assemble(p *plan, live *search.Result, start time.Time) *search.
 			res.Shops[m] = search.ShopInfo{Status: s.entry.Status, Source: s.entry.Source, FetchedAt: &at, Cached: true}
 			res.Stale = res.Stale || s.stale
 		default:
-			info, ok := search.ShopInfo{}, false
-			if live != nil {
-				info, ok = live.Shops[m]
+			o := live[m]
+			if o == nil && !final {
+				res.Markets[m] = search.StatusPending
+				res.Shops[m] = search.ShopInfo{Status: search.StatusPending}
+				res.Cached = false
+				continue
 			}
-			if ok && (info.Status == search.StatusOK || info.Status == search.StatusNoResults) {
-				res.Results = append(res.Results, productsOf(live.Results, m)...)
-				if oldest.IsZero() || live.FetchedAt.Before(oldest) {
-					oldest = live.FetchedAt
+			info := search.ShopInfo{}
+			if o != nil {
+				info.Source, info.TookMS = o.Source, o.TookMS
+			}
+			if o != nil && (o.Status == search.StatusOK || o.Status == search.StatusNoResults) {
+				res.Results = append(res.Results, o.Products...)
+				if oldest.IsZero() || o.FetchedAt.Before(oldest) {
+					oldest = o.FetchedAt
 				}
-				res.Markets[m] = info.Status
+				at := o.FetchedAt
+				info.Status, info.FetchedAt = o.Status, &at
+				res.Markets[m] = o.Status
 				res.Shops[m] = info
 				res.Cached = false
 				continue
@@ -422,6 +489,7 @@ func (c *Cache) assemble(p *plan, live *search.Result, start time.Time) *search.
 			res.Shops[m] = info
 		}
 	}
+	search.NormalizeCurrencies(res.Results)
 	search.SortProducts(res.Results, p.country.Targets)
 	res.FetchedAt = oldest
 	if oldest.IsZero() {
@@ -443,9 +511,10 @@ func productsOf(products []search.Product, market string) []search.Product {
 	return out
 }
 
-// refreshInBackground refreshes stale shops without blocking the caller.
-// Refreshes are bounded; when all slots are busy the refresh is skipped
-// and a later request will trigger it.
+// refreshInBackground refreshes stale shops without blocking the caller:
+// queue tasks behind the searches. At most MaxBackgroundRefresh refreshes
+// are followed at once; when all slots are busy the refresh is skipped and
+// a later request will trigger it.
 func (c *Cache) refreshInBackground(p *plan, shops []*shopState) {
 	c.mu.Lock()
 	if c.closed {
@@ -466,12 +535,16 @@ func (c *Cache) refreshInBackground(p *plan, shops []*shopState) {
 		defer func() { <-c.sem }()
 		ctx, cancel := context.WithTimeout(context.Background(), c.opts.FetchTimeout)
 		defer cancel()
-		v, _, _ := c.flights.Do(flightKey(p, shops), func() (any, error) {
-			return c.fetchAndStore(ctx, p, shops), nil
-		})
-		if f := v.(fetched); f.err != nil {
-			c.log.Warn("background refresh failed", "err", f.err)
+		var wg sync.WaitGroup
+		for _, s := range shops {
+			t := c.task(p, s, true)
+			wg.Go(func() {
+				if o, err := c.queue.Do(ctx, t); err == nil && o.Status == search.StatusError {
+					c.log.Warn("background refresh failed", "market", t.Market, "err", o.Error)
+				}
+			})
 		}
+		wg.Wait()
 	}()
 }
 
@@ -512,12 +585,16 @@ func (c *Cache) Close(ctx context.Context) error {
 		c.wg.Wait()
 		close(done)
 	}()
+	var err error
 	select {
 	case <-done:
-		return nil
 	case <-ctx.Done():
-		return ctx.Err()
+		err = ctx.Err()
 	}
+	if c.ownQ {
+		c.queue.Close(ctx)
+	}
+	return err
 }
 
 // Stats returns hit/stale/miss counters since start.

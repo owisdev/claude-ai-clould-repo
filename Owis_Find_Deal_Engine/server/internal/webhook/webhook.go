@@ -37,13 +37,16 @@ import (
 const (
 	HeaderSignature = "X-OFD-Signature"
 	HeaderEvent     = "X-OFD-Event"
-	HeaderDelivery  = "X-OFD-Delivery" // the job id: the same for every attempt
+	// HeaderDelivery is the same for every attempt: the job id, or the job
+	// id + ".first_results" for that event.
+	HeaderDelivery = "X-OFD-Delivery"
 )
 
 // Events.
 const (
-	EventCompleted = "search.completed"
-	EventFailed    = "search.failed"
+	EventCompleted    = "search.completed"
+	EventFailed       = "search.failed"
+	EventFirstResults = "search.first_results" // the fast shops are done (asked for with webhook_events)
 )
 
 // Secret format: SecretPrefix + 40 lowercase base32 characters.

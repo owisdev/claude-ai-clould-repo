@@ -13,9 +13,11 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"owis_find_deal_engine/internal/apikeys"
 	"owis_find_deal_engine/internal/auth"
+	"owis_find_deal_engine/internal/jobs"
 	"owis_find_deal_engine/internal/markets"
 	"owis_find_deal_engine/internal/search"
 	"owis_find_deal_engine/internal/store"
@@ -34,7 +36,10 @@ import (
 //     which means 2025-03-26). No Mcp-Session-Id is ever issued.
 //
 // Tools: search_products (scope "search", metered like POST
-// /api/v1/search) and list_countries (scope "countries").
+// /api/v1/search; with jobs on it waits up to 15 s and returns what is
+// ready, the job id and the shops still searched), get_search_results
+// (scope "search", free: the rest of that search) and list_countries
+// (scope "countries").
 
 // MCP protocol versions, newest first.
 var (
@@ -66,8 +71,13 @@ const (
 // Tool names.
 const (
 	toolSearchProducts = "search_products"
+	toolSearchResults  = "get_search_results"
 	toolListCountries  = "list_countries"
 )
+
+// mcpWait is how long search_products and get_search_results wait for a
+// search before they answer with what is ready (owner decision C).
+var mcpWait = 15 * time.Second
 
 // mcpListTTL is how long clients may cache tools/list and server/discover
 // (milliseconds): the tools only change with a new server version or new
@@ -77,7 +87,9 @@ const mcpListTTL = 3_600_000
 const mcpInstructions = "Owis Find Deal searches online marketplaces (Amazon, AliExpress, Temu, SHEIN, eBay, … depending on the country) " +
 	"for a product and returns the offers per marketplace with title, price, currency and link. " +
 	"Call list_countries once to learn the country codes and which marketplaces each covers, then search_products. " +
-	"A new search takes 20-60 seconds; the same search (title + country) within 48 hours is answered at once from the cache and does not " +
+	"search_products answers within about 15 seconds with the marketplaces that are done; slow marketplaces (up to 1.5 minutes) are " +
+	"listed in pending: call get_search_results with the job_id (it waits up to 15 s each call, free) until status is done, " +
+	"or answer with what you have. The same search (title + country) within 48 hours is answered at once from the cache and does not " +
 	"count against the API key's daily allowance. Prefer short product titles (brand + model) and do not repeat a search with refresh=true " +
 	"unless fresh prices are needed: a live search counts against the allowance."
 
@@ -371,6 +383,12 @@ func (h *handlers) mcpCallTool(w http.ResponseWriter, r *http.Request, c mcpCall
 	switch c.params.Name {
 	case toolSearchProducts:
 		scope = apikeys.ScopeSearch
+	case toolSearchResults:
+		if h.jobs == nil {
+			writeRPCError(w, http.StatusOK, c.id, rpcInvalidParams, "unknown tool: "+c.params.Name, nil)
+			return
+		}
+		scope = apikeys.ScopeSearch
 	case toolListCountries:
 		scope = apikeys.ScopeCountries
 	case "":
@@ -384,11 +402,14 @@ func (h *handlers) mcpCallTool(w http.ResponseWriter, r *http.Request, c mcpCall
 		h.toolError(w, c, CodeForbidden, fmt.Sprintf("this API key lacks the scope %q needed for %s; ask the service owner to add it", scope, c.params.Name), 0)
 		return
 	}
-	if c.params.Name == toolListCountries {
+	switch c.params.Name {
+	case toolListCountries:
 		h.toolListCountries(w, c, client)
-		return
+	case toolSearchResults:
+		h.toolSearchResults(w, r, c)
+	default:
+		h.toolSearchProducts(w, r, c)
 	}
-	h.toolSearchProducts(w, r, c)
 }
 
 func (h *handlers) toolListCountries(w http.ResponseWriter, c mcpCall, client store.Client) {
@@ -412,10 +433,62 @@ type searchArgs struct {
 	Refresh bool   `json:"refresh"`
 }
 
-// searchOutput is the structured result of search_products.
+// searchOutput is the structured result of search_products and
+// get_search_results.
 type searchOutput struct {
 	*search.Result
-	Quota any `json:"quota,omitempty"`
+	// Status is "done" or "running" (Pending lists the shops still
+	// searched; get_search_results with JobID gives the rest).
+	Status  string   `json:"status"`
+	JobID   string   `json:"job_id,omitempty"`
+	Pending []string `json:"pending"`
+	Quota   any      `json:"quota,omitempty"`
+}
+
+// jobOutput is a job as the tools show it. ok is false for a failed job
+// (e is its error).
+func (h *handlers) jobOutput(j jobs.Job) (o searchOutput, e *jobs.Error) {
+	v := viewJob(j, time.Now())
+	if v.Status == jobs.StatusFailed {
+		return o, v.Error
+	}
+	res := search.Result{Query: search.NormalizeTitle(j.Request.Title), Country: j.Request.Country}
+	if v.Result != nil {
+		res = *v.Result
+	} else if c, ok := h.catalog.Country(j.Request.Country); ok {
+		// Started, no shop done yet.
+		res.Markets, res.Shops = map[string]string{}, map[string]search.ShopInfo{}
+		for _, t := range c.Targets {
+			res.Markets[t.Market] = search.StatusPending
+			res.Shops[t.Market] = search.ShopInfo{Status: search.StatusPending}
+		}
+	}
+	if res.Results == nil {
+		res.Results = []search.Product{}
+	}
+	if res.Markets == nil {
+		res.Markets = map[string]string{}
+	}
+	o = searchOutput{Result: &res, Status: v.Status, JobID: j.ID, Pending: res.Pending()}
+	if o.Pending == nil {
+		o.Pending = []string{}
+	}
+	if v.Status == jobs.StatusDone {
+		o.Pending = []string{}
+	}
+	if v.Quota != nil {
+		o.Quota = v.Quota
+	}
+	return o, nil
+}
+
+// jobToolError answers a failed job.
+func (h *handlers) jobToolError(w http.ResponseWriter, c mcpCall, e *jobs.Error) {
+	retry := 0
+	if e.HTTPStatus == http.StatusServiceUnavailable || e.HTTPStatus == http.StatusGatewayTimeout {
+		retry = pollAfter
+	}
+	h.toolError(w, c, e.Code, e.Message, retry)
 }
 
 func (h *handlers) toolSearchProducts(w http.ResponseWriter, r *http.Request, c mcpCall) {
@@ -441,7 +514,12 @@ func (h *handlers) toolSearchProducts(w http.ResponseWriter, r *http.Request, c 
 		return
 	}
 
-	out, err := h.searcher.Search(ctx, user, search.Request{Title: args.Title, Country: args.Country, Refresh: args.Refresh})
+	req := search.Request{Title: args.Title, Country: args.Country, Refresh: args.Refresh}
+	if h.jobs != nil {
+		h.mcpStartSearch(w, r, c, user, req)
+		return
+	}
+	out, err := h.searcher.Search(ctx, user, req)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			return // the client went away
@@ -460,11 +538,92 @@ func (h *handlers) toolSearchProducts(w http.ResponseWriter, r *http.Request, c 
 	if res.Markets == nil {
 		res.Markets = map[string]string{}
 	}
-	o := searchOutput{Result: &res}
+	o := searchOutput{Result: &res, Status: jobs.StatusDone, Pending: []string{}}
 	if out.QuotaKnown {
 		o.Quota = viewQuota(out.Quota)
 	}
 	h.toolResult(w, c, o)
+}
+
+// mcpStartSearch runs search_products as an asynchronous search: waits up
+// to mcpWait and answers with what is ready.
+func (h *handlers) mcpStartSearch(w http.ResponseWriter, r *http.Request, c mcpCall, user auth.User, req search.Request) {
+	ctx := r.Context()
+	if _, ok := h.catalog.Country(req.Country); !ok {
+		h.toolError(w, c, CodeInvalidRequest, "unknown country; call list_countries for the codes", 0)
+		return
+	}
+	if ch, ok := h.searcher.(Checker); ok {
+		if _, _, err := ch.Check(ctx, user, req); err != nil {
+			e := searchError(err)
+			h.toolError(w, c, e.code, e.msg, e.retryAfter)
+			return
+		}
+	}
+	j := jobs.Job{ID: jobs.NewID(), Owner: user.ID, Request: jobs.Request{Title: req.Title, Country: req.Country, Refresh: req.Refresh},
+		Plan: user.Plan, DailyLimit: user.DailyLimit}
+	j, err := h.jobs.Start(ctx, j, h.jobTimeout, mcpWait, h.jobWork(user, req, nil, false), nil)
+	switch {
+	case errors.Is(err, jobs.ErrOwnerBusy):
+		h.toolError(w, c, CodeTooManyJobs, err.Error()+"; wait for one to finish (get_search_results)", pollAfter)
+		return
+	case err != nil:
+		h.toolError(w, c, CodeUnavailable, "service temporarily busy, please retry", pollAfter)
+		return
+	}
+	o, e := h.jobOutput(j)
+	if e != nil {
+		h.jobToolError(w, c, e)
+		return
+	}
+	h.toolResult(w, c, o)
+}
+
+type resultsArgs struct {
+	JobID string `json:"job_id"`
+}
+
+// toolSearchResults is get_search_results: the rest of a search started
+// by search_products (free). Waits up to mcpWait while it is running.
+func (h *handlers) toolSearchResults(w http.ResponseWriter, r *http.Request, c mcpCall) {
+	ctx := r.Context()
+	var args resultsArgs
+	if err := decodeArgs(c.params.Arguments, &args); err != nil {
+		h.toolError(w, c, CodeInvalidRequest, err.Error(), 0)
+		return
+	}
+	user, _ := auth.UserFrom(ctx)
+	notFound := "no search with this job_id (results are kept " + jobs.ResultTTL.String() + "); start one with search_products"
+	if !jobs.ValidID(args.JobID) {
+		h.toolError(w, c, CodeNotFound, notFound, 0)
+		return
+	}
+	deadline := time.Now().Add(mcpWait)
+	for {
+		j, err := h.jobs.Store().Get(ctx, args.JobID)
+		switch {
+		case errors.Is(err, jobs.ErrNotFound) || (err == nil && j.Owner != user.ID):
+			h.toolError(w, c, CodeNotFound, notFound, 0)
+			return
+		case err != nil:
+			h.toolError(w, c, CodeUnavailable, "service temporarily unavailable, please retry", pollAfter)
+			return
+		}
+		if v := viewJob(j, time.Now()); v.Status != jobs.StatusRunning || !time.Now().Before(deadline) {
+			o, e := h.jobOutput(j)
+			if e != nil {
+				h.jobToolError(w, c, e)
+				return
+			}
+			h.toolResult(w, c, o)
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
 }
 
 // decodeArgs strictly decodes tool arguments (absent = {}).
@@ -525,7 +684,7 @@ func (s *mcpServer) originAllowed(r *http.Request) bool {
 
 // mcpTools are the tool definitions (tools/list). The country codes come
 // from the catalog the router was built with.
-func mcpTools(cat *markets.Catalog) []map[string]any {
+func mcpTools(cat *markets.Catalog, async bool) []map[string]any {
 	var codes []string
 	for _, c := range cat.Countries() {
 		codes = append(codes, c.Code)
@@ -550,7 +709,53 @@ func mcpTools(cat *markets.Catalog) []map[string]any {
 	}
 	readOnly := map[string]any{"readOnlyHint": true, "openWorldHint": true}
 
-	return []map[string]any{
+	statuses := "ok, no_results, error, off, last_known or pending"
+	searchDesc := "Searches the marketplaces of one country for a product and returns the offers (title, price, currency, link) " +
+		"per marketplace, plus each marketplace's status (ok, no_results, error, off = shop turned off, last_known = the live search " +
+		"failed and the shop's latest results are shown; shops.<market>.fetched_at says how old). A new search takes 20-60 s; " +
+		"each marketplace's results are cached for 48 h, so the same search comes from the cache at once (cached=true) and is free. " +
+		"A live search counts once against the API key's daily allowance (quota shows what is left). Needs the scope \"search\"."
+	if async {
+		searchDesc = "Searches the marketplaces of one country for a product and returns the offers (title, price, currency, link) " +
+			"per marketplace, plus each marketplace's status (ok, no_results, error, off = shop turned off, last_known = the live search " +
+			"failed and the shop's latest results are shown, pending = still searched; shops.<market>.fetched_at says how old). " +
+			"It waits up to 15 s: fast marketplaces (Amazon, eBay) are usually done by then, slow ones (AliExpress, Temu, up to 1.5 min) " +
+			"are listed in pending with status \"running\" — call get_search_results with job_id for them, or answer with what is ready. " +
+			"Each marketplace's results are cached for 48 h, so the same search comes from the cache at once (cached=true) and is free. " +
+			"A live search counts once against the API key's daily allowance (quota shows what is left). Needs the scope \"search\"."
+	}
+	output := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"status":  str("done, or running: the marketplaces in pending are still searched (get_search_results with job_id)"),
+			"job_id":  str("id of the search for get_search_results"),
+			"pending": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "marketplaces still searched"},
+			"query":   str("the title searched"),
+			"country": str("the country searched"),
+			"results": map[string]any{"type": "array", "items": product},
+			"markets": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"},
+				"description": "status per marketplace: " + statuses},
+			"shops": map[string]any{"type": "object", "description": "details per marketplace", "additionalProperties": map[string]any{
+				"type": "object", "properties": map[string]any{
+					"status":     str(statuses),
+					"source":     str("what answered, e.g. serpapi-amazon or apify"),
+					"fetched_at": map[string]any{"type": "string", "format": "date-time", "description": "when this marketplace's results were fetched"},
+					"took_ms":    map[string]any{"type": "integer"},
+					"cached":     map[string]any{"type": "boolean"},
+				}}},
+			"took_ms":    map[string]any{"type": "integer"},
+			"fetched_at": map[string]any{"type": "string", "format": "date-time", "description": "when the prices were fetched (the oldest marketplace's date)"},
+			"cached":     map[string]any{"type": "boolean"},
+			"stale":      map[string]any{"type": "boolean", "description": "cached answer past its fresh period (refreshed in the background)"},
+			"quota": map[string]any{"type": "object", "description": "the API key's daily allowance after this search", "properties": map[string]any{
+				"plan": str("plan"), "limit": map[string]any{"type": "integer"}, "remaining": map[string]any{"type": "integer"},
+				"reset": map[string]any{"type": "string", "format": "date-time"},
+			}},
+		},
+		"required": []string{"status", "pending", "query", "country", "results", "markets"},
+	}
+
+	tools := []map[string]any{
 		{
 			"name":  toolListCountries,
 			"title": "List countries and marketplaces",
@@ -576,13 +781,9 @@ func mcpTools(cat *markets.Catalog) []map[string]any {
 			"annotations": readOnly,
 		},
 		{
-			"name":  toolSearchProducts,
-			"title": "Search products across marketplaces",
-			"description": "Searches the marketplaces of one country for a product and returns the offers (title, price, currency, link) " +
-				"per marketplace, plus each marketplace's status (ok, no_results, error, off = shop turned off, last_known = the live search " +
-				"failed and the shop's latest results are shown; shops.<market>.fetched_at says how old). A new search takes 20-60 s; " +
-				"each marketplace's results are cached for 48 h, so the same search comes from the cache at once (cached=true) and is free. " +
-				"A live search counts once against the API key's daily allowance (quota shows what is left). Needs the scope \"search\".",
+			"name":        toolSearchProducts,
+			"title":       "Search products across marketplaces",
+			"description": searchDesc,
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -596,34 +797,28 @@ func mcpTools(cat *markets.Catalog) []map[string]any {
 				"required":             []string{"title", "country"},
 				"additionalProperties": false,
 			},
-			"outputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"query":   str("the title searched"),
-					"country": str("the country searched"),
-					"results": map[string]any{"type": "array", "items": product},
-					"markets": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"},
-						"description": "status per marketplace: ok, no_results, error, off or last_known"},
-					"shops": map[string]any{"type": "object", "description": "details per marketplace", "additionalProperties": map[string]any{
-						"type": "object", "properties": map[string]any{
-							"status":     str("ok, no_results, error, off or last_known"),
-							"source":     str("what answered, e.g. serpapi-amazon or apify"),
-							"fetched_at": map[string]any{"type": "string", "format": "date-time", "description": "when this marketplace's results were fetched"},
-							"took_ms":    map[string]any{"type": "integer"},
-							"cached":     map[string]any{"type": "boolean"},
-						}}},
-					"took_ms":    map[string]any{"type": "integer"},
-					"fetched_at": map[string]any{"type": "string", "format": "date-time", "description": "when the prices were fetched (the oldest marketplace's date)"},
-					"cached":     map[string]any{"type": "boolean"},
-					"stale":      map[string]any{"type": "boolean", "description": "cached answer past its fresh period (refreshed in the background)"},
-					"quota": map[string]any{"type": "object", "description": "the API key's daily allowance after this search", "properties": map[string]any{
-						"plan": str("plan"), "limit": map[string]any{"type": "integer"}, "remaining": map[string]any{"type": "integer"},
-						"reset": map[string]any{"type": "string", "format": "date-time"},
-					}},
-				},
-				"required": []string{"query", "country", "results", "markets"},
-			},
-			"annotations": readOnly,
+			"outputSchema": output,
+			"annotations":  readOnly,
 		},
 	}
+	if async {
+		tools = append(tools, map[string]any{
+			"name":  toolSearchResults,
+			"title": "Get the rest of a search",
+			"description": "Returns a search started by search_products: the marketplaces done so far and those still pending. " +
+				"While the search runs it waits up to 15 s for it to finish, then answers with what is ready; call it again " +
+				"while status is \"running\". Free: does not count against the allowance. Results are kept 1 hour. Needs the scope \"search\".",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"job_id": map[string]any{"type": "string", "description": "job_id from search_products"},
+				},
+				"required":             []string{"job_id"},
+				"additionalProperties": false,
+			},
+			"outputSchema": output,
+			"annotations":  readOnly,
+		})
+	}
+	return tools
 }

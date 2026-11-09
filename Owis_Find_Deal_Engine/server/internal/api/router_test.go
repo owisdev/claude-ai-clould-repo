@@ -66,7 +66,8 @@ type envOpts struct {
 	quota    metering.Quota
 	keys     KeyAuthenticator
 	webhooks Webhooks
-	signIn   []string // AllowedSignIn
+	signIn   []string          // AllowedSignIn
+	groups   map[string]string // ShopGroups
 }
 
 func newEnv(t *testing.T, o envOpts) *testEnv {
@@ -113,6 +114,7 @@ func newEnv(t *testing.T, o envOpts) *testEnv {
 			Jobs:          runner,
 			JobTimeout:    5 * time.Second,
 			Webhooks:      o.webhooks,
+			ShopGroups:    o.groups,
 			Catalog:       cat,
 			Searcher:      metering.New(o.searcher, o.quota, log),
 			Verifier:      verifier,

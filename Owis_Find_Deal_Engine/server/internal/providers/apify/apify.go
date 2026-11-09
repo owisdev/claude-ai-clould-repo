@@ -43,7 +43,13 @@ type Config struct {
 	// Actors never charge for more.
 	MaxItems int
 	// Timeout bounds one Actor run (Apify's synchronous limit is 300 s).
+	// Sent to Apify as the run's timeout: set it a few seconds below the
+	// shop's time limit, so what the run found before it is stopped can
+	// still come back.
 	Timeout time.Duration
+	// MemoryMB is the run's memory (a power of 2, 128-32768); 0 = the
+	// Actor's default. More memory can make a run faster.
+	MemoryMB int
 	// MaxChargeUSD caps the cost of one run of a pay-per-event Actor
 	// (sent as maxTotalChargeUsd; Apify ignores it for other pricing).
 	// Without it such runs were aborted at once: "reached its maximum
@@ -137,6 +143,9 @@ func (c *Client) run(ctx context.Context, q search.Query, t markets.Target) ([]s
 	params.Set("maxItems", strconv.Itoa(c.cfg.MaxItems))
 	params.Set("limit", strconv.Itoa(c.cfg.MaxItems))
 	params.Set("clean", "1")
+	if c.cfg.MemoryMB > 0 {
+		params.Set("memory", strconv.Itoa(c.cfg.MemoryMB))
+	}
 	if c.cfg.MaxChargeUSD > 0 {
 		params.Set("maxTotalChargeUsd", strconv.FormatFloat(c.cfg.MaxChargeUSD, 'f', -1, 64))
 	}

@@ -2,9 +2,9 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -25,8 +25,9 @@ const (
 	CodeTimeout              = "timeout"
 )
 
-// pollAfter is the Retry-After hint while a job is running.
-const pollAfter = 5
+// pollAfter is the Retry-After hint while a job is running: the app shows
+// each shop's results as they come (step 14b part 3).
+const pollAfter = 2
 
 // cachedWait is how long POST /api/v1/searches waits for an answer that is
 // in the cache, so the 202 already carries it.
@@ -57,6 +58,29 @@ type asyncRequest struct {
 	Country    string `json:"country"`
 	Refresh    bool   `json:"refresh"`
 	WebhookURL string `json:"webhook_url"`
+	// WebhookEvents are the events to send: first_results and / or
+	// completed (default: completed).
+	WebhookEvents []string `json:"webhook_events"`
+}
+
+// webhookEvents checks the events a client asks for.
+func webhookEvents(events []string) ([]string, error) {
+	if events == nil {
+		return []string{jobs.EventCompleted}, nil
+	}
+	if len(events) == 0 {
+		return nil, errors.New("webhook_events must name at least one event: first_results, completed")
+	}
+	var out []string
+	for _, e := range events {
+		if e != jobs.EventFirstResults && e != jobs.EventCompleted {
+			return nil, errors.New("webhook_events: unknown event " + strconv.Quote(e) + " (first_results, completed)")
+		}
+		if !slices.Contains(out, e) {
+			out = append(out, e)
+		}
+	}
+	return out, nil
 }
 
 // jobView is a job as the caller sees it (and as the webhook sends it).
@@ -114,6 +138,10 @@ func (h *handlers) startSearch(w http.ResponseWriter, r *http.Request) {
 
 	var hook *jobs.Webhook
 	var secret string
+	if body.WebhookURL == "" && body.WebhookEvents != nil {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "webhook_events needs a webhook_url")
+		return
+	}
 	if body.WebhookURL != "" {
 		switch {
 		case h.webhooks.Sender == nil || h.webhooks.Secrets == nil:
@@ -131,7 +159,18 @@ func (h *handlers) startSearch(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error())
 			return
 		}
-		hook = &jobs.Webhook{URL: body.WebhookURL, Status: webhook.StatusPending}
+		events, err := webhookEvents(body.WebhookEvents)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, CodeInvalidRequest, err.Error())
+			return
+		}
+		hook = &jobs.Webhook{URL: body.WebhookURL, Events: events, Status: webhook.StatusPending}
+		if !hook.Wants(jobs.EventCompleted) {
+			hook.Status = jobs.DeliveryNotRequested
+		}
+		if hook.Wants(jobs.EventFirstResults) {
+			hook.First = &jobs.Delivery{Status: webhook.StatusPending}
+		}
 		secret = h.webhooks.Secrets.Secret(client.WebhookSalt)
 	}
 
@@ -155,24 +194,9 @@ func (h *handlers) startSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	j := jobs.Job{ID: jobs.NewID(), Owner: user.ID, Request: jobs.Request{Title: req.Title, Country: req.Country, Refresh: req.Refresh},
-		Webhook: hook}
-	var notify jobs.Notify
-	if hook != nil {
-		notify = func(ctx context.Context, j jobs.Job) webhook.Result {
-			event := webhook.EventCompleted
-			if j.Status != jobs.StatusDone {
-				event = webhook.EventFailed
-			}
-			v := viewJob(j, time.Now())
-			v.Webhook = nil // its delivery is not known yet
-			payload, err := json.Marshal(v)
-			if err != nil {
-				return webhook.Result{Status: webhook.StatusFailed, Error: err.Error()}
-			}
-			return h.webhooks.Sender.Deliver(ctx, webhook.Message{URL: hook.URL, Secret: secret, Event: event, Delivery: j.ID, Body: payload})
-		}
-	}
-	j, err := h.jobs.Start(ctx, j, h.jobTimeout, wait, h.runJob(user, req), notify)
+		Webhook: hook, Plan: user.Plan, DailyLimit: user.DailyLimit}
+	k := h.newJobHooks(hook, secret)
+	j, err := h.jobs.Start(ctx, j, h.jobTimeout, wait, h.jobWork(user, req, k, false), k.notifyFunc())
 	switch {
 	case errors.Is(err, jobs.ErrOwnerBusy):
 		w.Header().Set("Retry-After", strconv.Itoa(pollAfter))
@@ -192,27 +216,6 @@ func (h *handlers) startSearch(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Retry-After", strconv.Itoa(pollAfter))
 	}
 	writeJSON(w, http.StatusAccepted, viewJob(j, time.Now()))
-}
-
-// runJob is the search of a job: metered like POST /api/v1/search.
-func (h *handlers) runJob(user auth.User, req search.Request) jobs.Work {
-	return func(ctx context.Context, j jobs.Job) jobs.Job {
-		out, err := h.searcher.Search(ctx, user, req)
-		if out.QuotaKnown {
-			j.Quota = viewQuota(out.Quota)
-		}
-		now := time.Now()
-		switch {
-		case err == nil:
-			return jobs.Done(j, out.Result, now)
-		case errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded):
-			return jobs.Fail(j, http.StatusGatewayTimeout, CodeTimeout, "the search took too long; please retry", now)
-		case errors.Is(err, context.Canceled) || ctx.Err() != nil:
-			return jobs.Fail(j, http.StatusServiceUnavailable, CodeUnavailable, "the server stopped during the search; please start it again", now)
-		}
-		e := searchError(err)
-		return jobs.Fail(j, e.status, e.code, e.msg, now)
-	}
 }
 
 func viewQuota(d usage.Decision) *jobs.Quota {

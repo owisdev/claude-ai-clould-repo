@@ -40,6 +40,13 @@ type Searcher interface {
 	Search(ctx context.Context, req search.Request) (*search.Result, error)
 }
 
+// Progressor is a Searcher that reports the answer so far while shops are
+// still being searched (the cache, step 14b part 3). wait <= 0 waits
+// until ctx ends.
+type Progressor interface {
+	SearchProgress(ctx context.Context, req search.Request, wait time.Duration, progress func(*search.Result)) (*search.Result, error)
+}
+
 // Quota consumes, refunds and reports per-user allowance.
 type Quota interface {
 	Take(ctx context.Context, a usage.Account) (usage.Decision, error)
@@ -87,7 +94,17 @@ func (s *Service) WithRecorder(rec SearchRecorder) *Service {
 
 // Search runs and reports a search; see search.
 func (s *Service) Search(ctx context.Context, user auth.User, req search.Request) (Outcome, error) {
-	out, err := s.search(ctx, user, req)
+	return s.SearchProgress(ctx, user, req, 0, nil)
+}
+
+// SearchProgress is Search for the asynchronous search: progress gets the
+// answer so far each time a shop finishes (when the searcher supports
+// it), and the live search waits up to wait (<= 0: the searcher's own
+// wait for a plain Search, until ctx ends with progress). It is counted
+// once, like Search.
+func (s *Service) SearchProgress(ctx context.Context, user auth.User, req search.Request, wait time.Duration,
+	progress func(*search.Result)) (Outcome, error) {
+	out, err := s.search(ctx, user, req, wait, progress)
 	if s.rec != nil && user.ID != "" && !errors.Is(err, search.ErrInvalidTitle) && !errors.Is(err, search.ErrUnknownCountry) {
 		var quotaErr *QuotaError
 		outcome := OutcomeError
@@ -151,10 +168,12 @@ func New(searcher Searcher, quota Quota, log *slog.Logger) *Service {
 //     used up, ErrQuotaUnavailable when the counters are down);
 //  3. live search; if it fails, or turns out to be answered from cache
 //     after all (another request filled it meanwhile), the unit is
-//     given back.
+//     given back — except when it was stopped to go on after a server
+//     restart (search.ErrResumeLater).
 //
 // Search errors (search.ErrInvalidTitle, ...) are returned unchanged.
-func (s *Service) search(ctx context.Context, user auth.User, req search.Request) (Outcome, error) {
+func (s *Service) search(ctx context.Context, user auth.User, req search.Request, wait time.Duration,
+	progress func(*search.Result)) (Outcome, error) {
 	if user.ID == "" {
 		return Outcome{}, errors.New("metering: unauthenticated search")
 	}
@@ -179,8 +198,9 @@ func (s *Service) search(ctx context.Context, user auth.User, req search.Request
 		return out, &QuotaError{Decision: d}
 	}
 
-	res, err := s.searcher.Search(ctx, req)
-	if err != nil || res.Cached {
+	res, err := s.live(ctx, req, wait, progress)
+	resumed := err != nil && errors.Is(context.Cause(ctx), search.ErrResumeLater)
+	if (err != nil || res.Cached) && !resumed {
 		s.refund(ctx, d)
 		out.Quota.Used = max(out.Quota.Used-1, 0)
 	}
@@ -189,6 +209,21 @@ func (s *Service) search(ctx context.Context, user auth.User, req search.Request
 	}
 	out.Result = res
 	return out, nil
+}
+
+// live runs the search, with progress when asked and supported.
+func (s *Service) live(ctx context.Context, req search.Request, wait time.Duration, progress func(*search.Result)) (*search.Result, error) {
+	if p, ok := s.searcher.(Progressor); ok && progress != nil {
+		return p.SearchProgress(ctx, req, wait, progress)
+	}
+	return s.searcher.Search(ctx, req)
+}
+
+// Continue goes on with a search already counted (an asynchronous search
+// started before the server restarted): no allowance is taken or given
+// back, and it is not reported again.
+func (s *Service) Continue(ctx context.Context, req search.Request, progress func(*search.Result)) (*search.Result, error) {
+	return s.live(ctx, req, 0, progress)
 }
 
 // account is whose allowance user's searches use: app users by plan, API

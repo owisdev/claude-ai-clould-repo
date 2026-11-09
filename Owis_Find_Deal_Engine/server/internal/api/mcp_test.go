@@ -195,14 +195,14 @@ func TestMCPLegacy(t *testing.T) {
 		rec := e.post(key, `{"jsonrpc":"2.0","id":3,"method":"tools/list"}`, h...)
 		out := decodeRPC(t, rec)
 		tools, _ := out.Result["tools"].([]any)
-		if rec.Code != 200 || len(tools) != 2 {
+		if rec.Code != 200 || len(tools) != 3 {
 			t.Fatalf("tools/list = %d %s", rec.Code, rec.Body)
 		}
 		var names []string
 		for _, tl := range tools {
 			names = append(names, tl.(map[string]any)["name"].(string))
 		}
-		if !slices.Equal(names, []string{toolListCountries, toolSearchProducts}) {
+		if !slices.Equal(names, []string{toolListCountries, toolSearchProducts, toolSearchResults}) {
 			t.Errorf("tools = %v", names)
 		}
 	}
@@ -255,7 +255,7 @@ func TestMCPModern(t *testing.T) {
 	rec = e.modern(key, 2, "tools/list", nil)
 	out = decodeRPC(t, rec)
 	tools, _ := out.Result["tools"].([]any)
-	if rec.Code != 200 || len(tools) != 2 || out.Result["resultType"] != "complete" || out.Result["cacheScope"] != "public" {
+	if rec.Code != 200 || len(tools) != 3 || out.Result["resultType"] != "complete" || out.Result["cacheScope"] != "public" {
 		t.Fatalf("tools/list = %d %s", rec.Code, rec.Body)
 	}
 	search := tools[1].(map[string]any)

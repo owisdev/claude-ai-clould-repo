@@ -370,20 +370,59 @@ own address from cloudflared's `CF-Connecting-IP` header (see
 
 ## Asynchronous search and webhooks
 
-A live search takes 25–50 s (cached answers are instant). Servers and
-agents that do not want to hold a connection that long start it as a
-**job** and fetch the result later, or get it by a **signed webhook**.
-App users (login token) can use it too, without webhooks.
+A live search takes up to ~1.5 min (cached answers are instant). The app
+and API clients start it as a **job** and read it while it **fills in
+per shop** (step 14b part 3): the fast shops (Amazon, eBay) within
+seconds, the slow ones (AliExpress, Temu) later. API keys can also get
+it by **signed webhooks**. App users (login token) use it too, by
+polling.
 
 ```sh
 curl -i -X POST localhost:3002/api/v1/searches -H "Authorization: Bearer $KEY_OR_JWT" \
      -H 'Content-Type: application/json' -d '{"title":"usb c hub","country":"jor"}'
-# 202 Accepted, Location: /api/v1/searches/srch_…, Retry-After: 5
+# 202 Accepted, Location: /api/v1/searches/srch_…, Retry-After: 2
 # {"id":"srch_…","status":"running","request":{…},"created_at":"…","finished_at":null}
 
 curl localhost:3002/api/v1/searches/srch_… -H "Authorization: Bearer $KEY_OR_JWT"
+# a few seconds later: the shops done so far, the others "pending"
+# {"id":"srch_…","status":"running","result":{"markets":{"amazon":"ok","aliexpress":"pending","temu":"pending",…},"results":[…amazon…],…},…}
+# when all shops are done:
 # {"id":"srch_…","status":"done","result":{…same as POST /search…},"quota":{"plan":"api","limit":100,"remaining":99,"reset":"…"},…}
 ```
+
+**How it runs (step 14b part 3).** Each shop of a search is **one task
+of a queue** in Redis, run by a pool of workers inside the server
+(`internal/queue`):
+
+```
+POST /searches ─► job ─► cache: shops with an answer ─► at once
+                          shops without one ─► one queue task each
+                                                  │ same shop + title already
+                                                  │ queued or running: joined
+                                                  ▼
+                       worker pool: QUEUE_APIFY_MAX_RUNS (4) / QUEUE_SERPAPI_MAX_RUNS (10)
+                       / QUEUE_WEB_MAX_RUNS (10) runs at once; searches before
+                       background refreshes; waits up to QUEUE_MAX_WAIT (60s)
+                                                  ▼
+                       shop searched within SHOP_<SHOP>_TIMEOUT (counted from
+                       its start) ─► stored in the cache ─► the job is saved
+                       with that shop (GET shows it at once)
+```
+
+- The **waiting search** `POST /api/v1/search` and MCP use the same queue,
+  so the cap and the joining work for everyone. The admin test search
+  does not (direct, no cache).
+- **Restarts:** with Redis, a job cut off by a server stop stays
+  `running` with its answer so far; the next start resumes it (only its
+  pending shops). A shop's run that was cut off is run **again once** if
+  the task is younger than 3 minutes (this can pay one Apify run twice),
+  else it ends as an error (→ `last_known` / `error`). A crash is noticed
+  by the stopped heartbeat (~20 s). The resumed search stays counted once.
+- **Apify** is told to stop a run `APIFY_STOP_MARGIN` (5s) before the
+  shop's limit (AliExpress 90s → 85s), so what it found may still come
+  back; `APIFY_<SHOP>_MEMORY_MB` sets a run's memory (empty = the Actor's
+  default).
+- Prices given as `$` are shown as `USD` (also in older cached answers).
 
 - Same body, rules and metering as `POST /api/v1/search` (scope `search`,
   allowed countries, burst limit; cached answers free, a live search
@@ -394,23 +433,30 @@ curl localhost:3002/api/v1/searches/srch_… -H "Authorization: Bearer $KEY_OR_J
   given, e.g. `502 upstream_error`; `504 timeout`; `503 job_lost` when the
   server running it stopped). A cached answer is already `done` in the
   `202`.
-- Poll every few seconds (`Retry-After: 5` while running); reading jobs
+- Poll about every 2 s (`Retry-After: 2` while running); reading jobs
   has its own limit (5/s, burst 20) and does not use up the search limit.
 - Only the caller who started a job can read it (anyone else: `404`).
   Finished jobs are kept **1 hour**. Jobs live in Redis (any instance
   answers) or, without Redis, in memory.
 - At most **10 running jobs per caller** (`429 too_many_jobs`) and 200 per
-  server. At shutdown running jobs get the shutdown time, then end as
-  `failed` (`503`) — start them again.
+  server. A job may take the slowest shop's limit + `QUEUE_MAX_WAIT` +
+  15 s. Without Redis, at shutdown running jobs get the shutdown time,
+  then end as `failed` (`503`) — start them again.
 
-**Webhooks (API keys only).** Add `"webhook_url": "https://…"`; when the
-job ends the service POSTs the job (the same JSON as `GET`) to it:
+**Webhooks (API keys only).** Add `"webhook_url": "https://…"` and
+optionally `"webhook_events"`: `["completed"]` (default: when the job
+ends), `["first_results","completed"]` or `["first_results"]`.
+`first_results` is sent when the fast shops (`SHOP_<SHOP>_GROUP=fast`)
+are done while others are still searched (body `status: running`, slow
+shops `pending`; skipped when nothing is left to wait for); it always
+comes before `completed`. The service POSTs the job (the same JSON as
+`GET`):
 
 ```
 POST /your/hook
 Content-Type: application/json
-X-OFD-Event: search.completed            (or search.failed)
-X-OFD-Delivery: srch_…                   (the job id; the same on every retry)
+X-OFD-Event: search.completed            (or search.failed, search.first_results)
+X-OFD-Delivery: srch_…                   (the job id, + ".first_results"; the same on every retry)
 X-OFD-Signature: t=1792757906,v1=905c03bb…
 ```
 
@@ -427,7 +473,9 @@ X-OFD-Signature: t=1792757906,v1=905c03bb…
 - Any `2xx` answer within 10 s counts as delivered; network errors, `408`,
   `429` and `5xx` are retried after 5 s and 30 s (3 attempts). Redirects
   are not followed. The job shows how it went: `webhook.status`
-  (`pending` / `delivered` / `failed`), `attempts`, `http_status`, `error`.
+  (`pending` / `delivered` / `failed` / `not_requested`), `attempts`,
+  `http_status`, `error`, and `webhook.first_results` (`status`:
+  `pending` / `delivered` / `failed` / `skipped`, …).
 - Only `https` to public addresses; internal ones (localhost, 10.x,
   192.168.x, 169.254.x, …) are refused, also when a host name resolves to
   them. For a test receiver on your PC set `WEBHOOK_ALLOW_PRIVATE=true`
@@ -456,7 +504,8 @@ refused: `401`).
 | Tool | Scope | Arguments | Result |
 |---|---|---|---|
 | `list_countries` | `countries` | none | countries this key may use, currency, marketplaces (free) |
-| `search_products` | `search` | `title`, `country`, optional `refresh` | same as `POST /api/v1/search` + `quota`; metered the same way |
+| `search_products` | `search` | `title`, `country`, optional `refresh` | waits up to 15 s, then what is ready: same as `POST /api/v1/search` + `status` (`done` / `running`), `pending` (shops still searched), `job_id`, `quota`; metered the same way |
+| `get_search_results` | `search` | `job_id` | the rest of that search: waits up to 15 s, then what is ready (free) |
 
 - A key needs only the scope of the tools it calls; another tool answers
   with a tool error (`isError: true`, `{"error":{"code":"forbidden",…}}`).
@@ -465,8 +514,11 @@ refused: `401`).
   marketplace failed), so the agent can read them. Unknown tool or method:
   a JSON-RPC error.
 - Results: `structuredContent` (with an `outputSchema`) and the same JSON
-  in a text block. `search_products` waits for the search (20–60 s for a
-  live one): clients need a timeout of ~90 s.
+  in a text block. `search_products` is an asynchronous search (step 14b
+  part 4, owner decision C): fast shops are usually in its first answer,
+  slow ones come with `get_search_results`; each call answers within
+  ~15 s (client timeout 30 s is enough). Only the key that started a
+  search can read it.
 - **Protocol versions**: `2026-07-28` (stateless: `server/discover`,
   `_meta` protocol version per request, `MCP-Protocol-Version` /
   `Mcp-Method` / `Mcp-Name` headers checked against the body → `400`
@@ -574,7 +626,8 @@ shein            ──► off
 (a shop with source web ──► web providers, SEARCH_PROVIDERS order)
 ```
 
-A waiting search ends at the slowest shop's limit + 2 s (62 s). The web
+A waiting search ends at the slowest shop's limit + 2 s (production
+92 s); the asynchronous search shows each shop as it finishes. The web
 providers give each one `PROVIDER_ATTEMPT_TIMEOUT` (SerpApi:
 `SERPAPI_TIMEOUT`); after `PROVIDER_FAILURE_THRESHOLD` failures in a row
 one is skipped for `PROVIDER_COOLDOWN` (circuit breaker). Every result
@@ -731,7 +784,11 @@ internal/search/probe.go    admin test search, provider health
 internal/search/instrument.go  reports source calls and fallbacks
 internal/stats              usage counters (flushed to Postgres), dashboard
                             report (also per API client), monthly budget alert
-internal/jobs               asynchronous searches: jobs (Redis / memory), runner
+internal/jobs               asynchronous searches: jobs (Redis / memory), runner,
+                            filled per shop, resumed after a restart
+internal/queue              the shops' live searches: one task per shop and
+                            title (joined), runs at once per source, Redis /
+                            memory, run again once after a restart
 internal/webhook            webhook secrets, HMAC signing, sender (public
                             addresses only, retries)
 deploy/searxng              SearXNG settings

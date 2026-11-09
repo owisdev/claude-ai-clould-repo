@@ -67,7 +67,7 @@ func TestSearchRunsActorAndMapsItems(t *testing.T) {
 			t.Error("token must be sent as a Bearer header, not in the URL")
 		}
 		q := r.URL.Query()
-		if q.Get("maxItems") != "3" || q.Get("timeout") != "5" || q.Get("maxTotalChargeUsd") != "0.2" {
+		if q.Get("maxItems") != "3" || q.Get("timeout") != "5" || q.Get("maxTotalChargeUsd") != "0.2" || q.Has("memory") {
 			t.Errorf("query = %v", q)
 		}
 		if input["searchQueries"].([]any)[0] != `s pen "pro"` || input["maxItems"].(float64) != 3 || input["country"] != "SA" {
@@ -389,4 +389,18 @@ func TestDefaultCurrency(t *testing.T) {
 		t.Errorf("currencies = %q %q %q, want USD (default), SAR (own), empty (no price)",
 			got[0].Currency, got[1].Currency, got[2].Currency)
 	}
+}
+
+func TestMemorySent(t *testing.T) {
+	srv := newServer(t, http.StatusCreated, `[]`, func(r *http.Request, _ map[string]any) {
+		if got := r.URL.Query().Get("memory"); got != "4096" {
+			t.Errorf("memory = %q, want 4096", got)
+		}
+	})
+	c, err := New(Config{Token: "tok", Actor: "someone~temu-scraper", InputTemplate: temuTemplate,
+		Timeout: 5 * time.Second, MemoryMB: 4096, BaseURL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = c.Search(context.Background(), search.Query{Title: "s pen", Region: "us", Targets: []markets.Target{temu}})
 }

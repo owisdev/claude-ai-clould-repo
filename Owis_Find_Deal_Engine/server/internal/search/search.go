@@ -22,6 +22,10 @@ var (
 	ErrUnknownCountry = errors.New("unsupported country")
 	ErrInvalidTitle   = errors.New("invalid title")
 	ErrAllFailed      = errors.New("all marketplaces failed")
+	// ErrResumeLater is the cause of a search's cancellation when the
+	// server stops and the search goes on after the restart (asynchronous
+	// jobs with Redis): it stays counted.
+	ErrResumeLater = errors.New("the server is stopping; the search goes on after the restart")
 )
 
 const (
@@ -77,6 +81,9 @@ const (
 	// StatusLastKnown: the live search of the shop failed or ran out of
 	// time; its latest results from the cache are shown, with their date.
 	StatusLastKnown = "last_known"
+	// StatusPending: the shop is still being searched (asynchronous
+	// search, step 14b part 3); its results come later.
+	StatusPending = "pending"
 )
 
 // OffProvider is the catalog provider name of a shop that is turned off.
@@ -280,6 +287,7 @@ func (s *Service) Search(ctx context.Context, req Request) (*Result, error) {
 		}
 	}
 
+	NormalizeCurrencies(result.Results)
 	result.Results = dedupe(result.Results)
 	SortProducts(result.Results, country.Targets)
 	result.Results = limitPerMarket(result.Results, s.opts.PerMarket)
@@ -299,6 +307,100 @@ func (s *Service) Search(ctx context.Context, req Request) (*Result, error) {
 		return result, nil
 	}
 	return result, ErrAllFailed
+}
+
+// NormalizeCurrency returns the ISO 4217 code of a currency as shops show
+// it: "$" and "US$" are USD (the dollar shops we search are in USD), "€"
+// EUR, "£" GBP; codes are upper-cased.
+func NormalizeCurrency(c string) string {
+	c = strings.TrimSpace(c)
+	switch c {
+	case "$", "US$", "$US", "USD$":
+		return "USD"
+	case "€":
+		return "EUR"
+	case "£":
+		return "GBP"
+	}
+	if len(c) == 3 {
+		return strings.ToUpper(c)
+	}
+	return c
+}
+
+// NormalizeCurrencies applies NormalizeCurrency to every product.
+func NormalizeCurrencies(products []Product) {
+	for i := range products {
+		if products[i].Currency != "" {
+			products[i].Currency = NormalizeCurrency(products[i].Currency)
+		}
+	}
+}
+
+// Pending returns the shops still being searched, sorted.
+func (r *Result) Pending() []string {
+	var out []string
+	for m, status := range r.Markets {
+		if status == StatusPending {
+			out = append(out, m)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// MergeShops returns base with the shops of upd replaced by upd's (their
+// products, status and details), sorted by the country's market order.
+// The dates and flags are worked out again from all shops.
+func MergeShops(base, upd *Result, targets []markets.Target) *Result {
+	if base == nil {
+		return upd
+	}
+	if upd == nil {
+		return base
+	}
+	out := *base
+	out.Results = make([]Product, 0, len(base.Results)+len(upd.Results))
+	for _, p := range base.Results {
+		if _, replaced := upd.Shops[p.Market]; !replaced {
+			out.Results = append(out.Results, p)
+		}
+	}
+	out.Results = append(out.Results, upd.Results...)
+	out.Markets = make(map[string]string, len(base.Markets))
+	out.Shops = make(map[string]ShopInfo, len(base.Shops))
+	for m, v := range base.Markets {
+		out.Markets[m] = v
+	}
+	for m, v := range base.Shops {
+		out.Shops[m] = v
+	}
+	for m, v := range upd.Markets {
+		out.Markets[m] = v
+	}
+	for m, v := range upd.Shops {
+		out.Shops[m] = v
+	}
+	SortProducts(out.Results, targets)
+	out.Cached, out.Stale = true, false
+	var oldest time.Time
+	for _, info := range out.Shops {
+		if info.FetchedAt != nil && (oldest.IsZero() || info.FetchedAt.Before(oldest)) {
+			oldest = *info.FetchedAt
+		}
+		switch info.Status {
+		case StatusOK, StatusNoResults, StatusLastKnown:
+			out.Cached = out.Cached && info.Cached
+		case StatusError, StatusPending:
+			out.Cached = false
+		}
+	}
+	if !oldest.IsZero() {
+		out.FetchedAt = oldest
+	}
+	out.TookMS = max(base.TookMS, upd.TookMS)
+	out.Stale = base.Stale || upd.Stale
+	return &out
 }
 
 // AllFailed reports whether no shop answered: every shop is an error (or
