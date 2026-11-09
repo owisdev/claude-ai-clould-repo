@@ -49,7 +49,8 @@ production runs on the Oracle VM, public at
 1. **MCP test with real agents.** Connect Claude Code on the owner's PC
    to `https://globalprodsearch.dawirli.com/mcp` with the `owner-test`
    key, then a search from a chat (PLAN step 14 note).
-2. **Cost settings** (through SSH): per-search costs
+2. **Cost settings — done 2026-11-09 ✅** (settings version 41;
+   `SERPAPI_SEARCH_COST_USD` was already 0). Per-search costs
    (`SERPAPI_SEARCH_COST_USD` 0 on the free plan,
    `APIFY_ALIEXPRESS_RUN_COST_USD` 0.02, `APIFY_TEMU_RUN_COST_USD` 0.10,
    `APIFY_SHEIN_RUN_COST_USD` 0.033), so cost and budget figures stop
@@ -64,8 +65,7 @@ production runs on the Oracle VM, public at
    search (`APIFY_MARKETS`) to stop paying for empty runs.
 5. **Step 5:** admin two-factor login and verified email.
 
-Suggested order: **2 first** (a few minutes; makes cost numbers real
-before more test searches), then 3.
+Next: **item 3** (business rules review), in a new session.
 
 **Step 14 — worked through one step at a time with the owner
 (2026-11-06): each step is explained, approved, built, then the next.**
