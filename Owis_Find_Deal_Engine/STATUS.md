@@ -1296,6 +1296,22 @@ Please report:
   reset password, sign-in link) must use the Firebase Hosting domain and
   `linkDomain`, not Dynamic Links — see PLAN.md section 5.6. Not needed for
   the local test (the test token comes from `accounts:signUp`, no email).
+- **Scraping API instead of Apify scrapers (e.g. scrape.do; noted
+  2026-11-09, not checked now — owner).** It fetches any page through
+  rotating proxies with anti-bot bypass and optional browser rendering,
+  and returns raw HTML; we would write and maintain our own parser per
+  shop (Temu, SHEIN). Pricing seen: Hobby $29 / month (250k credits,
+  $0.11 / 1k), Pro $99, Business $249, Advanced $699. A hard page
+  (residential proxy + rendering) costs several credits (≈ 10–25, to
+  confirm), so ≈ $0.003 per search page vs $0.10 for Temu on Apify; but
+  "successful" means the page loaded, an empty page is still charged.
+  Worth it only above ≈ 200 live searches / month ($29 ÷ ≈ $0.155 Apify
+  per search), or when a shop's Apify scrapers keep breaking with no
+  replacement (SHEIN first). Risks: our parser breaks when the shop
+  changes its page; Temu may load results through protected background
+  calls, so the page may not contain them. First test when the time
+  comes: free trial, one Temu and one SHEIN search page — are the
+  products in the HTML?
 
 ## Open decisions (owner)
 
