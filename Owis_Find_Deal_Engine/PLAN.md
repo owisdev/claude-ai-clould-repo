@@ -196,6 +196,11 @@ Later (phase 2+):
 
 ## 4c. Background jobs and queues (phase 2)
 
+**Changed by step 14b (owner, 2026-11-09):** searches from the app and
+agents become asynchronous, one queue task per shop, fast shops first;
+only the admin test search stays synchronous. The text below is the
+earlier choice.
+
 The search request itself stays **synchronous**: the user waits for
 results, and its robustness comes from the fallback chain, circuit
 breaker, cache (stale-if-error) and request merging, not from a queue.
@@ -577,6 +582,86 @@ Redis, Postgres)
     (`docs/relay_log.py`) or report it with `/bug` and `claude
     --debug-file`.
 
+**Phase 4b — search rules redesign** (owner, 2026-11-09; after step 14,
+before phase 5). Goal: a **fast first answer** — the app and agents
+see the fast shops within seconds, slow shops fill in later — and
+clear rules per shop: source, cost, time limit, fast / slow group.
+
+14b. **Search rules, fast answer first.** Owner decisions 2026-11-09:
+   - **Async for the app and agents, sync only for the admin.** The
+     app and API keys use `POST /api/v1/searches` (202 + job id; app
+     users allowed too, today only API keys). The admin test search
+     (panel / SSH) stays synchronous, no cache.
+   - **A: `POST /api/v1/search` (waiting search) is kept** for API
+     clients as the older option.
+   - **B: last known results up to 7 days old** are shown, with their
+     date, when a shop fails or runs out of time.
+   - **C: MCP `search_products` waits up to 15 s**, returns what is
+     ready + job id + pending shops; new tool `get_search_results`.
+   - **D: the queue runs inside the server program** (Redis queue +
+     worker pool), no separate container for now.
+   - **Cache stays 48 h fresh**, now per shop.
+   - **SHEIN off** until a working source is found (see below).
+
+   Design:
+   - *Job filled per shop:* `GET /api/v1/searches/{id}` returns the
+     results so far and a status per shop: `pending`, `ok`,
+     `no_results`, `error`, `off`. The app polls (about every 2 s).
+     Webhooks (API keys): `first_results` when the fast shops are done,
+     then `completed`; the client picks the events.
+   - *Queue:* one task per shop in Redis, worker pool in the server:
+     jobs survive a restart, a cap on scraper runs in flight, and the
+     same shop + query already running is joined, not paid twice.
+   - *Rules per shop* (database settings, admin panel): on/off,
+     countries, source, time limit, cost per call, max results, group.
+     Draft:
+
+     | Shop | Source now → later | Group | Time limit |
+     |---|---|---|---|
+     | Amazon | SerpApi Amazon | fast | 15 s |
+     | eBay (usa, ksa) | SerpApi eBay → eBay Browse API | fast | 15 s |
+     | AliExpress | Apify → AliExpress affiliate API | slow → fast | 60 s |
+     | Temu | Apify `crw/…` | slow | 45 s |
+     | SHEIN | off → SearchApi.io (with D8) | — | 30 s |
+
+   - *Backup:* last known results of that shop (≤ 7 days, dated). The
+     paid Google Shopping backup and the SearXNG backup are removed.
+   - *Empty guard:* a shop that returns nothing several times in a row
+     while the other shops find products is paused and flagged in the
+     admin panel (the SHEIN case: the circuit breaker only sees
+     errors, not empty answers).
+
+   Build order (each part explained, built, tested by the owner):
+   1. Settings only: SHEIN out of `APIFY_MARKETS`. Owner: eBay
+      Production keyset (exemption from account-deletion notices;
+      App ID + Cert ID go into the panel as secrets, not in chat).
+   2. Rules per shop + cache per shop + last-known backup; paid backup
+      removed.
+   3. Jobs filled per shop + Redis queue + worker pool; async for app
+      users; webhook events `first_results` / `completed`.
+   4. MCP: `search_products` 15 s wait + `get_search_results`.
+   5. New sources when ready: eBay Browse API, SHEIN source,
+      AliExpress affiliate API.
+   6. Empty guard + shop-rules page in the admin panel.
+   7. Docs: OpenAPI, developer docs page, guide PDF.
+
+   **Sources checked (2026-11-09):**
+   - SHEIN: `clearpath/shein-product-scraper` returns nothing (3
+     tries, still charged ≈ $0.016). `axlymxp/shein-product-scraper`
+     rejected: under maintenance, $7 / 1,000 results, price changing.
+     Bright Data (batch, minutes), ZenRows (monthly minimum), Chrome
+     extension (manual): not suited. **SearchApi.io** (SHEIN engine,
+     per search): best fit, but no free tier, cheapest plan $40 /
+     month for 10,000 searches ($4 / 1,000) — too much for about 30
+     searches a month now; decide with D8, possibly as one plan that
+     also replaces SerpApi (check its engines: Amazon, eBay, SHEIN
+     country setting; ask support for test searches).
+   - eBay: owner has Sandbox keys only (test site, fake listings);
+     Production keyset needed.
+   - AliExpress affiliate API: account pending.
+   - Scraping APIs (scrape.do etc.): future option, see STATUS.md
+     "Future features".
+
 **Phase 5 — users** (old phase 2, after deployment)
 
 15. `users` table, `/me` (Firebase email-link reminder in section 5.6).
@@ -592,7 +677,7 @@ Redis, Postgres)
 19. Notifications: inbox, devices, FCM push, background jobs (section 4c).
 
 **Later:** eBay Browse API and AliExpress affiliate API if the keys are
-approved; another SHEIN scraper (cheaper or Saudi site).
+approved; a SHEIN source — now planned in step 14b.
 
 ## 10. Hosting ✅ decided (2026-11-01)
 

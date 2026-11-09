@@ -45,27 +45,30 @@ production runs on the Oracle VM, public at
 2026-11-08. ✅** GitHub `main`, the owner's PC and the VM in sync at
 `04da381` (VM server folder = `main`, image `666ab78`).
 
-**Start of the next session — owner picks from this list (2026-11-08):**
+**Step 14b — search rules redesign: planned 2026-11-09 (owner), see
+[PLAN.md](PLAN.md) step 14b.** Fast answer first: the app and agents
+use the asynchronous search (job filled per shop, Redis queue inside
+the server, webhooks `first_results` / `completed`), the admin test
+search stays synchronous. Decisions: A keep `POST /api/v1/search`,
+B last known results up to 7 days, C MCP waits 15 s, D queue in the
+same program; cache 48 h per shop; SHEIN off; paid Google Shopping
+backup removed. **Next: build part 1** (SHEIN out of `APIFY_MARKETS`
+in the panel; owner makes the eBay Production keyset), **then part 2**
+(rules per shop + cache per shop + last-known backup).
+
+Next-session list (2026-11-08), updated 2026-11-09:
 1. **MCP test with real agents.** Connect Claude Code on the owner's PC
    to `https://globalprodsearch.dawirli.com/mcp` with the `owner-test`
    key, then a search from a chat (PLAN step 14 note).
-2. **Cost settings and scraper time limit** (admin panel through SSH):
-   - per-search costs (`SERPAPI_SEARCH_COST_USD`,
-     `APIFY_*_RUN_COST_USD`), so cost and budget figures stop showing
-     $0;
-   - `APIFY_TIMEOUT` to 75 s or less, so slow searches always finish
-     within Cloudflare's 100 s limit (see the step 4 entry).
-3. **Re-engineer the service's business rules (owner, 2026-11-08):**
-   which exact online shops to use, and for each the source, cost, time
-   and sync / async handling — "all this stuff" reviewed together
-   (builds on 2 and 4; to explain, decide with the owner, then build).
-4. **SHEIN.** No results three times now. Run its scraper by hand in
-   Apify to see whether it is broken; until then take SHEIN out of the
-   search (`APIFY_MARKETS`) to stop paying for empty runs.
+2. **Cost settings and scraper time limit: done by the owner
+   (2026-11-09). ✅** Note: Cloudflare's limit is **125 s**, not 100 s
+   (owner, 2026-11-09); with step 14b only the admin test search waits
+   for the whole search.
+3. **Business rules review → step 14b** (planned 2026-11-09, above).
+4. **SHEIN → step 14b.** Taken off until a working source is found:
+   `clearpath/…` empty three times, `axlymxp/…` under maintenance,
+   SearchApi.io ($40 / month minimum) to decide with D8.
 5. **Step 5:** admin two-factor login and verified email.
-
-Suggested order: **2 first** (a few minutes; removes the 100 s risk and
-makes cost numbers real before more test searches), then 3.
 
 **Step 14 — worked through one step at a time with the owner
 (2026-11-06): each step is explained, approved, built, then the next.**
@@ -249,7 +252,8 @@ makes cost numbers real before more test searches), then 3.
   shein `no_results` (open SHEIN item).
   **Step 4 — done 2026-11-08. ✅** `https://globalprodsearch.dawirli.com`
   is public; the panel stays reachable only through SSH until step 6.
-  **Open (seen in step 4): Cloudflare's 100 s limit.** On the Free plan
+  **Open (seen in step 4): Cloudflare's 100 s limit** (correction,
+  owner 2026-11-09: the limit is 125 s; `APIFY_TIMEOUT` set in item 2). On the Free plan
   Cloudflare waits at most 100 s for an answer (then `524`). On the VM
   the search timeout is `APIFY_TIMEOUT` (1m30s there) + 8 s + 2 s =
   100 s, so a very slow live search could be cut by Cloudflare first.
