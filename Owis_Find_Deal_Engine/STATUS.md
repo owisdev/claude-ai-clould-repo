@@ -109,12 +109,33 @@ backup removed.
     test) → `last_known`, new title with Temu slow → `error`, next search
     only Temu live. Not run here: Docker build, Postgres store tests (CI
     runs them).
-  - **Owner, next:** review and merge the PR → CI publishes the image →
-    on the VM `deploy/deploy.sh` → `settings set -by owner
-    SHOP_SHEIN_SOURCE off` → check the `shop rules` log lines → two test
-    searches through the public address (commands in the chat of
-    2026-11-09). Then **part 3** (jobs filled per shop + queue +
-    fast answer first).
+  - **Merged (PR #25) and deployed by the owner 2026-11-09. ✅**
+    `SHOP_SHEIN_SOURCE=off` set (log 14:20 UTC: shein `off`; before it
+    `web`, i.e. SerpApi Google Shopping). `shop rules`: aliexpress apify
+    60s, amazon / ebay serpapi 15s fast, temu apify 45s.
+    Test searches `usb c hub` through the public address:
+    `jor` live — amazon ok 2.2 s, temu ok 25 s, **aliexpress error at
+    60.0 s** (log: `context deadline exceeded`), search 60 s; `usa` —
+    amazon and temu **from the `jor` cache** (shared), ebay live 3.4 s,
+    aliexpress again error at 60 s. Apify console: the AliExpress run
+    *Timed out* at 60 s, $0.000 (no results yet).
+    **`SHOP_ALIEXPRESS_TIMEOUT=90s`** set by the owner (the old limit).
+    Retest: aliexpress **ok in 85 s** (Apify: Succeeded, 10 results,
+    1 m 23 s, $0.025, memory 2048 MB, build 0.0.37); amazon and temu
+    from the cache. **The AliExpress scraper is now about twice as slow
+    as in October (24–40 s → ~83 s)**; 90 s leaves ~7 s margin, and more
+    than ~120 s would bring the waiting search near Cloudflare's 125 s.
+    Ideas: (1) owner test in the Apify console with memory 4096 MB — if
+    clearly faster, a per-shop memory setting (`APIFY_<SHOP>_MEMORY_MB`)
+    in part 3 (for per-result scrapers the extra memory should not cost
+    more; to confirm on Apify's pricing page); (2) part 3: slow shops no
+    longer hold up the first answer; (3) send Apify a run limit a few
+    seconds below the shop's limit, so results gathered before a stop
+    still reach the server (part 3); (4) AliExpress affiliate API later.
+    Noted: Amazon and Temu give `"currency":"$"`, AliExpress `"USD"` —
+    to make consistent (`USD`) in a later part.
+    **Next: part 3** (jobs filled per shop + queue + fast answer first),
+    explained to the owner before building.
 
 Next-session list (2026-11-08), updated 2026-11-09:
 1. **MCP test with real agents.** Connect Claude Code on the owner's PC
