@@ -1238,12 +1238,42 @@ we are". Later: D8 paid Apify / SerpApi plans (before real users).
 Open the repository and say:
 
 > Continue the Owis_Find_Deal_Engine project from
-> `Owis_Find_Deal_Engine/STATUS.md` on branch `claude/cloud-vs-local-7xi988`.
-> Continue phase 4, step 14: lay out the detailed build plan for approval.
-> (Decisions D1–D7 are recorded in STATUS.md.)
+> `Owis_Find_Deal_Engine/STATUS.md` (branch `main`). Step 14b part 3:
+> explain it to me first (plain words, what changes for the app, agents
+> and API clients, and the decisions I need to make), then build it.
 
-(Step 13 is merged (PR #12) and tested up to step 7; its steps 8–10 are
-part of the production test, PLAN.md step 14.)
+**Handoff for step 14b part 3 (2026-11-09).** Parts 1–2 are done and in
+production (PR #25, see "Where we are"). Plan: [PLAN.md](PLAN.md) step
+14b. Owner decisions already made: async search for the app (Firebase
+users) and API keys, admin test search stays synchronous; A keep
+`POST /api/v1/search`; B last known results up to 7 days (built); C MCP
+`search_products` waits up to 15 s, returns what is ready + job id +
+pending shops, new tool `get_search_results`; D queue inside the server
+program (Redis queue + worker pool); cache 48 h per shop (built).
+
+Part 3 scope: jobs filled per shop (`GET /api/v1/searches/{id}` returns
+results so far + status per shop incl. `pending`); one queue task per
+shop in Redis, worker pool in the server, cap on scraper runs in
+flight, the same shop + title already running is joined, jobs survive a
+restart; async search open to app users (polling, ~2 s); webhook events
+`first_results` (when the fast shops are done — `SHOP_<SHOP>_GROUP`,
+already in the config) and `completed`, the client picks the events.
+MCP (C) is part 4 in the plan; it can be built with part 3 if the owner
+agrees. Also for part 3 (found 2026-11-09): send Apify a run limit a few
+seconds below the shop's limit so results gathered before a stop still
+arrive; optional `APIFY_<SHOP>_MEMORY_MB` if the owner's 4096 MB console
+test is clearly faster than 83 s; later: currency `$` vs `USD`.
+
+Code to start from: `internal/jobs/jobs.go` (job runner, Redis /
+memory store), `internal/api/searches.go` (async endpoints, webhooks,
+`cachedWait`), `internal/cache/cache.go` (per-shop cache: `newPlan`,
+`fetch`, `assemble`), `internal/search/search.go` (`Request.Markets`,
+`Options.Timeouts`, `ShopInfo`), `internal/metering/metering.go` (a
+search is counted once, cached = free), `internal/api/mcp.go`,
+`cmd/owis_find_deal_engine/main.go` (`buildApp`). Production: Oracle VM,
+`https://globalprodsearch.dawirli.com`, deploy by the owner with
+`deploy/deploy.sh` after the PR is merged; settings with `docker exec
+owis_find_deal_engine-server-1 /owis_find_deal_engine settings …`.
 
 ## Run it on your PC
 
