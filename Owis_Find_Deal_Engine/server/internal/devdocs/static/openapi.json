@@ -4,7 +4,7 @@
     "title": "Owis Find Deal API",
     "version": "1.0.0",
     "summary": "Search online marketplaces for a product, per country.",
-    "description": "Searches the marketplaces of one country (Amazon, AliExpress, Temu, SHEIN, eBay, … depending on the country) for a product and returns the offers with price, currency and link.\n\n**Authentication.** `Authorization: Bearer <token>` with either an **API key** (`ofd_live_…`, for servers and AI agents; made by the service owner in the admin panel) or an app user's **Firebase ID token**.\n\n**Cache.** The same search (title + country) is answered from a 48-hour cache at once and is free. A live search takes 20–60 seconds and counts once against the daily allowance (`X-RateLimit-*` headers).\n\n**AI agents** can use the MCP endpoint `POST /mcp` (Model Context Protocol, Streamable HTTP) with the same API keys; see the developer documentation at `/docs/`.\n\nEvery answer carries `X-Request-ID` (send your own to correlate logs). Errors have the body `{\"error\":{\"code\":\"…\",\"message\":\"…\"}}`.",
+    "description": "Searches the marketplaces of one country (Amazon, AliExpress, Temu, SHEIN, eBay, … depending on the country) for a product and returns the offers with price, currency and link.\n\n**Authentication.** `Authorization: Bearer <token>` with either an **API key** (`ofd_live_…`, for servers and AI agents; made by the service owner in the admin panel) or an app user's **Firebase ID token**.\n\n**Cache.** The same search (title + country) is answered from a 48-hour cache at once and is free. A live search takes up to 1.5 minutes (the asynchronous search shows the fast shops within seconds) and counts once against the daily allowance (`X-RateLimit-*` headers).\n\n**AI agents** can use the MCP endpoint `POST /mcp` (Model Context Protocol, Streamable HTTP) with the same API keys; see the developer documentation at `/docs/`.\n\nEvery answer carries `X-Request-ID` (send your own to correlate logs). Errors have the body `{\"error\":{\"code\":\"…\",\"message\":\"…\"}}`.",
     "contact": { "name": "Owis Find Deal" }
   },
   "servers": [
@@ -84,7 +84,7 @@
         "tags": ["search"],
         "operationId": "startSearch",
         "summary": "Start an asynchronous search",
-        "description": "Starts the same search as `POST /api/v1/search` and answers at once with `202` and the job. Poll `GET /api/v1/searches/{id}` (every ~5 s, see `Retry-After`) until `status` is `done` or `failed`, or give a `webhook_url` (API keys only) to receive the job when it finishes.\n\nA cached answer is already `done` in the `202`. Bad input, a used-up allowance, a missing scope or a country the key may not use are refused at once with the same answers as the synchronous search. At most 10 jobs per caller run at once; finished jobs are kept 1 hour and only their caller can read them.",
+        "description": "Starts the same search as `POST /api/v1/search` and answers at once with `202` and the job. Poll `GET /api/v1/searches/{id}` (every ~2 s, see `Retry-After`) until `status` is `done` or `failed`, or give a `webhook_url` (API keys only) to receive the job by webhook. Apps (Firebase users) poll.\n\n**Filled per shop:** each shop is searched on its own. While the job is `running`, `result` already holds the shops that are done; the others have the status `pending`. Fast shops (Amazon, eBay) usually answer within seconds, slow ones (AliExpress, Temu) within 1.5 minutes. Show the results as they come.\n\nA cached answer is already `done` in the `202`. Bad input, a used-up allowance, a missing scope or a country the key may not use are refused at once with the same answers as the synchronous search. At most 10 jobs per caller run at once; finished jobs are kept 1 hour and only their caller can read them.",
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AsyncSearchRequest" } } } },
         "callbacks": {
           "searchFinished": {
@@ -120,7 +120,7 @@
         "tags": ["search"],
         "operationId": "getSearch",
         "summary": "Read an asynchronous search",
-        "description": "The job: `running` (poll again after `Retry-After` seconds), `done` (with `result`) or `failed` (with `error`, the answer the synchronous search would have given). Polling does not use up the search limit (it has its own: 5 per second).",
+        "description": "The job: `running` (with the shops done so far in `result`, the others `pending`; poll again after `Retry-After` seconds), `done` (with `result`) or `failed` (with `error`, the answer the synchronous search would have given). Polling does not use up the search limit (it has its own: 5 per second). A job cut off by a server restart goes on after the restart.",
         "parameters": [
           { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "pattern": "^srch_[a-z2-7]{26}$" }, "description": "The job id from the `202`." }
         ],
@@ -143,7 +143,7 @@
         "tags": ["agents"],
         "operationId": "mcp",
         "summary": "MCP endpoint for AI agents",
-        "description": "Model Context Protocol over Streamable HTTP (stateless; every request is answered with one JSON object, no sessions, no SSE). **API keys only.** Protocol versions `2026-07-28` (no handshake: `_meta` + `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name` headers) and `2025-03-26` … `2025-11-25` (`initialize` handshake).\n\nTools: `list_countries` (scope `countries`, free) and `search_products` (scope `search`, metered like `POST /api/v1/search`). Tool failures (allowance used up, country not allowed, …) come back as a tool result with `isError: true` and `{\"error\":{\"code\",\"message\"}}`, so the agent can read them.\n\nPoint an MCP client at this URL with the header `Authorization: Bearer ofd_live_…`; see `/docs/` for client setup.",
+        "description": "Model Context Protocol over Streamable HTTP (stateless; every request is answered with one JSON object, no sessions, no SSE). **API keys only.** Protocol versions `2026-07-28` (no handshake: `_meta` + `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name` headers) and `2025-03-26` … `2025-11-25` (`initialize` handshake).\n\nTools: `list_countries` (scope `countries`, free), `search_products` (scope `search`, metered like `POST /api/v1/search`; waits up to 15 s and returns what is ready, with `status`, `pending` and `job_id`) and `get_search_results` (scope `search`, free: the rest of that search, waits up to 15 s). Tool failures (allowance used up, country not allowed, …) come back as a tool result with `isError: true` and `{\"error\":{\"code\",\"message\"}}`, so the agent can read them.\n\nPoint an MCP client at this URL with the header `Authorization: Bearer ofd_live_…`; see `/docs/` for client setup.",
         "parameters": [
           { "name": "MCP-Protocol-Version", "in": "header", "required": false, "schema": { "type": "string", "examples": ["2026-07-28"] }, "description": "Required from 2025-06-18 on; must match `params._meta[\"io.modelcontextprotocol/protocolVersion\"]` for 2026-07-28." },
           { "name": "Mcp-Method", "in": "header", "required": false, "schema": { "type": "string" }, "description": "2026-07-28: the JSON-RPC method." },
@@ -257,7 +257,13 @@
           "title": { "type": "string", "minLength": 2, "maxLength": 200, "examples": ["usb c hub"] },
           "country": { "type": "string", "examples": ["jor"] },
           "refresh": { "type": "boolean", "default": false },
-          "webhook_url": { "type": "string", "format": "uri", "maxLength": 2048, "description": "API keys only: an `https` URL on a public address that receives the job when it finishes (signed, see the `searchFinished` webhook). The API client needs a webhook secret (admin panel → API clients → Webhook secret)." }
+          "webhook_url": { "type": "string", "format": "uri", "maxLength": 2048, "description": "API keys only: an `https` URL on a public address that receives the job (signed, see the `searchFinished` webhook). The API client needs a webhook secret (admin panel → API clients → Webhook secret)." },
+          "webhook_events": {
+            "type": "array", "minItems": 1, "uniqueItems": true,
+            "items": { "type": "string", "enum": ["first_results", "completed"] },
+            "default": ["completed"],
+            "description": "Which webhooks to send (needs `webhook_url`): `first_results` when the fast shops are done while slow ones are still searched (event `search.first_results`; not sent when nothing is left to wait for), `completed` when the job is done or failed (`search.completed` / `search.failed`)."
+          }
         },
         "required": ["title", "country"],
         "additionalProperties": false
@@ -282,7 +288,7 @@
       "ShopInfo": {
         "type": "object",
         "properties": {
-          "status": { "type": "string", "enum": ["ok", "no_results", "error", "off", "last_known"] },
+          "status": { "type": "string", "enum": ["ok", "no_results", "error", "off", "last_known", "pending"] },
           "source": { "type": "string", "description": "What answered, e.g. serpapi-amazon or apify." },
           "fetched_at": { "type": "string", "format": "date-time", "description": "When this shop's results were fetched (missing for error and off)." },
           "took_ms": { "type": "integer", "description": "Time of this shop's live search (0 when it came from the cache)." },
@@ -296,7 +302,7 @@
           "query": { "type": "string" },
           "country": { "type": "string" },
           "results": { "type": ["array", "null"], "items": { "$ref": "#/components/schemas/Product" } },
-          "markets": { "type": "object", "additionalProperties": { "type": "string", "enum": ["ok", "no_results", "error", "off", "last_known"] }, "description": "Status per marketplace: ok, no_results, error (that shop failed and has no recent results), off (the shop is turned off), last_known (the live search failed; the shop's latest results are shown, see shops.fetched_at)." },
+          "markets": { "type": "object", "additionalProperties": { "type": "string", "enum": ["ok", "no_results", "error", "off", "last_known", "pending"] }, "description": "Status per marketplace: ok, no_results, error (that shop failed and has no recent results), off (the shop is turned off), last_known (the live search failed; the shop's latest results are shown, see shops.fetched_at), pending (asynchronous search: still searched)." },
           "shops": { "type": "object", "additionalProperties": { "$ref": "#/components/schemas/ShopInfo" }, "description": "Details per marketplace: status, source, date of its results, time taken." },
           "took_ms": { "type": "integer" },
           "fetched_at": { "type": "string", "format": "date-time", "description": "When the prices were fetched; with several dates (shops are cached separately), the oldest one." },
@@ -335,10 +341,16 @@
             "description": "The webhook and how its delivery went (not in the webhook's own body).",
             "properties": {
               "url": { "type": "string" },
-              "status": { "type": "string", "enum": ["pending", "delivered", "failed"] },
+              "events": { "type": "array", "items": { "type": "string", "enum": ["first_results", "completed"] } },
+              "status": { "type": "string", "enum": ["pending", "delivered", "failed", "not_requested"], "description": "Delivery of `completed` (not_requested: only first_results was asked for)." },
               "attempts": { "type": "integer" },
               "http_status": { "type": "integer" },
-              "error": { "type": "string" }
+              "error": { "type": "string" },
+              "first_results": {
+                "type": "object", "description": "Delivery of `first_results`, when asked for (skipped: nothing was left to wait for).",
+                "properties": { "status": { "type": "string", "enum": ["pending", "delivered", "failed", "skipped"] }, "attempts": { "type": "integer" }, "http_status": { "type": "integer" }, "error": { "type": "string" } },
+                "required": ["status", "attempts"]
+              }
             },
             "required": ["url", "status", "attempts"]
           }
@@ -387,12 +399,12 @@
       "SearchWebhook": {
         "post": {
           "operationId": "searchFinished",
-          "summary": "Search finished (webhook)",
-          "description": "Sent to the job's `webhook_url` when an asynchronous search finishes. Body: the job (as `GET /api/v1/searches/{id}` returns it, without `webhook`).\n\n**Check the signature** before trusting the body: `X-OFD-Signature: t=<unix seconds>,v1=<hex>`, where `v1 = HMAC-SHA256(secret, \"<t>.\" + raw body)` with the client's webhook secret (`whsec_…`). Compare in constant time and refuse timestamps older than 5 minutes.\n\nAnswer with a 2xx within 10 seconds. Up to 3 attempts (at once, after 5 s, after 30 s); `X-OFD-Delivery` (the job id) is the same for every attempt, so you can ignore repeats. Redirects are not followed.",
+          "summary": "Search results (webhook)",
+          "description": "Sent to the job's `webhook_url`: `search.completed` / `search.failed` when the search finishes, and `search.first_results` (when asked for with `webhook_events`) when the fast shops are done — then the body's `status` is `running` and the slow shops are `pending`. `first_results` always comes before `completed`. Body: the job (as `GET /api/v1/searches/{id}` returns it, without `webhook`).\n\n**Check the signature** before trusting the body: `X-OFD-Signature: t=<unix seconds>,v1=<hex>`, where `v1 = HMAC-SHA256(secret, \"<t>.\" + raw body)` with the client's webhook secret (`whsec_…`). Compare in constant time and refuse timestamps older than 5 minutes.\n\nAnswer with a 2xx within 10 seconds. Up to 3 attempts (at once, after 5 s, after 30 s); `X-OFD-Delivery` (the job id, or the job id + `.first_results`) is the same for every attempt, so you can ignore repeats. Redirects are not followed.",
           "parameters": [
             { "name": "X-OFD-Signature", "in": "header", "required": true, "schema": { "type": "string", "pattern": "^t=\\d+,v1=[0-9a-f]{64}$" } },
-            { "name": "X-OFD-Event", "in": "header", "required": true, "schema": { "type": "string", "enum": ["search.completed", "search.failed"] } },
-            { "name": "X-OFD-Delivery", "in": "header", "required": true, "schema": { "type": "string" }, "description": "The job id." }
+            { "name": "X-OFD-Event", "in": "header", "required": true, "schema": { "type": "string", "enum": ["search.first_results", "search.completed", "search.failed"] } },
+            { "name": "X-OFD-Delivery", "in": "header", "required": true, "schema": { "type": "string" }, "description": "The job id (`search.completed` / `search.failed`) or the job id + `.first_results`." }
           ],
           "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Job" } } } },
           "responses": { "2XX": { "description": "Received. Any other answer (or none within 10 s) is retried." } }

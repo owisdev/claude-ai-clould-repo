@@ -65,13 +65,17 @@ type Config struct {
 	Shops map[string]ShopRule
 
 	// Apify scrapers for marketplaces without an official API (Temu, SHEIN).
-	ApifyToken            string
-	ApifyMarkets          []string           // shops whose source is apify (worked out from Shops)
-	ApifyActors           map[string]string  // market -> "owner~actor-name"
-	ApifyInputs           map[string]string  // market -> input JSON template with {{query}}
-	ApifyCurrencies       map[string]string  // market -> currency for prices given without one
-	ApifyMarketMaxItems   map[string]int     // market -> results per run (default ApifyMaxItems)
-	ApifyRunCostUSD       map[string]float64 // market -> estimated cost of one run (0 = unknown)
+	ApifyToken          string
+	ApifyMarkets        []string           // shops whose source is apify (worked out from Shops)
+	ApifyActors         map[string]string  // market -> "owner~actor-name"
+	ApifyInputs         map[string]string  // market -> input JSON template with {{query}}
+	ApifyCurrencies     map[string]string  // market -> currency for prices given without one
+	ApifyMarketMaxItems map[string]int     // market -> results per run (default ApifyMaxItems)
+	ApifyRunCostUSD     map[string]float64 // market -> estimated cost of one run (0 = unknown)
+	ApifyMemoryMB       map[string]int     // market -> run memory in MB (0 = the Actor's default)
+	// ApifyStopMargin: Apify is asked to stop a run this long before the
+	// shop's time limit, so what it found still comes back (default 5s).
+	ApifyStopMargin       time.Duration
 	ApifyMaxItems         int
 	ApifyTimeout          time.Duration
 	ApifyMaxChargeUSD     float64 // max cost of one pay-per-event run; 0 = not sent
@@ -131,16 +135,22 @@ type Config struct {
 	MarketsFile      string
 	// Catalog is the countries and shops: the MARKETS setting (JSON, edited
 	// in the admin panel), else MARKETS_FILE, else the built-in markets.json.
-	Catalog         *markets.Catalog
-	MarketsSource   string // "setting", "file" or "built-in"
-	MarketsJSON     []byte // the catalog as read
-	CORSOrigins     []string
-	RateLimitRPS    float64 // per user, burst smoothing
-	RateLimitBurst  int
-	SearchTimeout   time.Duration
-	MaxConcurrency  int
-	ShutdownTimeout time.Duration
-	LogLevel        string
+	Catalog        *markets.Catalog
+	MarketsSource  string // "setting", "file" or "built-in"
+	MarketsJSON    []byte // the catalog as read
+	CORSOrigins    []string
+	RateLimitRPS   float64 // per user, burst smoothing
+	RateLimitBurst int
+	SearchTimeout  time.Duration
+	MaxConcurrency int
+	// Queue of the shops' live searches (step 14b part 3): runs at once
+	// per source and how long a search may wait for a free run.
+	QueueApifyMaxRuns   int
+	QueueSerpAPIMaxRuns int
+	QueueWebMaxRuns     int
+	QueueMaxWait        time.Duration
+	ShutdownTimeout     time.Duration
+	LogLevel            string
 }
 
 // Shop sources (SHOP_<SHOP>_SOURCE).
@@ -240,6 +250,12 @@ func LoadFrom(lookup Lookup) (Config, error) {
 		ApifyCurrencies:           map[string]string{},
 		ApifyMarketMaxItems:       map[string]int{},
 		ApifyRunCostUSD:           map[string]float64{},
+		ApifyMemoryMB:             map[string]int{},
+		ApifyStopMargin:           parse(getenv, &errs, "APIFY_STOP_MARGIN", 5*time.Second, time.ParseDuration),
+		QueueApifyMaxRuns:         parse(getenv, &errs, "QUEUE_APIFY_MAX_RUNS", 4, strconv.Atoi),
+		QueueSerpAPIMaxRuns:       parse(getenv, &errs, "QUEUE_SERPAPI_MAX_RUNS", 10, strconv.Atoi),
+		QueueWebMaxRuns:           parse(getenv, &errs, "QUEUE_WEB_MAX_RUNS", 10, strconv.Atoi),
+		QueueMaxWait:              parse(getenv, &errs, "QUEUE_MAX_WAIT", 60*time.Second, time.ParseDuration),
 		SerpAPISearchCostUSD:      parse(getenv, &errs, "SERPAPI_SEARCH_COST_USD", 0, parseFloat),
 		CacheGeneration:           parse(getenv, &errs, "CACHE_GENERATION", 0, strconv.Atoi),
 		BudgetMonthlyUSD:          parse(getenv, &errs, "BUDGET_MONTHLY_USD", 5, parseFloat),
@@ -445,6 +461,10 @@ func LoadFrom(lookup Lookup) (Config, error) {
 			if cfg.ApifyRunCostUSD[m] < 0 {
 				errs = append(errs, fmt.Errorf("%s_RUN_COST_USD must not be negative", key))
 			}
+			cfg.ApifyMemoryMB[m] = parse(getenv, &errs, key+"_MEMORY_MB", 0, strconv.Atoi)
+			if mb := cfg.ApifyMemoryMB[m]; mb != 0 && (mb < 128 || mb > 32768 || mb&(mb-1) != 0) {
+				errs = append(errs, fmt.Errorf("%s_MEMORY_MB must be a power of 2 between 128 and 32768 (e.g. 2048, 4096), or empty", key))
+			}
 			in := cfg.ApifyInputs[m]
 			if cfg.ApifyActors[m] == "" || !(strings.Contains(in, "{{query}}") || strings.Contains(in, "{{query_url}}") || strings.Contains(in, "{{query_path}}") || strings.Contains(in, "{{query_slug}}")) {
 				errs = append(errs, fmt.Errorf("%s_ACTOR and %s_INPUT (JSON containing {{query}}, {{query_url}}, {{query_path}} or {{query_slug}}) are required for %s", key, key, m))
@@ -464,6 +484,15 @@ func LoadFrom(lookup Lookup) (Config, error) {
 	cfg.SearchTimeout = max(cfg.SearchTimeout, longest+2*time.Second)
 	if cfg.ProviderAttemptTimeout <= 0 || cfg.SerpAPITimeout <= 0 || cfg.SearchTimeout <= 0 {
 		errs = append(errs, errors.New("PROVIDER_ATTEMPT_TIMEOUT, SERPAPI_TIMEOUT and SEARCH_TIMEOUT must be positive"))
+	}
+	if cfg.QueueApifyMaxRuns <= 0 || cfg.QueueSerpAPIMaxRuns <= 0 || cfg.QueueWebMaxRuns <= 0 {
+		errs = append(errs, errors.New("QUEUE_APIFY_MAX_RUNS, QUEUE_SERPAPI_MAX_RUNS and QUEUE_WEB_MAX_RUNS must be positive"))
+	}
+	if cfg.QueueMaxWait < time.Second || cfg.QueueMaxWait > 10*time.Minute {
+		errs = append(errs, errors.New("QUEUE_MAX_WAIT must be between 1s and 10m"))
+	}
+	if cfg.ApifyStopMargin < 0 || cfg.ApifyStopMargin > time.Minute {
+		errs = append(errs, errors.New("APIFY_STOP_MARGIN must be between 0s and 1m"))
 	}
 	if cfg.RateLimitRPS <= 0 || cfg.RateLimitBurst <= 0 || cfg.MaxConcurrency <= 0 || cfg.ProviderFailThreshold <= 0 || cfg.ResultsPerMarket <= 0 {
 		errs = append(errs, errors.New("RATE_LIMIT_RPS, RATE_LIMIT_BURST, SEARCH_MAX_CONCURRENCY, PROVIDER_FAILURE_THRESHOLD and RESULTS_PER_MARKET must be positive"))
@@ -563,4 +592,23 @@ func parsePrefixes(s string) ([]netip.Prefix, error) {
 		out = append(out, netip.PrefixFrom(a, a.BitLen()))
 	}
 	return out, nil
+}
+
+// ApifyRunTimeout is the run time limit sent to Apify for a shop: its
+// time limit less ApifyStopMargin (at least 1s, at most APIFY_TIMEOUT's
+// 300 s ceiling).
+func (c Config) ApifyRunTimeout(market string) time.Duration {
+	t := c.Shops[market].Timeout - c.ApifyStopMargin
+	return min(max(t, time.Second), 300*time.Second)
+}
+
+// LongestShopTimeout is the time limit of the slowest shop that is on.
+func (c Config) LongestShopTimeout() time.Duration {
+	var longest time.Duration
+	for _, r := range c.Shops {
+		if r.Source != SourceOff {
+			longest = max(longest, r.Timeout)
+		}
+	}
+	return longest
 }

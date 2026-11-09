@@ -81,19 +81,26 @@
 <p><code>markets</code> gives each marketplace's status: <code>ok</code>, <code>no_results</code>, <code>error</code> (that shop failed and has no recent results; the others still answer), <code>off</code> (the shop is turned off) or <code>last_known</code> (the live search of that shop failed or ran out of time, so its latest results from the last 7 days are shown). <code>shops</code> gives the details per marketplace: where its results come from (<code>source</code>), when they were fetched (<code>fetched_at</code> — show it for <code>last_known</code>, e.g. "prices from 3 days ago"), how long its live search took and whether they came from the cache. Each shop is cached on its own for 48 h, so one answer can mix shops of different ages; the top-level <code>fetched_at</code> is the oldest. A product whose <code>link_type</code> is <code>search</code> links to the marketplace's own search because no product page was found.</p>
 
 <h2 id="async">Asynchronous search</h2>
-<p>For live searches without holding a connection open for a minute:</p>
+<p>For live searches without holding a connection open for a minute, and to show each shop's results as they come (apps signed in with Firebase use this too):</p>
 <pre><code>curl -i -X POST http://localhost:3002/api/v1/searches \
   -H "Authorization: Bearer $OFD_KEY" -H "Content-Type: application/json" \
   -d '{"title":"usb c hub","country":"jor"}'
 
 HTTP/1.1 202 Accepted
 Location: /api/v1/searches/srch_…
-Retry-After: 5
+Retry-After: 2
 
 {"id":"srch_…","status":"running","request":{…},"created_at":"…","finished_at":null}</code></pre>
-<p>Then poll every ~5 seconds until <code>status</code> is <code>done</code> (with <code>result</code>, the same object as the synchronous answer) or <code>failed</code> (with <code>error</code>: the status and code the synchronous search would have given):</p>
+<p>Then poll every ~2 seconds until <code>status</code> is <code>done</code> (with <code>result</code>, the same object as the synchronous answer) or <code>failed</code> (with <code>error</code>: the status and code the synchronous search would have given):</p>
 <pre><code>curl http://localhost:3002/api/v1/searches/srch_… -H "Authorization: Bearer $OFD_KEY"</code></pre>
+<p><strong>The job fills in per shop.</strong> Each shop is searched on its own; while the job is <code>running</code>, <code>result</code> already holds the shops that are done, and the others have the status <code>pending</code>. Fast shops (Amazon, eBay) usually answer within a few seconds, slow ones (AliExpress, Temu) within 1.5 minutes:</p>
+<pre><code>{"id":"srch_…","status":"running",
+ "result":{"markets":{"amazon":"ok","aliexpress":"pending","temu":"pending","shein":"off"},
+           "results":[{"market":"amazon", …}], …}, …}</code></pre>
 <ul>
+  <li>Show what is there and keep polling; a shop that stays <code>pending</code> ends as <code>ok</code>, <code>no_results</code>, <code>last_known</code> or <code>error</code>.</li>
+  <li>The same shop and title searched by several callers at once is searched once; they all get its results.</li>
+  <li>A job cut off by a server restart goes on after the restart (it may take a little longer).</li>
   <li>A cached answer is already <code>done</code> in the <code>202</code>.</li>
   <li>Bad input, a used-up allowance, a missing scope or a country the key may not use are refused at once (no job).</li>
   <li>Only the caller can read its jobs (others get <code>404</code>). Finished jobs are kept 1 hour.</li>
@@ -101,17 +108,25 @@ Retry-After: 5
 </ul>
 
 <h2 id="webhooks">Webhooks</h2>
-<p>Instead of polling, an API key can add <code>"webhook_url":"https://…"</code> to <code>POST /api/v1/searches</code>. When the search finishes, the job is POSTed there. The client needs a webhook secret first: the service owner makes it in the admin panel (<em>API clients → Webhook secret</em>, shown once, <code>whsec_…</code>). Without one the request is refused with <code>400 webhook_not_configured</code>.</p>
+<p>Instead of polling, an API key can add <code>"webhook_url":"https://…"</code> to <code>POST /api/v1/searches</code>. The job is POSTed there when the search finishes. Pick the events with <code>"webhook_events"</code>:</p>
+<table>
+  <tr><th>Event</th><th>Sent</th></tr>
+  <tr><td><code>completed</code> (default)</td><td>When the job is done (<code>search.completed</code>) or failed (<code>search.failed</code>).</td></tr>
+  <tr><td><code>first_results</code></td><td>When the fast shops are done while slow ones are still searched (<code>search.first_results</code>; the body's <code>status</code> is <code>running</code>, slow shops <code>pending</code>). Always before <code>completed</code>. Not sent when nothing is left to wait for (for example, a cached answer).</td></tr>
+</table>
+<pre><code>{"title":"usb c hub","country":"jor","webhook_url":"https://example.com/hooks/ofd",
+ "webhook_events":["first_results","completed"]}</code></pre>
+<p> The client needs a webhook secret first: the service owner makes it in the admin panel (<em>API clients → Webhook secret</em>, shown once, <code>whsec_…</code>). Without one the request is refused with <code>400 webhook_not_configured</code>.</p>
 <table>
   <tr><th>Header</th><th></th></tr>
   <tr><td><code>X-OFD-Signature</code></td><td><code>t=&lt;unix seconds&gt;,v1=&lt;hex HMAC-SHA256(secret, "&lt;t&gt;." + raw body)&gt;</code></td></tr>
-  <tr><td><code>X-OFD-Event</code></td><td><code>search.completed</code> or <code>search.failed</code></td></tr>
-  <tr><td><code>X-OFD-Delivery</code></td><td>The job id; the same on every attempt, so you can drop repeats.</td></tr>
+  <tr><td><code>X-OFD-Event</code></td><td><code>search.first_results</code>, <code>search.completed</code> or <code>search.failed</code></td></tr>
+  <tr><td><code>X-OFD-Delivery</code></td><td>The job id (for <code>first_results</code>: the job id + <code>.first_results</code>); the same on every attempt, so you can drop repeats.</td></tr>
 </table>
 <ul>
   <li>Answer with any 2xx within 10 seconds. Otherwise it is retried: 3 attempts in all (at once, after 5 s, after 30 s). Redirects are not followed.</li>
   <li>Only <code>https</code> URLs on public addresses are accepted.</li>
-  <li>The job (<code>GET /api/v1/searches/{id}</code>) shows how the delivery went in <code>webhook.status</code>: <code>pending</code>, <code>delivered</code> or <code>failed</code>.</li>
+  <li>The job (<code>GET /api/v1/searches/{id}</code>) shows how the delivery went in <code>webhook.status</code> (<code>completed</code>: <code>pending</code>, <code>delivered</code>, <code>failed</code> or <code>not_requested</code>) and <code>webhook.first_results.status</code> (<code>pending</code>, <code>delivered</code>, <code>failed</code> or <code>skipped</code>).</li>
 </ul>
 <p><strong>Always check the signature</strong> on the raw body, before parsing it, and refuse old timestamps:</p>
 <pre><code># Python
@@ -142,8 +157,10 @@ function verify(secret, header, rawBody, tolerance = 300) {
 <table>
   <tr><th>Tool</th><th>Scope</th><th>Arguments</th><th>Returns</th></tr>
   <tr><td><code>list_countries</code></td><td><code>countries</code></td><td>none</td><td>The countries this key may search in, with currency and marketplaces. Free.</td></tr>
-  <tr><td><code>search_products</code></td><td><code>search</code></td><td><code>title</code>, <code>country</code>, optional <code>refresh</code></td><td>The same result as <code>POST /api/v1/search</code>, plus <code>quota</code> (the allowance left). Metered the same way.</td></tr>
+  <tr><td><code>search_products</code></td><td><code>search</code></td><td><code>title</code>, <code>country</code>, optional <code>refresh</code></td><td>Waits up to 15 s, then returns what is ready: the same result as <code>POST /api/v1/search</code> plus <code>status</code> (<code>done</code> or <code>running</code>), <code>pending</code> (shops still searched), <code>job_id</code> and <code>quota</code> (the allowance left). Metered the same way.</td></tr>
+  <tr><td><code>get_search_results</code></td><td><code>search</code></td><td><code>job_id</code></td><td>The rest of a search that was still <code>running</code>: waits up to 15 s for it to finish, then returns what is ready. Free.</td></tr>
 </table>
+<p>Fast marketplaces (Amazon, eBay) are usually in the first answer; slow ones (AliExpress, Temu) can take up to 1.5 minutes. The agent can answer with what it has, or call <code>get_search_results</code> until <code>status</code> is <code>done</code>.</p>
 <p>Results come as structured content (with an output schema) and as the same JSON in a text block. When a tool cannot run — allowance used up, country not allowed, scope missing, every marketplace failing — the result has <code>isError: true</code> and a text block <code>{"error":{"code":"…","message":"…"}}</code>, so the agent can read why and adjust.</p>
 
 <h3>Connect a client</h3>
@@ -170,7 +187,7 @@ function verify(secret, header, rawBody, tolerance = 300) {
   <li>Versions: <code>2026-07-28</code> (stateless: each request carries <code>params._meta["io.modelcontextprotocol/protocolVersion"]</code> and the headers <code>MCP-Protocol-Version</code>, <code>Mcp-Method</code>, <code>Mcp-Name</code>; <code>server/discover</code> lists what the server supports) and <code>2025-03-26</code>, <code>2025-06-18</code>, <code>2025-11-25</code> (with the <code>initialize</code> handshake).</li>
   <li>Every request is answered with one JSON object. No sessions (<code>Mcp-Session-Id</code> is never issued), no SSE streams; <code>GET /mcp</code> answers <code>405</code>. One message per request (no batches).</li>
   <li>An unsupported version answers <code>400</code> with JSON-RPC error <code>-32022</code> and <code>data.supported</code>; headers that do not match the body answer <code>400</code> with <code>-32020</code>.</li>
-  <li><code>search_products</code> waits for the search (20–60 s for a new one), so give your client a timeout of at least 90 seconds.</li>
+  <li><code>search_products</code> and <code>get_search_results</code> answer within about 15 seconds; a client timeout of 30 seconds is enough.</li>
 </ul>
 <p>A raw call (2026-07-28):</p>
 <pre><code>curl http://localhost:3002/mcp \

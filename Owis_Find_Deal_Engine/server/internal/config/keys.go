@@ -33,10 +33,15 @@ var runtimeKeys = []string{
 	"APIFY_TIMEOUT",
 	"APIFY_MAX_CHARGE_USD",
 	"APIFY_EMPTY_FALLBACK",
+	"APIFY_STOP_MARGIN",
 	"SEARCH_COMBINED",
 	"RESULTS_PER_MARKET",
 	"SEARCH_TIMEOUT",
 	"SEARCH_MAX_CONCURRENCY",
+	"QUEUE_APIFY_MAX_RUNS",
+	"QUEUE_SERPAPI_MAX_RUNS",
+	"QUEUE_WEB_MAX_RUNS",
+	"QUEUE_MAX_WAIT",
 	"CACHE_ENABLED",
 	"CACHE_FRESH_TTL",
 	"CACHE_PARTIAL_TTL",
@@ -58,7 +63,7 @@ var runtimeKeys = []string{
 }
 
 // apifyMarketKey matches the per-shop Apify settings, e.g. APIFY_TEMU_INPUT.
-var apifyMarketKey = regexp.MustCompile(`^APIFY_[A-Z0-9][A-Z0-9_]*_(ACTOR|INPUT|CURRENCY|MAX_ITEMS|RUN_COST_USD)$`)
+var apifyMarketKey = regexp.MustCompile(`^APIFY_[A-Z0-9][A-Z0-9_]*_(ACTOR|INPUT|CURRENCY|MAX_ITEMS|RUN_COST_USD|MEMORY_MB)$`)
 
 // shopKey matches the rules per shop, e.g. SHOP_TEMU_SOURCE (step 14b).
 var shopKey = regexp.MustCompile(`^SHOP_[A-Z0-9][A-Z0-9_]*_(SOURCE|TIMEOUT|GROUP)$`)

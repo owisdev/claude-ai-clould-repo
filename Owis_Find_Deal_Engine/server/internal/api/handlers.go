@@ -21,6 +21,10 @@ import (
 // MeteredSearcher runs a user's search and accounts for it.
 type MeteredSearcher interface {
 	Search(ctx context.Context, user auth.User, req search.Request) (metering.Outcome, error)
+	// SearchProgress is Search reporting the answer so far (asynchronous
+	// search); wait <= 0 waits until ctx ends.
+	SearchProgress(ctx context.Context, user auth.User, req search.Request, wait time.Duration,
+		progress func(*search.Result)) (metering.Outcome, error)
 }
 
 type handlers struct {
@@ -29,6 +33,7 @@ type handlers struct {
 	jobs       *jobs.Runner
 	jobTimeout time.Duration
 	webhooks   Webhooks
+	groups     map[string]string // shop -> fast / slow
 	limiter    *ratelimit.Limiter
 	mcpServer  *mcpServer
 	log        *slog.Logger

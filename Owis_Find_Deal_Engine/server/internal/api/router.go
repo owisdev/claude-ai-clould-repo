@@ -2,6 +2,7 @@
 package api
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"time"
@@ -43,6 +44,19 @@ type Deps struct {
 
 	// Version is the server's version (shown to MCP clients).
 	Version string
+
+	// ShopGroups gives each shop's group (fast / slow): the webhook event
+	// first_results is sent when the fast shops are done.
+	ShopGroups map[string]string
+	// ClientSalt returns an API client's webhook salt, to sign the
+	// webhooks of jobs resumed after a restart (nil = none).
+	ClientSalt func(ctx context.Context, clientID int64) ([]byte, error)
+}
+
+func newHandlers(d Deps) *handlers {
+	return &handlers{catalog: d.Catalog, searcher: d.Searcher, jobs: d.Jobs, jobTimeout: d.JobTimeout, webhooks: d.Webhooks,
+		limiter: d.Limiter, log: d.Log, groups: d.ShopGroups,
+		mcpServer: &mcpServer{version: d.Version, origins: d.CORSOrigins, tools: mcpTools(d.Catalog, d.Jobs != nil)}}
 }
 
 // NewRouter returns the service's HTTP handler.
@@ -53,16 +67,16 @@ type Deps struct {
 //	                        rate limit -> metered search (cached answers
 //	                        free, live searches counted per user / client)
 //	POST /api/v1/searches   the same search, asynchronous: 202 + job id,
-//	                        optional signed webhook (API keys only)
-//	GET  /api/v1/searches/{id}  the job: running, done (result) or failed
+//	                        optional signed webhooks (API keys only)
+//	GET  /api/v1/searches/{id}  the job: running (the shops done so far,
+//	                        the others pending), done (result) or failed
 //	POST /mcp               MCP (Streamable HTTP) for AI agents, API keys
-//	                        only: tools search_products, list_countries
+//	                        only: tools search_products, get_search_results,
+//	                        list_countries
 //	GET  /api/v1/openapi.json  OpenAPI 3.1 description (public)
 //	GET  /docs/             developer documentation (public)
 func NewRouter(d Deps) http.Handler {
-	h := &handlers{catalog: d.Catalog, searcher: d.Searcher, jobs: d.Jobs, jobTimeout: d.JobTimeout, webhooks: d.Webhooks,
-		limiter: d.Limiter, log: d.Log,
-		mcpServer: &mcpServer{version: d.Version, origins: d.CORSOrigins, tools: mcpTools(d.Catalog)}}
+	h := newHandlers(d)
 	if d.PollLimiter == nil {
 		d.PollLimiter = ratelimit.New(5, 20, 10*time.Minute)
 	}

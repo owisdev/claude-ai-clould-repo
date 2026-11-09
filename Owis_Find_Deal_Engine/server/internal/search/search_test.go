@@ -416,3 +416,28 @@ func TestSearchShopRules(t *testing.T) {
 		t.Errorf("err = %v, want ErrAllFailed (%v)", err, res.Markets)
 	}
 }
+
+func TestNormalizeCurrency(t *testing.T) {
+	for in, want := range map[string]string{"$": "USD", " US$ ": "USD", "usd": "USD", "€": "EUR", "£": "GBP", "SAR": "SAR", "": "", "JD": "JD"} {
+		if got := NormalizeCurrency(in); got != want {
+			t.Errorf("NormalizeCurrency(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestMergeShops(t *testing.T) {
+	t0 := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
+	t1 := t0.Add(time.Minute)
+	base := &Result{Results: []Product{{Market: "amazon", Position: 1}}, Markets: map[string]string{"amazon": "ok", "temu": StatusPending},
+		Shops: map[string]ShopInfo{"amazon": {Status: "ok", FetchedAt: &t0, Cached: true}, "temu": {Status: StatusPending}}}
+	upd := &Result{Results: []Product{{Market: "temu", Position: 1}}, Markets: map[string]string{"temu": "ok"},
+		Shops: map[string]ShopInfo{"temu": {Status: "ok", FetchedAt: &t1}}}
+	got := MergeShops(base, upd, nil)
+	if len(got.Results) != 2 || got.Markets["temu"] != "ok" || got.Markets["amazon"] != "ok" || len(got.Pending()) != 0 ||
+		!got.FetchedAt.Equal(t0) || got.Cached {
+		t.Errorf("merged = %+v", got)
+	}
+	if base.Markets["temu"] != StatusPending {
+		t.Error("base changed")
+	}
+}
