@@ -1,6 +1,6 @@
 # Project status and handoff
 
-Last updated: 2026-11-08 · Project branch: **`main`** from step 14,
+Last updated: 2026-11-09 · Project branch: **`main`** from step 14,
 step 2 on (owner, 2026-11-06, Q8: the old project branch
 `claude/cloud-vs-local-7xi988` goes into `main` with PR #8 and stays
 frozen; new step PRs target `main`). Steps 7–12: PRs #9–#11, step 13:
@@ -49,12 +49,12 @@ production runs on the Oracle VM, public at
 1. **MCP test with real agents.** Connect Claude Code on the owner's PC
    to `https://globalprodsearch.dawirli.com/mcp` with the `owner-test`
    key, then a search from a chat (PLAN step 14 note).
-2. **Cost settings and scraper time limit** (admin panel through SSH):
-   - per-search costs (`SERPAPI_SEARCH_COST_USD`,
-     `APIFY_*_RUN_COST_USD`), so cost and budget figures stop showing
-     $0;
-   - `APIFY_TIMEOUT` to 75 s or less, so slow searches always finish
-     within Cloudflare's 100 s limit (see the step 4 entry).
+2. **Cost settings** (through SSH): per-search costs
+   (`SERPAPI_SEARCH_COST_USD` 0 on the free plan,
+   `APIFY_ALIEXPRESS_RUN_COST_USD` 0.02, `APIFY_TEMU_RUN_COST_USD` 0.10,
+   `APIFY_SHEIN_RUN_COST_USD` 0.033), so cost and budget figures stop
+   showing $0. `APIFY_TIMEOUT` stays 90s: Cloudflare's limit is 125 s,
+   not 100 s (corrected 2026-11-09, see the step 4 entry).
 3. **Re-engineer the service's business rules (owner, 2026-11-08):**
    which exact online shops to use, and for each the source, cost, time
    and sync / async handling — "all this stuff" reviewed together
@@ -64,8 +64,8 @@ production runs on the Oracle VM, public at
    search (`APIFY_MARKETS`) to stop paying for empty runs.
 5. **Step 5:** admin two-factor login and verified email.
 
-Suggested order: **2 first** (a few minutes; removes the 100 s risk and
-makes cost numbers real before more test searches), then 3.
+Suggested order: **2 first** (a few minutes; makes cost numbers real
+before more test searches), then 3.
 
 **Step 14 — worked through one step at a time with the owner
 (2026-11-06): each step is explained, approved, built, then the next.**
@@ -249,13 +249,15 @@ makes cost numbers real before more test searches), then 3.
   shein `no_results` (open SHEIN item).
   **Step 4 — done 2026-11-08. ✅** `https://globalprodsearch.dawirli.com`
   is public; the panel stays reachable only through SSH until step 6.
-  **Open (seen in step 4): Cloudflare's 100 s limit.** On the Free plan
-  Cloudflare waits at most 100 s for an answer (then `524`). On the VM
-  the search timeout is `APIFY_TIMEOUT` (1m30s there) + 8 s + 2 s =
-  100 s, so a very slow live search could be cut by Cloudflare first.
-  To decide: `APIFY_TIMEOUT` ≤ 75s in the panel, and/or slow clients use
-  the asynchronous `POST /api/v1/searches` (step 12), which answers at
-  once.
+  **Cloudflare's time limit (corrected 2026-11-09).** Cloudflare waits
+  up to **125 s** for the server's answer (Proxy Read Timeout, then
+  `524`), on every plan; only Enterprise zones can change it (owner
+  checked Cloudflare's "Connection limits" page; the earlier "100 s" here
+  was wrong). On the VM the search timeout is `APIFY_TIMEOUT` (1m30s) +
+  8 s + 2 s = 100 s and the server's write limit 110 s, both under
+  125 s, so `APIFY_TIMEOUT` stays 90s. Whether slow shops should answer
+  through the asynchronous `POST /api/v1/searches` (step 12) instead is
+  part of item 3.
 - **SHEIN — to check before production (owner, 2026-11-07).** In the
   VM test search the SHEIN scraper (`clearpath/shein-product-scraper`,
   now build 0.0.84) ran 4 s and returned 0 results for `USB-C power
@@ -409,7 +411,7 @@ Agreed in the plan review:
 - **HTTPS: permanent Cloudflare Tunnel** (`cloudflared` next to the
   stack) for `globalprodsearch.dawirli.com`: no web port open on the VM, only SSH.
   Turn off Cloudflare bot blocking for `/api` and `/mcp` (agents and
-  apps must get through); Cloudflare's 100 s limit is above the 60 s
+  apps must get through); Cloudflare's 125 s limit is above the 60 s
   live search.
 - **`/admin` extra lock: Cloudflare Access** (free, ≤ 50 users): only
   the owner's email (one-time code or Google) reaches the admin login
