@@ -56,14 +56,17 @@ type Config struct {
 	SerpAPIBaseURL         string // empty = SerpApi; for tests / outbound proxies
 	ProviderAttemptTimeout time.Duration
 	SerpAPITimeout         time.Duration // Google Shopping is slow
-	// SerpAPIMarkets use a dedicated SerpApi engine ("amazon", "ebay": the
-	// Amazon Search API) instead of the web providers, which stay as the
-	// fallback.
+	// SerpAPIMarkets are the shops whose source is serpapi: SerpApi's own
+	// engine for that shop ("amazon", "ebay"). Worked out from Shops.
 	SerpAPIMarkets []string
+
+	// Shops holds the rules of every shop in the catalog (SHOP_<SHOP>_*
+	// settings, step 14b): its source, time limit and group.
+	Shops map[string]ShopRule
 
 	// Apify scrapers for marketplaces without an official API (Temu, SHEIN).
 	ApifyToken            string
-	ApifyMarkets          []string           // e.g. temu,shein
+	ApifyMarkets          []string           // shops whose source is apify (worked out from Shops)
 	ApifyActors           map[string]string  // market -> "owner~actor-name"
 	ApifyInputs           map[string]string  // market -> input JSON template with {{query}}
 	ApifyCurrencies       map[string]string  // market -> currency for prices given without one
@@ -108,11 +111,14 @@ type Config struct {
 	RedisURL    string // empty: in-memory counters (single instance only)
 
 	// Search cache (stale-while-revalidate).
-	CacheEnabled              bool
-	CacheFreshTTL             time.Duration
-	CachePartialTTL           time.Duration
-	CacheEmptyTTL             time.Duration
-	CacheStaleTTL             time.Duration
+	CacheEnabled    bool
+	CacheFreshTTL   time.Duration
+	CachePartialTTL time.Duration
+	CacheEmptyTTL   time.Duration
+	CacheStaleTTL   time.Duration
+	// CacheLastKnownTTL: how long a shop's latest results are kept to be
+	// shown, dated, when a live search of that shop fails (default 7 days).
+	CacheLastKnownTTL         time.Duration
 	CacheMinRefresh           time.Duration
 	CacheMaxEntries           int
 	CacheMaxBackgroundRefresh int
@@ -135,6 +141,45 @@ type Config struct {
 	MaxConcurrency  int
 	ShutdownTimeout time.Duration
 	LogLevel        string
+}
+
+// Shop sources (SHOP_<SHOP>_SOURCE).
+const (
+	SourceSerpAPI = "serpapi" // SerpApi's engine for the shop (amazon, ebay)
+	SourceApify   = "apify"   // the shop's Apify scraper (APIFY_<SHOP>_*)
+	SourceWeb     = "web"     // the web providers (SEARCH_PROVIDERS)
+	SourceOff     = "off"     // not searched
+)
+
+// Shop groups (SHOP_<SHOP>_GROUP): the asynchronous search answers first
+// when the fast shops are done (step 14b part 3).
+const (
+	GroupFast = "fast"
+	GroupSlow = "slow"
+)
+
+// ShopRule is how one shop is searched.
+type ShopRule struct {
+	Source  string
+	Timeout time.Duration // how long one search of this shop may take
+	Group   string
+}
+
+type shopDefault struct {
+	timeout time.Duration
+	group   string
+}
+
+// shopDefaults are the time limits and groups agreed with the owner
+// (2026-11-09) for the known shops; SHOP_<SHOP>_TIMEOUT / _GROUP change
+// them. A shop searched through the web providers gets the time of the
+// whole web chain instead.
+var shopDefaults = map[string]shopDefault{
+	"amazon":     {15 * time.Second, GroupFast},
+	"ebay":       {15 * time.Second, GroupFast},
+	"aliexpress": {60 * time.Second, GroupSlow},
+	"temu":       {45 * time.Second, GroupSlow},
+	"shein":      {30 * time.Second, GroupSlow},
 }
 
 // Load reads the environment. Required: the AUTH_* settings and the
@@ -212,6 +257,7 @@ func LoadFrom(lookup Lookup) (Config, error) {
 		CachePartialTTL:           parse(getenv, &errs, "CACHE_PARTIAL_TTL", 10*time.Minute, time.ParseDuration),
 		CacheEmptyTTL:             parse(getenv, &errs, "CACHE_EMPTY_TTL", 30*time.Minute, time.ParseDuration),
 		CacheStaleTTL:             parse(getenv, &errs, "CACHE_STALE_TTL", 72*time.Hour, time.ParseDuration),
+		CacheLastKnownTTL:         parse(getenv, &errs, "CACHE_LAST_KNOWN_TTL", 7*24*time.Hour, time.ParseDuration),
 		CacheMinRefresh:           parse(getenv, &errs, "CACHE_MIN_REFRESH", 10*time.Minute, time.ParseDuration),
 		CacheMaxEntries:           parse(getenv, &errs, "CACHE_MAX_ENTRIES", 10000, strconv.Atoi),
 		CacheMaxBackgroundRefresh: parse(getenv, &errs, "CACHE_MAX_BACKGROUND_REFRESH", 4, strconv.Atoi),
@@ -271,9 +317,113 @@ func LoadFrom(lookup Lookup) (Config, error) {
 	if cfg.SerpAPIEngine != "google_shopping" && cfg.SerpAPIEngine != "google" {
 		errs = append(errs, fmt.Errorf("SERPAPI_ENGINE: %q must be google_shopping or google", cfg.SerpAPIEngine))
 	}
+	// The old shop lists still say which shops use a dedicated source when
+	// no SHOP_<SHOP>_SOURCE is set: APIFY_MARKETS and SERPAPI_MARKETS.
+	// Amazon and eBay go to SerpApi's own engines by default once a key is
+	// set (direct product links and prices instead of Google Shopping).
+	defaultSerpMarkets := ""
+	if cfg.SerpAPIKey != "" {
+		defaultSerpMarkets = "amazon,ebay"
+	}
+	// Unlike other settings, an empty SERPAPI_MARKETS= means "none".
+	serpMarkets, set := lookup("SERPAPI_MARKETS")
+	if !set {
+		serpMarkets = defaultSerpMarkets
+	}
+	serpList := splitList(strings.ToLower(serpMarkets))
+	apifyList := cfg.ApifyMarkets
+	for _, m := range serpList {
+		if slices.Contains(apifyList, m) {
+			errs = append(errs, fmt.Errorf("%s is in both SERPAPI_MARKETS and APIFY_MARKETS", m))
+		}
+	}
+
+	var err error
+	if cfg.Catalog, cfg.MarketsJSON, cfg.MarketsSource, err = loadCatalog(getenv("MARKETS"), cfg.MarketsFile); err != nil {
+		errs = append(errs, err)
+	} else {
+		for _, m := range slices.Concat(apifyList, serpList) {
+			if !cfg.Catalog.HasMarket(m) {
+				errs = append(errs, fmt.Errorf("%s is in APIFY_MARKETS or SERPAPI_MARKETS but not a shop in MARKETS", m))
+			}
+		}
+	}
+
+	// The web providers are tried one after another, so a shop searched
+	// through them needs the time of the whole chain.
+	var chain time.Duration
+	for _, p := range cfg.SearchProviders {
+		if p == "serpapi" {
+			chain += cfg.SerpAPITimeout
+		} else {
+			chain += cfg.ProviderAttemptTimeout
+		}
+	}
+
+	// Rules per shop (step 14b): source, time limit, group.
+	cfg.Shops = map[string]ShopRule{}
+	cfg.ApifyMarkets, cfg.SerpAPIMarkets = nil, nil
+	var shops []string
+	if cfg.Catalog != nil {
+		shops = cfg.Catalog.Markets()
+	}
+	for _, m := range shops {
+		key := "SHOP_" + strings.ToUpper(m)
+		src := strings.ToLower(strings.TrimSpace(getenv(key + "_SOURCE")))
+		if src == "" {
+			switch {
+			case slices.Contains(apifyList, m):
+				src = SourceApify
+			case slices.Contains(serpList, m):
+				src = SourceSerpAPI
+			default:
+				src = SourceWeb
+			}
+		}
+		def := shopDefaults[m]
+		switch src {
+		case SourceSerpAPI:
+			switch {
+			case m != "amazon" && m != "ebay":
+				errs = append(errs, fmt.Errorf("%s_SOURCE: SerpApi has a dedicated engine only for amazon and ebay", key))
+			case cfg.SerpAPIKey == "":
+				errs = append(errs, fmt.Errorf("SERPAPI_KEY is required when %s's source is serpapi", m))
+			}
+			if def.timeout == 0 {
+				def = shopDefault{timeout: 15 * time.Second, group: GroupFast}
+			}
+			cfg.SerpAPIMarkets = append(cfg.SerpAPIMarkets, m)
+		case SourceApify:
+			if def.timeout == 0 {
+				def.timeout = cfg.ApifyTimeout
+			}
+			cfg.ApifyMarkets = append(cfg.ApifyMarkets, m)
+		case SourceWeb:
+			def.timeout = chain
+		case SourceOff:
+		default:
+			errs = append(errs, fmt.Errorf("%s_SOURCE: %q must be serpapi, apify, web or off", key, src))
+		}
+		if def.group == "" {
+			def.group = GroupSlow
+		}
+		rule := ShopRule{
+			Source:  src,
+			Timeout: parse(getenv, &errs, key+"_TIMEOUT", def.timeout, time.ParseDuration),
+			Group:   strings.ToLower(strings.TrimSpace(env(key+"_GROUP", def.group))),
+		}
+		if src != SourceOff && (rule.Timeout < time.Second || rule.Timeout > 300*time.Second) {
+			errs = append(errs, fmt.Errorf("%s_TIMEOUT must be between 1s and 300s", key))
+		}
+		if rule.Group != GroupFast && rule.Group != GroupSlow {
+			errs = append(errs, fmt.Errorf("%s_GROUP: %q must be fast or slow", key, rule.Group))
+		}
+		cfg.Shops[m] = rule
+	}
+
 	if len(cfg.ApifyMarkets) > 0 {
 		if cfg.ApifyToken == "" {
-			errs = append(errs, errors.New("APIFY_TOKEN is required when APIFY_MARKETS is set"))
+			errs = append(errs, errors.New("APIFY_TOKEN is required when a shop's source is apify"))
 		}
 		if cfg.ApifyMaxItems <= 0 || cfg.ApifyTimeout <= 0 || cfg.ApifyTimeout > 300*time.Second {
 			errs = append(errs, errors.New("APIFY_MAX_ITEMS must be positive and APIFY_TIMEOUT between 1s and 300s"))
@@ -301,65 +451,17 @@ func LoadFrom(lookup Lookup) (Config, error) {
 			}
 		}
 	}
-	// Amazon and eBay go to SerpApi's own engines by default once a key is
-	// set (direct product links and prices instead of Google Shopping).
-	defaultSerpMarkets := ""
-	if cfg.SerpAPIKey != "" {
-		defaultSerpMarkets = "amazon,ebay"
-	}
-	// Unlike other settings, an empty SERPAPI_MARKETS= means "none".
-	serpMarkets, set := lookup("SERPAPI_MARKETS")
-	if !set {
-		serpMarkets = defaultSerpMarkets
-	}
-	cfg.SerpAPIMarkets = splitList(strings.ToLower(serpMarkets))
-	for _, m := range cfg.SerpAPIMarkets {
-		switch {
-		case m != "amazon" && m != "ebay":
-			errs = append(errs, fmt.Errorf("SERPAPI_MARKETS: %q has no dedicated SerpApi engine (supported: amazon, ebay)", m))
-		case cfg.SerpAPIKey == "":
-			errs = append(errs, errors.New("SERPAPI_KEY is required when SERPAPI_MARKETS is set"))
-		case slices.Contains(cfg.ApifyMarkets, m):
-			errs = append(errs, fmt.Errorf("%s is in both SERPAPI_MARKETS and APIFY_MARKETS", m))
-		}
-	}
 
-	var err error
-	if cfg.Catalog, cfg.MarketsJSON, cfg.MarketsSource, err = loadCatalog(getenv("MARKETS"), cfg.MarketsFile); err != nil {
-		errs = append(errs, err)
-	} else {
-		for _, m := range slices.Concat(cfg.ApifyMarkets, cfg.SerpAPIMarkets) {
-			if !cfg.Catalog.HasMarket(m) {
-				errs = append(errs, fmt.Errorf("%s is in APIFY_MARKETS or SERPAPI_MARKETS but not a shop in MARKETS", m))
-			}
+	// A waiting search ends when the slowest shop's time is up; there is no
+	// backup source to wait for any more (the last known results are read
+	// from the cache).
+	var longest time.Duration
+	for _, r := range cfg.Shops {
+		if r.Source != SourceOff {
+			longest = max(longest, r.Timeout)
 		}
 	}
-
-	// Give the whole search enough time for every provider in the chain to
-	// get its full attempt: a dedicated source (Apify run or SerpApi
-	// engine), then each web provider.
-	// Shops are searched in parallel, so the longest path counts: the web
-	// chain, or a dedicated source plus one web attempt after it fails.
-	var chain time.Duration
-	for _, p := range cfg.SearchProviders {
-		if p == "serpapi" {
-			chain += cfg.SerpAPITimeout
-		} else {
-			chain += cfg.ProviderAttemptTimeout
-		}
-	}
-	var dedicated time.Duration
-	if len(cfg.ApifyMarkets) > 0 {
-		dedicated = cfg.ApifyTimeout
-	}
-	if len(cfg.SerpAPIMarkets) > 0 {
-		dedicated = max(dedicated, cfg.SerpAPITimeout)
-	}
-	if dedicated > 0 {
-		dedicated += cfg.ProviderAttemptTimeout
-	}
-	need := 2*time.Second + max(chain, dedicated)
-	cfg.SearchTimeout = max(cfg.SearchTimeout, need)
+	cfg.SearchTimeout = max(cfg.SearchTimeout, longest+2*time.Second)
 	if cfg.ProviderAttemptTimeout <= 0 || cfg.SerpAPITimeout <= 0 || cfg.SearchTimeout <= 0 {
 		errs = append(errs, errors.New("PROVIDER_ATTEMPT_TIMEOUT, SERPAPI_TIMEOUT and SEARCH_TIMEOUT must be positive"))
 	}
@@ -371,6 +473,8 @@ func LoadFrom(lookup Lookup) (Config, error) {
 			errs = append(errs, errors.New("CACHE_*_TTL must be positive"))
 		} else if cfg.CacheFreshTTL > cfg.CacheStaleTTL {
 			errs = append(errs, errors.New("CACHE_FRESH_TTL must not be longer than CACHE_STALE_TTL"))
+		} else if cfg.CacheLastKnownTTL < cfg.CacheStaleTTL {
+			errs = append(errs, errors.New("CACHE_LAST_KNOWN_TTL must not be shorter than CACHE_STALE_TTL"))
 		}
 		if cfg.CacheMaxEntries <= 0 || cfg.CacheMaxBackgroundRefresh <= 0 {
 			errs = append(errs, errors.New("CACHE_MAX_ENTRIES and CACHE_MAX_BACKGROUND_REFRESH must be positive"))

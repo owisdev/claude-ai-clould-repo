@@ -349,3 +349,70 @@ func TestSearchRemovesDuplicateProducts(t *testing.T) {
 		t.Errorf("second temu = %+v", temu[1])
 	}
 }
+
+// slowFor sleeps for the listed markets until ctx ends, others answer.
+type slowFor struct {
+	fakeProvider
+	slow map[string]bool
+}
+
+func (s *slowFor) Search(ctx context.Context, q Query) ([]Product, error) {
+	if s.slow[q.Targets[0].Market] {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return s.fakeProvider.Search(ctx, q)
+}
+
+func TestSearchShopRules(t *testing.T) {
+	cat, err := markets.Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cat, err = cat.WithProviders(map[string]string{"shein": OffProvider})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &slowFor{slow: map[string]bool{"temu": true}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	svc := NewService(cat, map[string]Provider{"web": p}, Options{
+		Timeout:  5 * time.Second,
+		Timeouts: map[string]time.Duration{"temu": 50 * time.Millisecond},
+	}, log)
+
+	start := time.Now()
+	res, err := svc.Search(context.Background(), Request{Title: "usb hub", Country: "jor"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took > 2*time.Second {
+		t.Errorf("search took %v; temu's own limit (50ms) should end it", took)
+	}
+	want := map[string]string{"amazon": StatusOK, "aliexpress": StatusOK, "temu": StatusError, "shein": StatusOff}
+	for m, w := range want {
+		if res.Markets[m] != w || res.Shops[m].Status != w {
+			t.Errorf("%s: markets %q shops %+v, want %q", m, res.Markets[m], res.Shops[m], w)
+		}
+	}
+	if s := res.Shops["amazon"]; s.Source != "fake" || s.FetchedAt == nil || s.Cached {
+		t.Errorf("amazon details = %+v", s)
+	}
+	if res.Shops["temu"].FetchedAt != nil {
+		t.Error("a failed shop has no fetch date")
+	}
+
+	// Only some shops.
+	res, err = svc.Search(context.Background(), Request{Title: "usb hub", Country: "jor", Markets: []string{"amazon"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Markets) != 1 || res.Markets["amazon"] != StatusOK {
+		t.Errorf("markets = %v, want only amazon", res.Markets)
+	}
+
+	// Every shop off or failing: nothing answered.
+	res, err = svc.Search(context.Background(), Request{Title: "usb hub", Country: "jor", Markets: []string{"temu", "shein"}})
+	if !errors.Is(err, ErrAllFailed) {
+		t.Errorf("err = %v, want ErrAllFailed (%v)", err, res.Markets)
+	}
+}

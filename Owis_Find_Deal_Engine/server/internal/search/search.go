@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -72,7 +73,26 @@ const (
 	StatusOK        = "ok"
 	StatusNoResults = "no_results" // searched fine, nothing matched
 	StatusError     = "error"
+	StatusOff       = "off" // the shop is turned off (SHOP_<SHOP>_SOURCE=off)
+	// StatusLastKnown: the live search of the shop failed or ran out of
+	// time; its latest results from the cache are shown, with their date.
+	StatusLastKnown = "last_known"
 )
+
+// OffProvider is the catalog provider name of a shop that is turned off.
+const OffProvider = "off"
+
+// ShopInfo describes how one shop was answered.
+type ShopInfo struct {
+	Status string `json:"status"`
+	// Source is what answered: "serpapi-amazon", "apify", "serpapi>searxng".
+	Source string `json:"source,omitempty"`
+	// FetchedAt is when this shop's results were fetched (older than the
+	// search for cached and last known results).
+	FetchedAt *time.Time `json:"fetched_at,omitempty"`
+	TookMS    int64      `json:"took_ms"`
+	Cached    bool       `json:"cached"`
+}
 
 // PartialError is returned by a provider that searched several marketplaces
 // in one call and did not cover all of them. Products holds the results it
@@ -104,6 +124,9 @@ type Request struct {
 	Country string
 	// Refresh asks for live results instead of cached ones (pull to refresh).
 	Refresh bool
+	// Markets limits the search to these shops of the country (the cache
+	// searches only the shops it has no answer for); empty = all.
+	Markets []string
 }
 
 // Result is the merged search response.
@@ -112,7 +135,10 @@ type Result struct {
 	Country string            `json:"country"`
 	Results []Product         `json:"results"`
 	Markets map[string]string `json:"markets"`
-	TookMS  int64             `json:"took_ms"`
+	// Shops gives each shop's status, source, date of its results and
+	// time taken.
+	Shops  map[string]ShopInfo `json:"shops"`
+	TookMS int64               `json:"took_ms"`
 	// FetchedAt is when the results were fetched from the providers; for
 	// cached answers it tells the user how old the prices are.
 	FetchedAt time.Time `json:"fetched_at"`
@@ -139,9 +165,12 @@ func NormalizeTitle(title string) string {
 
 // Options tunes the service.
 type Options struct {
-	Timeout        time.Duration // whole search
-	MaxConcurrency int           // provider calls in flight per search
-	PerMarket      int           // results kept per marketplace (best first)
+	Timeout time.Duration // whole search
+	// Timeouts bounds the search of each shop (by market id); a shop
+	// without one has the whole search's time.
+	Timeouts       map[string]time.Duration
+	MaxConcurrency int // provider calls in flight per search
+	PerMarket      int // results kept per marketplace (best first)
 }
 
 // Service runs searches. Safe for concurrent use.
@@ -177,6 +206,7 @@ type outcome struct {
 	job      job
 	products []Product
 	err      error
+	took     time.Duration
 }
 
 // Search validates the input, searches every marketplace of the country with
@@ -194,6 +224,16 @@ func (s *Service) Search(ctx context.Context, req Request) (*Result, error) {
 		return nil, ErrUnknownCountry
 	}
 
+	targets := country.Targets
+	if len(req.Markets) > 0 {
+		targets = make([]markets.Target, 0, len(req.Markets))
+		for _, t := range country.Targets {
+			if slices.Contains(req.Markets, t.Market) {
+				targets = append(targets, t)
+			}
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, s.opts.Timeout)
 	defer cancel()
 
@@ -201,10 +241,11 @@ func (s *Service) Search(ctx context.Context, req Request) (*Result, error) {
 		Query:   title,
 		Country: country.Code,
 		Results: []Product{},
-		Markets: make(map[string]string, len(country.Targets)),
+		Markets: make(map[string]string, len(targets)),
+		Shops:   make(map[string]ShopInfo, len(targets)),
 	}
 
-	jobs := s.planJobs(country.Targets, result)
+	jobs := s.planJobs(targets, result)
 	q := Query{Title: title, Region: country.Region, ShoppingRegion: country.ShoppingRegion, Language: country.Language}
 	for o := range s.runPool(ctx, q, jobs) {
 		var failed map[string]error
@@ -229,6 +270,7 @@ func (s *Service) Search(ctx context.Context, req Request) (*Result, error) {
 			} else {
 				result.Markets[t.Market] = StatusNoResults // until a product shows up
 			}
+			result.Shops[t.Market] = ShopInfo{Source: o.job.provider.Name(), TookMS: o.took.Milliseconds()}
 		}
 		result.Results = append(result.Results, o.products...)
 	}
@@ -239,17 +281,35 @@ func (s *Service) Search(ctx context.Context, req Request) (*Result, error) {
 	}
 
 	result.Results = dedupe(result.Results)
-	sortProducts(result.Results, country.Targets)
+	SortProducts(result.Results, country.Targets)
 	result.Results = limitPerMarket(result.Results, s.opts.PerMarket)
 	result.TookMS = time.Since(start).Milliseconds()
 	result.FetchedAt = time.Now().UTC()
-
-	for _, status := range result.Markets {
-		if status != StatusError {
-			return result, nil
+	for m, status := range result.Markets {
+		info := result.Shops[m]
+		info.Status = status
+		if status == StatusOK || status == StatusNoResults {
+			at := result.FetchedAt
+			info.FetchedAt = &at
 		}
+		result.Shops[m] = info
+	}
+
+	if !AllFailed(result.Markets) {
+		return result, nil
 	}
 	return result, ErrAllFailed
+}
+
+// AllFailed reports whether no shop answered: every shop is an error (or
+// off). A search where every shop is off has nothing to answer either.
+func AllFailed(statuses map[string]string) bool {
+	for _, status := range statuses {
+		if status != StatusError && status != StatusOff {
+			return false
+		}
+	}
+	return true
 }
 
 // planJobs groups the targets into provider calls. Targets whose provider
@@ -258,6 +318,10 @@ func (s *Service) planJobs(targets []markets.Target, result *Result) []job {
 	var jobs []job
 	batched := make(map[string]int) // provider name -> index in jobs
 	for _, t := range targets {
+		if t.Provider == OffProvider {
+			result.Markets[t.Market] = StatusOff
+			continue
+		}
 		p, ok := s.providers[t.Provider]
 		if !ok {
 			result.Markets[t.Market] = StatusError
@@ -319,14 +383,25 @@ func (s *Service) runJob(ctx context.Context, q Query, j job) (o outcome) {
 		o.err = err
 		return o
 	}
+	var limit time.Duration
+	for _, t := range j.targets {
+		limit = max(limit, s.opts.Timeouts[t.Market])
+	}
+	if limit > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, limit)
+		defer cancel()
+	}
 	q.Targets = j.targets
+	start := time.Now()
 	o.products, o.err = j.provider.Search(ctx, q)
+	o.took = time.Since(start)
 	return o
 }
 
-// sortProducts orders results by rank, then by the country's market order,
+// SortProducts orders results by rank, then by the country's market order,
 // so the first results interleave the best match of every marketplace.
-func sortProducts(products []Product, targets []markets.Target) {
+func SortProducts(products []Product, targets []markets.Target) {
 	order := make(map[string]int, len(targets))
 	for i, t := range targets {
 		order[t.Market] = i

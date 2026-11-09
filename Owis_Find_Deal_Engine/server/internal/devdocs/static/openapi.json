@@ -279,19 +279,31 @@
         },
         "required": ["market", "title", "link", "position", "provider"]
       },
+      "ShopInfo": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "enum": ["ok", "no_results", "error", "off", "last_known"] },
+          "source": { "type": "string", "description": "What answered, e.g. serpapi-amazon or apify." },
+          "fetched_at": { "type": "string", "format": "date-time", "description": "When this shop's results were fetched (missing for error and off)." },
+          "took_ms": { "type": "integer", "description": "Time of this shop's live search (0 when it came from the cache)." },
+          "cached": { "type": "boolean", "description": "The shop's results came from the cache (also for last_known)." }
+        },
+        "required": ["status", "took_ms", "cached"]
+      },
       "SearchResult": {
         "type": "object",
         "properties": {
           "query": { "type": "string" },
           "country": { "type": "string" },
           "results": { "type": ["array", "null"], "items": { "$ref": "#/components/schemas/Product" } },
-          "markets": { "type": "object", "additionalProperties": { "type": "string", "enum": ["ok", "no_results", "error"] }, "description": "Status per marketplace." },
+          "markets": { "type": "object", "additionalProperties": { "type": "string", "enum": ["ok", "no_results", "error", "off", "last_known"] }, "description": "Status per marketplace: ok, no_results, error (that shop failed and has no recent results), off (the shop is turned off), last_known (the live search failed; the shop's latest results are shown, see shops.fetched_at)." },
+          "shops": { "type": "object", "additionalProperties": { "$ref": "#/components/schemas/ShopInfo" }, "description": "Details per marketplace: status, source, date of its results, time taken." },
           "took_ms": { "type": "integer" },
-          "fetched_at": { "type": "string", "format": "date-time", "description": "When the prices were fetched (for cached answers: how old they are)." },
+          "fetched_at": { "type": "string", "format": "date-time", "description": "When the prices were fetched; with several dates (shops are cached separately), the oldest one." },
           "cached": { "type": "boolean" },
           "stale": { "type": "boolean", "description": "A cached answer past its fresh period; a background refresh has started." }
         },
-        "required": ["query", "country", "results", "markets", "took_ms", "fetched_at", "cached", "stale"]
+        "required": ["query", "country", "results", "markets", "shops", "took_ms", "fetched_at", "cached", "stale"]
       },
       "Job": {
         "type": "object",

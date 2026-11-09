@@ -42,6 +42,7 @@ var runtimeKeys = []string{
 	"CACHE_PARTIAL_TTL",
 	"CACHE_EMPTY_TTL",
 	"CACHE_STALE_TTL",
+	"CACHE_LAST_KNOWN_TTL",
 	"CACHE_MIN_REFRESH",
 	"CACHE_MAX_BACKGROUND_REFRESH",
 	"CACHE_GENERATION",
@@ -59,6 +60,9 @@ var runtimeKeys = []string{
 // apifyMarketKey matches the per-shop Apify settings, e.g. APIFY_TEMU_INPUT.
 var apifyMarketKey = regexp.MustCompile(`^APIFY_[A-Z0-9][A-Z0-9_]*_(ACTOR|INPUT|CURRENCY|MAX_ITEMS|RUN_COST_USD)$`)
 
+// shopKey matches the rules per shop, e.g. SHOP_TEMU_SOURCE (step 14b).
+var shopKey = regexp.MustCompile(`^SHOP_[A-Z0-9][A-Z0-9_]*_(SOURCE|TIMEOUT|GROUP)$`)
+
 // secretKeys are runtime settings that are stored encrypted and never
 // shown again once set.
 var secretKeys = []string{"SERPAPI_KEY", "APIFY_TOKEN"}
@@ -66,14 +70,14 @@ var secretKeys = []string{"SERPAPI_KEY", "APIFY_TOKEN"}
 // Runtime reports whether key is a runtime setting (kept in the database
 // when there is one) rather than a bootstrap one (environment only).
 func Runtime(key string) bool {
-	return slices.Contains(runtimeKeys, key) || apifyMarketKey.MatchString(key)
+	return slices.Contains(runtimeKeys, key) || apifyMarketKey.MatchString(key) || shopKey.MatchString(key)
 }
 
 // Secret reports whether the runtime setting key holds a secret.
 func Secret(key string) bool { return slices.Contains(secretKeys, key) }
 
 // RuntimeKeys returns the runtime settings with a fixed name (the per-shop
-// APIFY_<SHOP>_* settings are not listed).
+// APIFY_<SHOP>_* and SHOP_<SHOP>_* settings are not listed).
 func RuntimeKeys() []string { return slices.Clone(runtimeKeys) }
 
 // RuntimeFromEnv returns the runtime settings found in environ

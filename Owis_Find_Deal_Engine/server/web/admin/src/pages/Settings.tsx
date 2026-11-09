@@ -9,26 +9,27 @@ const HELP: Record<string, string> = {
   SEARXNG_MAX_PAGES: "Result pages read from SearXNG",
   SERPAPI_KEY: "SerpApi key (secret)",
   SERPAPI_ENGINE: "google_shopping (prices) or google (web)",
-  SERPAPI_MARKETS: "Shops searched by SerpApi's own engines (amazon, ebay); empty = none",
+  SERPAPI_MARKETS: "Old list: shops whose source is serpapi when SHOP_<SHOP>_SOURCE is not set (amazon, ebay); empty = none",
   SERPAPI_TIMEOUT: "Max wait for SerpApi, e.g. 25s",
   SERPAPI_SEARCH_COST_USD: "Estimated cost of one SerpApi search (free plan: 0)",
-  PROVIDER_ATTEMPT_TIMEOUT: "Time each web provider gets before the next one",
+  PROVIDER_ATTEMPT_TIMEOUT: "Time each web provider gets before the next one (shops with source web)",
   PROVIDER_FAILURE_THRESHOLD: "Failures in a row before a source is skipped",
   PROVIDER_COOLDOWN: "How long a failing source is skipped",
   APIFY_TOKEN: "Apify API token (secret)",
-  APIFY_MARKETS: "Shops searched by Apify scrapers, e.g. aliexpress,temu,shein",
+  APIFY_MARKETS: "Old list: shops whose source is apify when SHOP_<SHOP>_SOURCE is not set, e.g. aliexpress,temu",
   APIFY_MAX_ITEMS: "Results per scraper run (default for every shop)",
-  APIFY_TIMEOUT: "Max wait for one scraper run, e.g. 90s",
+  APIFY_TIMEOUT: "Time limit of an Apify shop without a default or SHOP_<SHOP>_TIMEOUT",
   APIFY_MAX_CHARGE_USD: "Max cost of one pay-per-event run",
-  APIFY_EMPTY_FALLBACK: "true: a scraper with nothing relevant falls back to web search",
+  APIFY_EMPTY_FALLBACK: "No effect since step 14b (no backup source any more)",
   SEARCH_COMBINED: "true: one provider call per search (cheapest)",
   RESULTS_PER_MARKET: "Results kept per shop",
-  SEARCH_TIMEOUT: "Whole search timeout (raised automatically to fit the chain)",
+  SEARCH_TIMEOUT: "Whole waiting search (raised automatically to the slowest shop's limit + 2s)",
   SEARCH_MAX_CONCURRENCY: "Provider calls in parallel per search",
   CACHE_ENABLED: "Search cache on / off",
-  CACHE_FRESH_TTL: "Answers served as fresh, e.g. 48h",
-  CACHE_PARTIAL_TTL: "Fresh time when a shop failed",
-  CACHE_EMPTY_TTL: "Fresh time when nothing was found",
+  CACHE_FRESH_TTL: "A shop's results served as fresh, e.g. 48h",
+  CACHE_PARTIAL_TTL: "No effect since step 14b (results are cached per shop, failures never)",
+  CACHE_EMPTY_TTL: "Fresh time of a shop that found nothing",
+  CACHE_LAST_KNOWN_TTL: "How long a shop's results are kept and shown, dated, when its live search fails (default 168h = 7 days)",
   CACHE_STALE_TTL: "Served (and refreshed in the background) until",
   CACHE_MIN_REFRESH: "Pull-to-refresh ignored for younger answers",
   CACHE_MAX_BACKGROUND_REFRESH: "Parallel background refreshes",
@@ -43,6 +44,7 @@ const HELP: Record<string, string> = {
 };
 
 const GROUPS: { title: string; match: (k: string) => boolean }[] = [
+  { title: "Shops: source, time limit, group", match: (k) => k.startsWith("SHOP_") },
   { title: "Sources: SerpApi and web search", match: (k) => /^(SEARCH_PROVIDERS|SEARXNG_|SERPAPI_|PROVIDER_)/.test(k) },
   { title: "Sources: Apify scrapers", match: (k) => k.startsWith("APIFY_") },
   { title: "Search", match: (k) => /^(SEARCH_|RESULTS_PER_MARKET)/.test(k) },
@@ -145,6 +147,9 @@ export function Settings() {
 
       <Card title="Add a setting">
         <p className="muted small">
+          Rules per shop: SHOP_&lt;SHOP&gt;_SOURCE (serpapi, apify, web or off), _TIMEOUT (e.g. 45s), _GROUP (fast or slow),
+          e.g. SHOP_SHEIN_SOURCE = off.
+          <br />
           Per-shop Apify settings: APIFY_&lt;SHOP&gt;_ACTOR, _INPUT, _CURRENCY, _MAX_ITEMS, _RUN_COST_USD (e.g. APIFY_TEMU_RUN_COST_USD).
         </p>
         <div className="row">

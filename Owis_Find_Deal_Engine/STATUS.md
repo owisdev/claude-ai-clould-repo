@@ -45,27 +45,90 @@ production runs on the Oracle VM, public at
 2026-11-08. ✅** GitHub `main`, the owner's PC and the VM in sync at
 `04da381` (VM server folder = `main`, image `666ab78`).
 
-**Start of the next session — owner picks from this list (2026-11-08):**
+**Step 14b — search rules redesign: planned 2026-11-09 (owner), see
+[PLAN.md](PLAN.md) step 14b.** Fast answer first: the app and agents
+use the asynchronous search (job filled per shop, Redis queue inside
+the server, webhooks `first_results` / `completed`), the admin test
+search stays synchronous. Decisions: A keep `POST /api/v1/search`,
+B last known results up to 7 days, C MCP waits 15 s, D queue in the
+same program; cache 48 h per shop; SHEIN off; paid Google Shopping
+backup removed.
+- **Part 1 — done by the owner 2026-11-09. ✅** `APIFY_MARKETS=aliexpress,temu`
+  (settings version 42; log: scrapers for aliexpress and temu only, still
+  `timeout 1m30s`). eBay **Production** keyset made (no account-deletion
+  question was asked); App ID + Cert ID stay with the owner until part 5.
+  Found while building part 2: a shop in no list goes to the web
+  providers, so since part 1 **SHEIN is searched through SerpApi Google
+  Shopping** (one extra SerpApi search per live search) until
+  `SHOP_SHEIN_SOURCE=off` is set after the part 2 deploy.
+- **Part 2 — built 2026-11-09 (branch `claude/dreamy-edison-wma6qw`):
+  rules per shop, cache per shop, last known results.** Owner decisions:
+  new status `last_known` + per-shop details (yes), countries share a
+  shop's results (yes), time limits amazon 15 s / ebay 15 s / aliexpress
+  60 s / temu 45 s (ok), SearXNG keeps running.
+  - *Rules per shop:* new runtime settings `SHOP_<SHOP>_SOURCE`
+    (`serpapi` / `apify` / `web` / `off`), `SHOP_<SHOP>_TIMEOUT`,
+    `SHOP_<SHOP>_GROUP` (`fast` / `slow`, used in part 3). Without
+    `_SOURCE` the old lists decide (`APIFY_MARKETS` → apify,
+    `SERPAPI_MARKETS` → serpapi, else web), so the deploy changes no
+    source by itself. Defaults: the agreed limits, shein 30 s; amazon and
+    ebay fast, others slow. Each shop has its own time limit; the waiting
+    search ends at the slowest + 2 s (production: 62 s instead of 100 s).
+    No backup source behind serpapi / apify shops any more (no paid
+    Google Shopping, no SearXNG). A shop that is `off` is not searched,
+    status `off`. Start log: one `shop rules` line per shop.
+  - *Cache per shop* (key `shop:v7:<shop>:…` = shop + site + source
+    setup + title; per region only for web shops and scrapers with
+    `{{country}}`): only shops without an answer are searched live;
+    countries share AliExpress, Temu and `amazon.com` (usa / jor). Fresh
+    48 h, stale 72 h, empty 30 min, failures never stored. New
+    `CACHE_LAST_KNOWN_TTL` (default 168h = 7 days): a shop whose live
+    search fails or runs out of time shows its latest results, status
+    `last_known`, with their date. A search where nothing new was fetched
+    counts as cached (free). `CACHE_PARTIAL_TTL` and
+    `APIFY_EMPTY_FALLBACK` have no effect any more. Old whole-search
+    entries are not read (each product's next search is live once, then
+    expire by themselves).
+  - *Response:* `markets` statuses `ok`, `no_results`, `error`, `off`,
+    `last_known`; new `shops` block per shop: `status`, `source`,
+    `fetched_at`, `took_ms`, `cached`; top `fetched_at` = oldest shop.
+    OpenAPI, MCP tool description / output schema, developer page,
+    README, `.env.example`, admin settings page (new "Shops" group, help
+    texts) updated. Admin test search: each shop within its own limit,
+    `off` shown.
+  - *Tested here:* unit tests (rules, defaults, wrong values; per-shop
+    time limit, off shops, part of the shops; cache: hit, shared between
+    countries, per-region not shared, only missing shops live,
+    last_known and its 7-day end, stale refresh of only the stale shop,
+    forced refresh, errors not stored, merged identical searches,
+    Redis store), race detector, admin web app build. End to end: the
+    real server binary with Redis and fake Firebase keys / SerpApi /
+    Apify: first search live (3 shops, shein `off`), again `HIT` with no
+    calls, `usa` searched only eBay live, Temu failing → `last_known`
+    with the first date, Temu too slow → cut at its limit (5 s in the
+    test) → `last_known`, new title with Temu slow → `error`, next search
+    only Temu live. Not run here: Docker build, Postgres store tests (CI
+    runs them).
+  - **Owner, next:** review and merge the PR → CI publishes the image →
+    on the VM `deploy/deploy.sh` → `settings set -by owner
+    SHOP_SHEIN_SOURCE off` → check the `shop rules` log lines → two test
+    searches through the public address (commands in the chat of
+    2026-11-09). Then **part 3** (jobs filled per shop + queue +
+    fast answer first).
+
+Next-session list (2026-11-08), updated 2026-11-09:
 1. **MCP test with real agents.** Connect Claude Code on the owner's PC
    to `https://globalprodsearch.dawirli.com/mcp` with the `owner-test`
    key, then a search from a chat (PLAN step 14 note).
-2. **Cost settings and scraper time limit** (admin panel through SSH):
-   - per-search costs (`SERPAPI_SEARCH_COST_USD`,
-     `APIFY_*_RUN_COST_USD`), so cost and budget figures stop showing
-     $0;
-   - `APIFY_TIMEOUT` to 75 s or less, so slow searches always finish
-     within Cloudflare's 100 s limit (see the step 4 entry).
-3. **Re-engineer the service's business rules (owner, 2026-11-08):**
-   which exact online shops to use, and for each the source, cost, time
-   and sync / async handling — "all this stuff" reviewed together
-   (builds on 2 and 4; to explain, decide with the owner, then build).
-4. **SHEIN.** No results three times now. Run its scraper by hand in
-   Apify to see whether it is broken; until then take SHEIN out of the
-   search (`APIFY_MARKETS`) to stop paying for empty runs.
+2. **Cost settings and scraper time limit: done by the owner
+   (2026-11-09). ✅** Note: Cloudflare's limit is **125 s**, not 100 s
+   (owner, 2026-11-09); with step 14b only the admin test search waits
+   for the whole search.
+3. **Business rules review → step 14b** (planned 2026-11-09, above).
+4. **SHEIN → step 14b.** Taken off until a working source is found:
+   `clearpath/…` empty three times, `axlymxp/…` under maintenance,
+   SearchApi.io ($40 / month minimum) to decide with D8.
 5. **Step 5:** admin two-factor login and verified email.
-
-Suggested order: **2 first** (a few minutes; removes the 100 s risk and
-makes cost numbers real before more test searches), then 3.
 
 **Step 14 — worked through one step at a time with the owner
 (2026-11-06): each step is explained, approved, built, then the next.**
@@ -249,7 +312,8 @@ makes cost numbers real before more test searches), then 3.
   shein `no_results` (open SHEIN item).
   **Step 4 — done 2026-11-08. ✅** `https://globalprodsearch.dawirli.com`
   is public; the panel stays reachable only through SSH until step 6.
-  **Open (seen in step 4): Cloudflare's 100 s limit.** On the Free plan
+  **Open (seen in step 4): Cloudflare's 100 s limit** (correction,
+  owner 2026-11-09: the limit is 125 s; `APIFY_TIMEOUT` set in item 2). On the Free plan
   Cloudflare waits at most 100 s for an answer (then `524`). On the VM
   the search timeout is `APIFY_TIMEOUT` (1m30s there) + 8 s + 2 s =
   100 s, so a very slow live search could be cut by Cloudflare first.
@@ -1296,6 +1360,22 @@ Please report:
   reset password, sign-in link) must use the Firebase Hosting domain and
   `linkDomain`, not Dynamic Links — see PLAN.md section 5.6. Not needed for
   the local test (the test token comes from `accounts:signUp`, no email).
+- **Scraping API instead of Apify scrapers (e.g. scrape.do; noted
+  2026-11-09, not checked now — owner).** It fetches any page through
+  rotating proxies with anti-bot bypass and optional browser rendering,
+  and returns raw HTML; we would write and maintain our own parser per
+  shop (Temu, SHEIN). Pricing seen: Hobby $29 / month (250k credits,
+  $0.11 / 1k), Pro $99, Business $249, Advanced $699. A hard page
+  (residential proxy + rendering) costs several credits (≈ 10–25, to
+  confirm), so ≈ $0.003 per search page vs $0.10 for Temu on Apify; but
+  "successful" means the page loaded, an empty page is still charged.
+  Worth it only above ≈ 200 live searches / month ($29 ÷ ≈ $0.155 Apify
+  per search), or when a shop's Apify scrapers keep breaking with no
+  replacement (SHEIN first). Risks: our parser breaks when the shop
+  changes its page; Temu may load results through protected background
+  calls, so the page may not contain them. First test when the time
+  comes: free trial, one Temu and one SHEIN search page — are the
+  products in the HTML?
 
 ## Open decisions (owner)
 

@@ -579,8 +579,9 @@ func mcpTools(cat *markets.Catalog) []map[string]any {
 			"name":  toolSearchProducts,
 			"title": "Search products across marketplaces",
 			"description": "Searches the marketplaces of one country for a product and returns the offers (title, price, currency, link) " +
-				"per marketplace, plus each marketplace's status (ok, no_results, error). A new search takes 20-60 s; the same search " +
-				"within 48 h comes from the cache at once (cached=true, fetched_at says how old the prices are) and is free. " +
+				"per marketplace, plus each marketplace's status (ok, no_results, error, off = shop turned off, last_known = the live search " +
+				"failed and the shop's latest results are shown; shops.<market>.fetched_at says how old). A new search takes 20-60 s; " +
+				"each marketplace's results are cached for 48 h, so the same search comes from the cache at once (cached=true) and is free. " +
 				"A live search counts once against the API key's daily allowance (quota shows what is left). Needs the scope \"search\".",
 			"inputSchema": map[string]any{
 				"type": "object",
@@ -598,12 +599,21 @@ func mcpTools(cat *markets.Catalog) []map[string]any {
 			"outputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"query":      str("the title searched"),
-					"country":    str("the country searched"),
-					"results":    map[string]any{"type": "array", "items": product},
-					"markets":    map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "status per marketplace: ok, no_results or error"},
+					"query":   str("the title searched"),
+					"country": str("the country searched"),
+					"results": map[string]any{"type": "array", "items": product},
+					"markets": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"},
+						"description": "status per marketplace: ok, no_results, error, off or last_known"},
+					"shops": map[string]any{"type": "object", "description": "details per marketplace", "additionalProperties": map[string]any{
+						"type": "object", "properties": map[string]any{
+							"status":     str("ok, no_results, error, off or last_known"),
+							"source":     str("what answered, e.g. serpapi-amazon or apify"),
+							"fetched_at": map[string]any{"type": "string", "format": "date-time", "description": "when this marketplace's results were fetched"},
+							"took_ms":    map[string]any{"type": "integer"},
+							"cached":     map[string]any{"type": "boolean"},
+						}}},
 					"took_ms":    map[string]any{"type": "integer"},
-					"fetched_at": map[string]any{"type": "string", "format": "date-time", "description": "when the prices were fetched"},
+					"fetched_at": map[string]any{"type": "string", "format": "date-time", "description": "when the prices were fetched (the oldest marketplace's date)"},
 					"cached":     map[string]any{"type": "boolean"},
 					"stale":      map[string]any{"type": "boolean", "description": "cached answer past its fresh period (refreshed in the background)"},
 					"quota": map[string]any{"type": "object", "description": "the API key's daily allowance after this search", "properties": map[string]any{
