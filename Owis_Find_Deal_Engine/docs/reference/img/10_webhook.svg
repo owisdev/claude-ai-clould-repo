@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 448" width="1100" height="448" role="img" aria-label="Webhook delivery and signature check">
+<title>Webhook delivery and signature check</title>
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5262"/></marker><marker id="arrS" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 L0 5 L10 10 z" fill="#4a5262"/></marker></defs>
+<rect width="1100" height="448" fill="#ffffff"/>
+<line x1="95.0" y1="66" x2="95.0" y2="432" stroke="#b9bfca" stroke-width="1.3" stroke-dasharray="4 4"/>
+<rect x="10.0" y="20" width="170" height="44" rx="10" fill="#e8f1fd" stroke="#2f6fd6" stroke-width="1.6"/>
+<text x="95.0" y="46.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#123a73" text-anchor="middle">admin panel</text>
+<line x1="398.3333333333333" y1="66" x2="398.3333333333333" y2="432" stroke="#b9bfca" stroke-width="1.3" stroke-dasharray="4 4"/>
+<rect x="313.3333333333333" y="20" width="170" height="44" rx="10" fill="#e6f6ee" stroke="#2a9a62" stroke-width="1.6"/>
+<text x="398.3333333333333" y="46.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#0f4a2d" text-anchor="middle">server</text>
+<line x1="701.6666666666666" y1="66" x2="701.6666666666666" y2="432" stroke="#b9bfca" stroke-width="1.3" stroke-dasharray="4 4"/>
+<rect x="616.6666666666666" y="20" width="170" height="44" rx="10" fill="#f1eafb" stroke="#7b52c7" stroke-width="1.6"/>
+<text x="701.6666666666666" y="46.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#3c2266" text-anchor="middle">Postgres</text>
+<line x1="1005.0" y1="66" x2="1005.0" y2="432" stroke="#b9bfca" stroke-width="1.3" stroke-dasharray="4 4"/>
+<rect x="920.0" y="20" width="170" height="44" rx="10" fill="#e8f1fd" stroke="#2f6fd6" stroke-width="1.6"/>
+<text x="1005.0" y="46.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#123a73" text-anchor="middle">client&#x27;s receiver</text>
+<path d="M 99.0 90 L 394.3333333333333 90" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="154.11666666666665" y="72.5" width="185.10000000000002" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="246.66666666666666" y="84" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">API clients → Webhook secret</text>
+<path d="M 402.3333333333333 124 L 697.6666666666666 124" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="432.15" y="106.5" width="235.70000000000002" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="550.0" y="118" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">store random salt (32 bytes), prefix</text>
+<path d="M 394.3333333333333 158 L 99.0 158" fill="none" stroke="#4a5262" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#arr)"/>
+<rect x="185.74166666666665" y="140.5" width="121.85000000000001" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="246.66666666666666" y="152" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">whsec_… shown once</text>
+<rect x="163.33333333333331" y="176" width="470" height="24" rx="6" fill="#fffbe6" stroke="#c9a21a" stroke-width="1.6"/>
+<text x="398.3333333333333" y="193" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#5a4706" text-anchor="middle">secret = HMAC(key from SETTINGS_ENCRYPTION_KEY, salt) — never stored</text>
+<line x1="20" y1="222" x2="1080" y2="222" stroke="#d6dae1" stroke-width="1"/>
+<rect x="346.7625" y="214.5" width="406.475" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="550.0" y="226" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">later: a job with webhook_url ends (or its fast shops are done)</text>
+<path d="M 402.3333333333333 256 L 1001.0 256" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="479.45416666666665" y="238.5" width="444.425" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="701.6666666666666" y="250" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">POST body = job JSON   X-OFD-Event · X-OFD-Delivery · X-OFD-Signature</text>
+<rect x="622.0" y="274" width="470" height="24" rx="6" fill="#fffbe6" stroke="#c9a21a" stroke-width="1.6"/>
+<text x="857.0" y="291" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#5a4706" text-anchor="middle">v1 = HMAC-SHA256(secret, t + &quot;.&quot; + raw body); refuse t older than 5 min</text>
+<path d="M 1001.0 320 L 402.3333333333333 320" fill="none" stroke="#4a5262" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#arr)"/>
+<rect x="612.2791666666666" y="302.5" width="178.775" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="701.6666666666666" y="314" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">2xx within 10 s → delivered</text>
+<path d="M 402.3333333333333 354 L 1001.0 354" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="479.45416666666665" y="336.5" width="444.425" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="701.6666666666666" y="348" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">no 2xx / network error / 408 / 429 / 5xx → retry after 5 s, then 30 s</text>
+<rect x="208.33333333333331" y="372" width="380" height="24" rx="6" fill="#fffbe6" stroke="#c9a21a" stroke-width="1.6"/>
+<text x="398.3333333333333" y="389" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#5a4706" text-anchor="middle">job shows webhook.status and webhook.first_results.status</text>
+</svg>

@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 690" width="1100" height="690" role="img" aria-label="Architecture overview">
+<title>Architecture overview</title>
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5262"/></marker><marker id="arrS" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 L0 5 L10 10 z" fill="#4a5262"/></marker></defs>
+<rect width="1100" height="690" fill="#ffffff"/>
+<text x="550" y="30" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#1f2430" text-anchor="middle">Global Product Search — who talks to whom</text>
+<rect x="40" y="55" width="220" height="70" rx="10" fill="#e8f1fd" stroke="#2f6fd6" stroke-width="1.6"/>
+<text x="150.0" y="73.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#123a73" text-anchor="middle">Dawirli app users</text>
+<text x="150.0" y="91.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#123a73" text-anchor="middle">Firebase login token</text>
+<text x="150.0" y="106.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#123a73" text-anchor="middle">(JWT)</text>
+<rect x="300" y="55" width="220" height="70" rx="10" fill="#e8f1fd" stroke="#2f6fd6" stroke-width="1.6"/>
+<text x="410.0" y="73.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#123a73" text-anchor="middle">API clients</text>
+<text x="410.0" y="91.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#123a73" text-anchor="middle">own servers</text>
+<text x="410.0" y="106.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#123a73" text-anchor="middle">API key ofd_live_…</text>
+<rect x="560" y="55" width="220" height="70" rx="10" fill="#e8f1fd" stroke="#2f6fd6" stroke-width="1.6"/>
+<text x="670.0" y="73.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#123a73" text-anchor="middle">AI agents</text>
+<text x="670.0" y="91.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#123a73" text-anchor="middle">MCP: POST /mcp</text>
+<text x="670.0" y="106.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#123a73" text-anchor="middle">API key</text>
+<rect x="820" y="55" width="220" height="70" rx="10" fill="#e8f1fd" stroke="#2f6fd6" stroke-width="1.6"/>
+<text x="930.0" y="73.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#123a73" text-anchor="middle">Owner / admin</text>
+<text x="930.0" y="91.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#123a73" text-anchor="middle">browser, /admin/</text>
+<text x="930.0" y="106.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#123a73" text-anchor="middle">via SSH tunnel</text>
+<rect x="40" y="150" width="900" height="90" rx="14" fill="none" stroke="#e08a1e" stroke-width="1.4" stroke-dasharray="6 5"/>
+<text x="926" y="170" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#e08a1e" text-anchor="end">Cloudflare (dawirli.com)</text>
+<rect x="60" y="178" width="260" height="50" rx="10" fill="#fff2e2" stroke="#e08a1e" stroke-width="1.6"/>
+<text x="190.0" y="193.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#6b3d06" text-anchor="middle">DNS + HTTPS</text>
+<text x="190.0" y="211.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#6b3d06" text-anchor="middle">globalprodsearch.dawirli.com</text>
+<rect x="340" y="178" width="260" height="50" rx="10" fill="#fff2e2" stroke="#e08a1e" stroke-width="1.6"/>
+<text x="470.0" y="193.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#6b3d06" text-anchor="middle">WAF rule</text>
+<text x="470.0" y="211.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#6b3d06" text-anchor="middle">/admin blocked (403)</text>
+<rect x="620" y="178" width="300" height="50" rx="10" fill="#fff2e2" stroke="#e08a1e" stroke-width="1.6"/>
+<text x="770.0" y="193.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#6b3d06" text-anchor="middle">Tunnel ofd-prod</text>
+<text x="770.0" y="211.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#6b3d06" text-anchor="middle">no open web port on the VM</text>
+<path d="M 150 125 L 150 176" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<path d="M 410 125 L 410 176" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<path d="M 670 125 L 670 176" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="40" y="265" width="1020" height="290" rx="14" fill="none" stroke="#2a9a62" stroke-width="1.4" stroke-dasharray="6 5"/>
+<text x="54" y="545" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#2a9a62" text-anchor="start">Oracle Cloud VM (Dubai) — Docker Compose stack</text>
+<rect x="700" y="290" width="220" height="55" rx="10" fill="#fff2e2" stroke="#e08a1e" stroke-width="1.6"/>
+<text x="810.0" y="308.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#6b3d06" text-anchor="middle">cloudflared</text>
+<text x="810.0" y="326.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#6b3d06" text-anchor="middle">10.203.20.10</text>
+<path d="M 810 230 L 810 288" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="330" y="290" width="320" height="125" rx="10" fill="#e6f6ee" stroke="#2a9a62" stroke-width="1.6"/>
+<text x="490.0" y="320.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#0f4a2d" text-anchor="middle">server (Go)</text>
+<text x="490.0" y="338.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">API · async jobs · queue workers</text>
+<text x="490.0" y="353.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">cache · metering · webhooks</text>
+<text x="490.0" y="368.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">MCP · admin API + admin web app</text>
+<text x="490.0" y="383.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">port 3002</text>
+<path d="M 698 318 L 652 318" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="639.375" y="298.5" width="71.25" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="675" y="310" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">HTTP :3002</text>
+<path d="M 930 127 L 930 140 L 990 140 L 990 385 L 652 385" fill="none" stroke="#4a5262" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#arr)"/>
+<rect x="730.6125" y="366.5" width="178.775" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="820" y="378" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">SSH -L 3012 → :3002 (admin)</text>
+<rect x="70" y="450" width="190" height="60" rx="10" fill="#f1eafb" stroke="#7b52c7" stroke-width="1.6"/>
+<text x="165.0" y="470.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#3c2266" text-anchor="middle">Redis 7</text>
+<text x="165.0" y="488.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3c2266" text-anchor="middle">cache · usage · jobs · queue</text>
+<rect x="290" y="450" width="190" height="60" rx="10" fill="#f1eafb" stroke="#7b52c7" stroke-width="1.6"/>
+<text x="385.0" y="470.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#3c2266" text-anchor="middle">Postgres 17</text>
+<text x="385.0" y="488.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3c2266" text-anchor="middle">settings · admins · clients</text>
+<rect x="510" y="450" width="190" height="60" rx="10" fill="#f1eafb" stroke="#7b52c7" stroke-width="1.6"/>
+<text x="605.0" y="470.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#3c2266" text-anchor="middle">SearXNG</text>
+<text x="605.0" y="488.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3c2266" text-anchor="middle">free web search</text>
+<path d="M 380 417 L 165 448" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<path d="M 420 417 L 385 448" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<path d="M 500 417 L 605 448" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<path d="M 640 417 L 640 432 L 740 432 L 740 572" fill="none" stroke="#4a5262" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#arr)"/>
+<rect x="751.725" y="458.5" width="96.55000000000001" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="800" y="470" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">outbound HTTPS</text>
+<rect x="40" y="580" width="1020" height="95" rx="14" fill="none" stroke="#7a8090" stroke-width="1.4" stroke-dasharray="6 5"/>
+<text x="1046" y="600" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#7a8090" text-anchor="end">Outside services (internet)</text>
+<rect x="60" y="610" width="220" height="50" rx="10" fill="#f1f2f4" stroke="#7a8090" stroke-width="1.6"/>
+<text x="170.0" y="625.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#2d323c" text-anchor="middle">Firebase</text>
+<text x="170.0" y="643.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#2d323c" text-anchor="middle">login keys (JWKS)</text>
+<rect x="310" y="610" width="220" height="50" rx="10" fill="#f1f2f4" stroke="#7a8090" stroke-width="1.6"/>
+<text x="420.0" y="625.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#2d323c" text-anchor="middle">SerpApi</text>
+<text x="420.0" y="643.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#2d323c" text-anchor="middle">Amazon · eBay</text>
+<rect x="560" y="610" width="220" height="50" rx="10" fill="#f1f2f4" stroke="#7a8090" stroke-width="1.6"/>
+<text x="670.0" y="625.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#2d323c" text-anchor="middle">Apify</text>
+<text x="670.0" y="643.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#2d323c" text-anchor="middle">AliExpress · Temu</text>
+<rect x="810" y="610" width="220" height="50" rx="10" fill="#f1f2f4" stroke="#7a8090" stroke-width="1.6"/>
+<text x="920.0" y="625.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#2d323c" text-anchor="middle">GitHub</text>
+<text x="920.0" y="643.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#2d323c" text-anchor="middle">code · CI · ghcr.io image</text>
+<path d="M 170 592 L 740 592" stroke="#4a5262" stroke-width="1.6" stroke-dasharray="6 5" fill="none"/>
+<path d="M 170 592 L 170 608" fill="none" stroke="#4a5262" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#arr)"/>
+<path d="M 420 592 L 420 608" fill="none" stroke="#4a5262" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#arr)"/>
+<path d="M 670 592 L 670 608" fill="none" stroke="#4a5262" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#arr)"/>
+<path d="M 920 608 L 920 540" fill="none" stroke="#4a5262" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#arr)"/>
+<rect x="836.9375" y="560.5" width="166.125" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="920" y="572" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">deploy.sh pulls the image</text>
+</svg>

@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 760" width="1100" height="760" role="img" aria-label="Go packages and how they call each other">
+<title>Go packages and how they call each other</title>
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5262"/></marker><marker id="arrS" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 L0 5 L10 10 z" fill="#4a5262"/></marker></defs>
+<rect width="1100" height="760" fill="#ffffff"/>
+<text x="550" y="30" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="700" fill="#1f2430" text-anchor="middle">Code map — server/ (module owis_find_deal_engine, Go 1.26)</text>
+<rect x="380" y="50" width="340" height="60" rx="10" fill="#e8f1fd" stroke="#2f6fd6" stroke-width="1.6"/>
+<text x="550.0" y="63.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#123a73" text-anchor="middle">cmd/owis_find_deal_engine</text>
+<text x="550.0" y="81.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#123a73" text-anchor="middle">main.go: wiring, settings hot swap, shutdown</text>
+<text x="550.0" y="96.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#123a73" text-anchor="middle">admincmd.go: settings / admins / clients CLI</text>
+<rect x="30" y="130" width="1040" height="150" rx="14" fill="none" stroke="#2a9a62" stroke-width="1.4" stroke-dasharray="6 5"/>
+<text x="44" y="150" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#2a9a62" text-anchor="start">internal/api — HTTP layer</text>
+<rect x="45" y="160" width="118" height="100" rx="10" fill="#e6f6ee" stroke="#2a9a62" stroke-width="1.6"/>
+<text x="104.0" y="193.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0f4a2d" text-anchor="middle">router.go</text>
+<text x="104.0" y="211.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">public routes</text>
+<text x="104.0" y="226.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">Deps, NewRouter</text>
+<rect x="173" y="160" width="118" height="100" rx="10" fill="#e6f6ee" stroke="#2a9a62" stroke-width="1.6"/>
+<text x="232.0" y="193.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0f4a2d" text-anchor="middle">middleware.go</text>
+<text x="232.0" y="211.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">request id, log,</text>
+<text x="232.0" y="226.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">CORS, recover</text>
+<rect x="301" y="160" width="118" height="100" rx="10" fill="#e6f6ee" stroke="#2a9a62" stroke-width="1.6"/>
+<text x="360.0" y="193.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0f4a2d" text-anchor="middle">access.go</text>
+<text x="360.0" y="211.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">requireCaller:</text>
+<text x="360.0" y="226.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">JWT or API key</text>
+<rect x="429" y="160" width="118" height="100" rx="10" fill="#e6f6ee" stroke="#2a9a62" stroke-width="1.6"/>
+<text x="488.0" y="193.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0f4a2d" text-anchor="middle">handlers.go</text>
+<text x="488.0" y="211.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">POST /search</text>
+<text x="488.0" y="226.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">(waiting)</text>
+<rect x="557" y="160" width="118" height="100" rx="10" fill="#e6f6ee" stroke="#2a9a62" stroke-width="1.6"/>
+<text x="616.0" y="193.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0f4a2d" text-anchor="middle">searches.go</text>
+<text x="616.0" y="211.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">POST /searches</text>
+<text x="616.0" y="226.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">GET /searches/{id}</text>
+<rect x="685" y="160" width="118" height="100" rx="10" fill="#e6f6ee" stroke="#2a9a62" stroke-width="1.6"/>
+<text x="744.0" y="193.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0f4a2d" text-anchor="middle">jobwork.go</text>
+<text x="744.0" y="211.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">job work, webhooks,</text>
+<text x="744.0" y="226.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">ResumeJobs</text>
+<rect x="813" y="160" width="118" height="100" rx="10" fill="#e6f6ee" stroke="#2a9a62" stroke-width="1.6"/>
+<text x="872.0" y="200.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0f4a2d" text-anchor="middle">mcp.go</text>
+<text x="872.0" y="218.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">POST /mcp tools</text>
+<rect x="941" y="160" width="118" height="100" rx="10" fill="#e6f6ee" stroke="#2a9a62" stroke-width="1.6"/>
+<text x="1000.0" y="193.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#0f4a2d" text-anchor="middle">admin*.go</text>
+<text x="1000.0" y="211.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">/admin/v1/*</text>
+<text x="1000.0" y="226.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">clients, tools</text>
+<path d="M 550 112 L 550 158" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="60" y="320" width="210" height="70" rx="10" fill="#e6f6ee" stroke="#2a9a62" stroke-width="1.6"/>
+<text x="165.0" y="338.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#0f4a2d" text-anchor="middle">internal/metering</text>
+<text x="165.0" y="356.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">counted once · cached free</text>
+<text x="165.0" y="371.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">refund · Continue</text>
+<rect x="310" y="320" width="230" height="70" rx="10" fill="#e6f6ee" stroke="#2a9a62" stroke-width="1.6"/>
+<text x="425.0" y="338.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#0f4a2d" text-anchor="middle">internal/jobs</text>
+<text x="425.0" y="356.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">Job, Runner, Store</text>
+<text x="425.0" y="371.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">progress saves · Resume</text>
+<rect x="580" y="320" width="210" height="70" rx="10" fill="#e6f6ee" stroke="#2a9a62" stroke-width="1.6"/>
+<text x="685.0" y="338.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#0f4a2d" text-anchor="middle">internal/webhook</text>
+<text x="685.0" y="356.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">secrets · HMAC sign</text>
+<text x="685.0" y="371.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">Sender (retries)</text>
+<rect x="830" y="320" width="220" height="70" rx="10" fill="#e6f6ee" stroke="#2a9a62" stroke-width="1.6"/>
+<text x="940.0" y="338.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#0f4a2d" text-anchor="middle">internal/auth · apikeys</text>
+<text x="940.0" y="356.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">JWT via JWKS</text>
+<text x="940.0" y="371.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">API keys (SHA-256)</text>
+<path d="M 165 262 L 165 318" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<path d="M 420 262 L 420 318" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<path d="M 680 262 L 680 318" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<path d="M 940 262 L 940 318" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="60" y="420" width="210" height="75" rx="10" fill="#e6f6ee" stroke="#2a9a62" stroke-width="1.6"/>
+<text x="165.0" y="433.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#0f4a2d" text-anchor="middle">internal/cache</text>
+<text x="165.0" y="451.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">per shop · fresh/stale</text>
+<text x="165.0" y="466.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">last_known · SearchProgress</text>
+<text x="165.0" y="481.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">RunTask</text>
+<path d="M 165 392 L 165 418" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="310" y="420" width="230" height="75" rx="10" fill="#e6f6ee" stroke="#2a9a62" stroke-width="1.6"/>
+<text x="425.0" y="433.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#0f4a2d" text-anchor="middle">internal/queue</text>
+<text x="425.0" y="451.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">one task per shop</text>
+<text x="425.0" y="466.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">caps · join · heartbeats</text>
+<text x="425.0" y="481.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">Redis Lua / memory</text>
+<path d="M 272 455 L 308 455" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="279.675" y="437.5" width="20.65" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="290.0" y="449.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">Do</text>
+<path d="M 425 497 L 425 520 L 165 520 L 165 497" fill="none" stroke="#4a5262" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#arr)"/>
+<rect x="273.8625" y="503.5" width="52.275000000000006" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="300" y="515" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">RunTask</text>
+<rect x="60" y="545" width="480" height="75" rx="10" fill="#e6f6ee" stroke="#2a9a62" stroke-width="1.6"/>
+<text x="300.0" y="558.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#0f4a2d" text-anchor="middle">internal/search</text>
+<text x="300.0" y="576.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">Service.Search: per-shop time limit, merge, dedupe, sort</text>
+<text x="300.0" y="591.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">fallback.go (web chain + circuit breaker) · probe.go (admin test)</text>
+<text x="300.0" y="606.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">instrument.go (cost / calls → stats)</text>
+<path d="M 120 497 L 120 543" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="60" y="640" width="480" height="105" rx="14" fill="none" stroke="#7a8090" stroke-width="1.4" stroke-dasharray="6 5"/>
+<text x="74" y="660" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#7a8090" text-anchor="start">internal/providers</text>
+<rect x="75" y="670" width="145" height="60" rx="10" fill="#f1f2f4" stroke="#7a8090" stroke-width="1.6"/>
+<text x="147.5" y="690.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#2d323c" text-anchor="middle">serpapi</text>
+<text x="147.5" y="708.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#2d323c" text-anchor="middle">Amazon · eBay · Google</text>
+<rect x="230" y="670" width="145" height="60" rx="10" fill="#f1f2f4" stroke="#7a8090" stroke-width="1.6"/>
+<text x="302.5" y="690.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#2d323c" text-anchor="middle">apify</text>
+<text x="302.5" y="708.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#2d323c" text-anchor="middle">AliExpress · Temu</text>
+<rect x="385" y="670" width="145" height="60" rx="10" fill="#f1f2f4" stroke="#7a8090" stroke-width="1.6"/>
+<text x="457.5" y="690.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#2d323c" text-anchor="middle">searxng</text>
+<text x="457.5" y="708.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#2d323c" text-anchor="middle">web (free)</text>
+<path d="M 300 622 L 300 668" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="600" y="420" width="450" height="35" rx="10" fill="#f1eafb" stroke="#7b52c7" stroke-width="1.6"/>
+<text x="825.0" y="441.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#3c2266" text-anchor="middle">internal/config  —  settings: env or DB, validation</text>
+<rect x="600" y="461" width="450" height="35" rx="10" fill="#f1eafb" stroke="#7b52c7" stroke-width="1.6"/>
+<text x="825.0" y="482.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#3c2266" text-anchor="middle">internal/settings  —  encrypt, Set, Watch (hot swap)</text>
+<rect x="600" y="502" width="450" height="35" rx="10" fill="#f1eafb" stroke="#7b52c7" stroke-width="1.6"/>
+<text x="825.0" y="523.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#3c2266" text-anchor="middle">internal/store  —  Postgres + migrations</text>
+<rect x="600" y="543" width="450" height="35" rx="10" fill="#f1eafb" stroke="#7b52c7" stroke-width="1.6"/>
+<text x="825.0" y="564.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#3c2266" text-anchor="middle">internal/markets  —  countries → shops (markets.json)</text>
+<rect x="600" y="584" width="450" height="35" rx="10" fill="#f1eafb" stroke="#7b52c7" stroke-width="1.6"/>
+<text x="825.0" y="605.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#3c2266" text-anchor="middle">internal/usage  —  plans, daily quotas</text>
+<rect x="600" y="625" width="450" height="35" rx="10" fill="#f1eafb" stroke="#7b52c7" stroke-width="1.6"/>
+<text x="825.0" y="646.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#3c2266" text-anchor="middle">internal/ratelimit  —  token bucket</text>
+<rect x="600" y="666" width="450" height="35" rx="10" fill="#f1eafb" stroke="#7b52c7" stroke-width="1.6"/>
+<text x="825.0" y="687.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#3c2266" text-anchor="middle">internal/stats  —  usage, cost, budget</text>
+<rect x="600" y="707" width="450" height="35" rx="10" fill="#f1eafb" stroke="#7b52c7" stroke-width="1.6"/>
+<text x="825.0" y="728.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#3c2266" text-anchor="middle">internal/devdocs · adminui  —  /docs, OpenAPI, /admin/ app</text>
+</svg>

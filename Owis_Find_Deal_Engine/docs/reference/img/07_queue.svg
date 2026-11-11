@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 560" width="1100" height="560" role="img" aria-label="Life of a queue task">
+<title>Life of a queue task</title>
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5262"/></marker><marker id="arrS" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 L0 5 L10 10 z" fill="#4a5262"/></marker></defs>
+<rect width="1100" height="560" fill="#ffffff"/>
+<text x="550" y="30" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="700" fill="#1f2430" text-anchor="middle">Queue task (internal/queue) — one per shop + title</text>
+<rect x="40" y="70" width="230" height="80" rx="10" fill="#e8f1fd" stroke="#2f6fd6" stroke-width="1.6"/>
+<text x="155.0" y="85.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#123a73" text-anchor="middle">Enqueue (claim)</text>
+<text x="155.0" y="103.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#123a73" text-anchor="middle">id = the shop&#x27;s cache key</text>
+<text x="155.0" y="118.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#123a73" text-anchor="middle">same id queued/running → join</text>
+<text x="155.0" y="133.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#123a73" text-anchor="middle">done well &lt; 10 s ago → join</text>
+<rect x="330" y="60" width="260" height="100" rx="10" fill="#fff2e2" stroke="#e08a1e" stroke-width="1.6"/>
+<text x="460.0" y="78.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#6b3d06" text-anchor="middle">queued</text>
+<text x="460.0" y="96.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#6b3d06" text-anchor="middle">Redis lists owis:q:hi:&lt;class&gt;</text>
+<text x="460.0" y="111.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#6b3d06" text-anchor="middle">(searches) and owis:q:lo:&lt;class&gt;</text>
+<text x="460.0" y="126.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#6b3d06" text-anchor="middle">(background refreshes)</text>
+<text x="460.0" y="141.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#6b3d06" text-anchor="middle">a search joining a refresh → hi</text>
+<path d="M 272 110 L 328 110" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="286.5125" y="92.5" width="26.975" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="300.0" y="104.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">new</text>
+<rect x="650" y="60" width="400" height="100" rx="10" fill="#e6f6ee" stroke="#2a9a62" stroke-width="1.6"/>
+<text x="850.0" y="78.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#0f4a2d" text-anchor="middle">running</text>
+<text x="850.0" y="96.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">worker slot free? apify 4 · serpapi 10 · web 10</text>
+<text x="850.0" y="111.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">heartbeat owis:q:beat:&lt;id&gt; every 5 s (TTL 20 s)</text>
+<text x="850.0" y="126.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">shop&#x27;s time limit starts now</text>
+<text x="850.0" y="141.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">cache.RunTask → search one shop → store</text>
+<path d="M 592 110 L 648 110" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="587.5375" y="92.5" width="64.92500000000001" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="620.0" y="104.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">pop (Lua)</text>
+<rect x="650" y="230" width="400" height="80" rx="10" fill="#f1eafb" stroke="#7b52c7" stroke-width="1.6"/>
+<text x="850.0" y="245.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#3c2266" text-anchor="middle">done</text>
+<text x="850.0" y="263.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3c2266" text-anchor="middle">outcome ok / no_results / error</text>
+<text x="850.0" y="278.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3c2266" text-anchor="middle">kept 10 min for waiters; good ones joinable 10 s</text>
+<text x="850.0" y="293.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3c2266" text-anchor="middle">waiters woken (same server) or poll every 1 s</text>
+<path d="M 850 162 L 850 228" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="827.025" y="177.5" width="45.95" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="850.0" y="189.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">finish</text>
+<rect x="330" y="230" width="260" height="80" rx="10" fill="#fdecec" stroke="#d0453f" stroke-width="1.6"/>
+<text x="460.0" y="253.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#6e1512" text-anchor="middle">error: waited too long</text>
+<text x="460.0" y="271.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#6e1512" text-anchor="middle">queued &gt; QUEUE_MAX_WAIT (60 s)</text>
+<text x="460.0" y="286.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#6e1512" text-anchor="middle">→ shop shows last_known / error</text>
+<path d="M 460 162 L 460 228" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<path d="M 592 270 L 648 270" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="40" y="380" width="470" height="150" rx="10" fill="#fdecec" stroke="#d0453f" stroke-width="1.6"/>
+<text x="275.0" y="415.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="700" fill="#6e1512" text-anchor="middle">Server stops or crashes while running</text>
+<text x="275.0" y="433.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#6e1512" text-anchor="middle">clean stop (SIGTERM): task put back in front, attempt + 1</text>
+<text x="275.0" y="448.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#6e1512" text-anchor="middle">crash: heartbeat expires → another start finds the orphan</text>
+<text x="275.0" y="463.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#6e1512" text-anchor="middle">attempt 2 allowed if the task is &lt; 3 min old (RetryMaxAge)</text>
+<text x="275.0" y="478.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#6e1512" text-anchor="middle">otherwise → error &quot;the server stopped during this shop&#x27;s search&quot;</text>
+<text x="275.0" y="493.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#6e1512" text-anchor="middle">(a re-run Apify search is paid twice)</text>
+<path d="M 680 162 L 680 200 L 620 200 L 620 350 L 275 350 L 275 378" fill="none" stroke="#4a5262" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#arr)"/>
+<rect x="408.05" y="333.5" width="83.9" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="450" y="345" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">server stops</text>
+<path d="M 300 378 L 300 185 L 360 185 L 360 162" fill="none" stroke="#4a5262" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#arr)"/>
+<rect x="267.5375" y="278.5" width="64.92500000000001" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="300" y="290" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">attempt 2</text>
+<rect x="560" y="380" width="490" height="150" rx="10" fill="#fffbe6" stroke="#c9a21a" stroke-width="1.6"/>
+<text x="805.0" y="415.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="700" fill="#5a4706" text-anchor="middle">Who waits for a task</text>
+<text x="805.0" y="433.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#5a4706" text-anchor="middle">waiting search (POST /search): up to search timeout + 5 s</text>
+<text x="805.0" y="448.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#5a4706" text-anchor="middle">async job / MCP: until the job deadline (slowest shop + 60 s + 15 s)</text>
+<text x="805.0" y="463.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#5a4706" text-anchor="middle">background refresh: up to search timeout + 5 s</text>
+<text x="805.0" y="478.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#5a4706" text-anchor="middle">a waiter that gives up does NOT stop the task:</text>
+<text x="805.0" y="493.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#5a4706" text-anchor="middle">it finishes and fills the cache for the next search</text>
+</svg>

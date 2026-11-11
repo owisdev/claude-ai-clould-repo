@@ -9,6 +9,14 @@ frozen; new step PRs target `main`). Steps 7–12: PRs #9–#11, step 13:
 branch `claude/sweet-archimedes-vxsy2x`.
 
 Read first:
+- [docs/full_service_reference.pdf](docs/full_service_reference.pdf) —
+  **the Full Service Reference** (11 Nov 2026): the whole service in one
+  document — architecture, cloud deployment, code map with the Go files,
+  cache, queue, waiting / asynchronous search, webhooks, restarts, MCP,
+  API, admin panel, settings, data stores, every PC / VM command, tests,
+  troubleshooting, remaining work. Source:
+  [docs/full_service_reference.md](docs/full_service_reference.md);
+  rebuild with `python3 docs/build_full_reference_pdf.py`.
 - [docs/step13_guide.pdf](docs/step13_guide.pdf) — **step 13**: what the
   MCP endpoint for AI agents, the OpenAPI description and the developer
   docs page do, and the test steps 0–10 with the Git Bash commands

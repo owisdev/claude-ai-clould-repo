@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 300" width="1100" height="300" role="img" aria-label="Cache freshness of one shop&#x27;s results">
+<title>Cache freshness of one shop&#x27;s results</title>
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5262"/></marker><marker id="arrS" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 L0 5 L10 10 z" fill="#4a5262"/></marker></defs>
+<rect width="1100" height="300" fill="#ffffff"/>
+<text x="550" y="30" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="700" fill="#1f2430" text-anchor="middle">One shop&#x27;s results in the cache (key shop:v7:&lt;shop&gt;:&lt;hash&gt;) — age since fetched</text>
+<rect x="60" y="70" width="320" height="60" rx="4" fill="#e8f1fd" stroke="#2f6fd6" stroke-width="1.6"/>
+<text x="220.0" y="96" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#123a73" text-anchor="middle">fresh (≤ 48 h)</text>
+<text x="220.0" y="115" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#123a73" text-anchor="middle">served from cache, free</text>
+<rect x="380" y="70" width="180" height="60" rx="4" fill="#fff2e2" stroke="#e08a1e" stroke-width="1.6"/>
+<text x="470.0" y="96" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#6b3d06" text-anchor="middle">stale (48–72 h)</text>
+<text x="470.0" y="115" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#6b3d06" text-anchor="middle">served + refreshed in background</text>
+<rect x="560" y="70" width="360" height="60" rx="4" fill="#f1eafb" stroke="#7b52c7" stroke-width="1.6"/>
+<text x="740.0" y="96" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#3c2266" text-anchor="middle">kept as backup (≤ 7 days)</text>
+<text x="740.0" y="115" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#3c2266" text-anchor="middle">searched live; shown as last_known</text>
+<rect x="920" y="70" width="120" height="60" rx="4" fill="#f1f2f4" stroke="#7a8090" stroke-width="1.6"/>
+<text x="980.0" y="96" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#2d323c" text-anchor="middle">gone</text>
+<line x1="60" y1="130" x2="60" y2="150" stroke="#4a5262" stroke-width="1.5"/>
+<text x="60" y="166" font-family="'JetBrains Mono', Consolas, 'Courier New', monospace" font-size="11.5" font-weight="400" fill="#1f2430" text-anchor="middle">0</text>
+<line x1="380" y1="130" x2="380" y2="150" stroke="#4a5262" stroke-width="1.5"/>
+<text x="380" y="166" font-family="'JetBrains Mono', Consolas, 'Courier New', monospace" font-size="11.5" font-weight="400" fill="#1f2430" text-anchor="middle">CACHE_FRESH_TTL 48h</text>
+<line x1="560" y1="130" x2="560" y2="150" stroke="#4a5262" stroke-width="1.5"/>
+<text x="560" y="166" font-family="'JetBrains Mono', Consolas, 'Courier New', monospace" font-size="11.5" font-weight="400" fill="#1f2430" text-anchor="middle">CACHE_STALE_TTL 72h</text>
+<line x1="920" y1="130" x2="920" y2="150" stroke="#4a5262" stroke-width="1.5"/>
+<text x="920" y="166" font-family="'JetBrains Mono', Consolas, 'Courier New', monospace" font-size="11.5" font-weight="400" fill="#1f2430" text-anchor="middle">CACHE_LAST_KNOWN_TTL 168h</text>
+<text x="60" y="200" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#1f2430" text-anchor="start">• A shop that found nothing is fresh only CACHE_EMPTY_TTL (30 min). Failures are never stored.</text>
+<text x="60" y="222" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#1f2430" text-anchor="start">• &quot;refresh&quot;: true forces a live search at most once per CACHE_MIN_REFRESH (10 min) per shop.</text>
+<text x="60" y="244" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#1f2430" text-anchor="start">• Countries share entries when the shop request is the same (AliExpress, Temu everywhere; amazon.com for usa + jor).</text>
+<text x="60" y="266" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#1f2430" text-anchor="start">• Key = shop + site + source setup + normalized title (+ region for web shops). CACHE_GENERATION drops everything.</text>
+</svg>

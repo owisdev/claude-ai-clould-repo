@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 330" width="1100" height="330" role="img" aria-label="How the owner reaches the admin panel">
+<title>How the owner reaches the admin panel</title>
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5262"/></marker><marker id="arrS" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 L0 5 L10 10 z" fill="#4a5262"/></marker></defs>
+<rect width="1100" height="330" fill="#ffffff"/>
+<text x="550" y="30" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="700" fill="#1f2430" text-anchor="middle">Admin panel access (until Cloudflare Access, step 6)</text>
+<rect x="40" y="70" width="230" height="90" rx="10" fill="#e8f1fd" stroke="#2f6fd6" stroke-width="1.6"/>
+<text x="155.0" y="90.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#123a73" text-anchor="middle">Owner PC</text>
+<text x="155.0" y="108.5" font-family="'JetBrains Mono', Consolas, 'Courier New', monospace" font-size="11.5" font-weight="400" fill="#123a73" text-anchor="middle">ssh -i ~/.ssh/owis_oracle.key</text>
+<text x="155.0" y="123.5" font-family="'JetBrains Mono', Consolas, 'Courier New', monospace" font-size="11.5" font-weight="400" fill="#123a73" text-anchor="middle">-L 3012:127.0.0.1:3002</text>
+<text x="155.0" y="138.5" font-family="'JetBrains Mono', Consolas, 'Courier New', monospace" font-size="11.5" font-weight="400" fill="#123a73" text-anchor="middle">ubuntu@&lt;public IP&gt;</text>
+<rect x="330" y="70" width="230" height="90" rx="10" fill="#e8f1fd" stroke="#2f6fd6" stroke-width="1.6"/>
+<text x="445.0" y="98.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#123a73" text-anchor="middle">Browser</text>
+<text x="445.0" y="116.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#123a73" text-anchor="middle">http://localhost:3012/admin/</text>
+<text x="445.0" y="131.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#123a73" text-anchor="middle">React app (embedded)</text>
+<rect x="620" y="70" width="220" height="90" rx="10" fill="#e6f6ee" stroke="#2a9a62" stroke-width="1.6"/>
+<text x="730.0" y="105.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#0f4a2d" text-anchor="middle">VM :22 → 127.0.0.1:3002</text>
+<text x="730.0" y="123.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">server container</text>
+<rect x="880" y="70" width="190" height="90" rx="10" fill="#f1f2f4" stroke="#7a8090" stroke-width="1.6"/>
+<text x="975.0" y="98.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#2d323c" text-anchor="middle">Firebase</text>
+<text x="975.0" y="116.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#2d323c" text-anchor="middle">email + password</text>
+<text x="975.0" y="131.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#2d323c" text-anchor="middle">sign-in (ID token)</text>
+<path d="M 272 115 L 328 115" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<path d="M 562 115 L 618 115" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="554.375" y="97.5" width="71.25" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="590.0" y="109.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">SSH tunnel</text>
+<path d="M 445 162 L 445 200 L 975 200 L 975 162" fill="none" stroke="#4a5262" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#arr)"/>
+<rect x="673.8625" y="183.5" width="52.275000000000006" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="700" y="195" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">sign in</text>
+<rect x="40" y="230" width="1030" height="80" rx="10" fill="#fdecec" stroke="#d0453f" stroke-width="1.6"/>
+<text x="555.0" y="253.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="700" fill="#6e1512" text-anchor="middle">Server checks on every /admin/v1 call</text>
+<text x="555.0" y="271.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#6e1512" text-anchor="middle">valid Firebase ID token · signed in &lt; ADMIN_SESSION_MAX_AGE (12 h) · active entry in the admin list (linked to the login)</text>
+<text x="555.0" y="286.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#6e1512" text-anchor="middle">(off for now, step 5: ADMIN_REQUIRE_2FA, ADMIN_REQUIRE_VERIFIED_EMAIL) · rate limits · every change in the audit log</text>
+</svg>
