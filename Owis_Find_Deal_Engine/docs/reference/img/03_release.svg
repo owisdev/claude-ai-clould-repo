@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 360" width="1100" height="360" role="img" aria-label="From code change to production">
+<title>From code change to production</title>
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5262"/></marker><marker id="arrS" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 L0 5 L10 10 z" fill="#4a5262"/></marker></defs>
+<rect width="1100" height="360" fill="#ffffff"/>
+<text x="550" y="30" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="700" fill="#1f2430" text-anchor="middle">Release flow: branch → pull request → CI → main → image → deploy.sh</text>
+<rect x="30" y="70" width="190" height="95" rx="10" fill="#e8f1fd" stroke="#2f6fd6" stroke-width="1.6"/>
+<text x="125.0" y="100.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="700" fill="#123a73" text-anchor="middle">Work branch</text>
+<text x="125.0" y="118.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#123a73" text-anchor="middle">claude/… (Claude Code)</text>
+<text x="125.0" y="133.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#123a73" text-anchor="middle">commits + tests</text>
+<rect x="245" y="70" width="190" height="95" rx="10" fill="#e8f1fd" stroke="#2f6fd6" stroke-width="1.6"/>
+<text x="340.0" y="100.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="700" fill="#123a73" text-anchor="middle">Pull request</text>
+<text x="340.0" y="118.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#123a73" text-anchor="middle">into main</text>
+<text x="340.0" y="133.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#123a73" text-anchor="middle">owner reviews</text>
+<path d="M 220 117 L 243 117" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="460" y="70" width="190" height="95" rx="10" fill="#f1f2f4" stroke="#7a8090" stroke-width="1.6"/>
+<text x="555.0" y="93.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="700" fill="#2d323c" text-anchor="middle">GitHub Actions</text>
+<text x="555.0" y="111.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#2d323c" text-anchor="middle">gofmt · vet · test -race</text>
+<text x="555.0" y="126.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#2d323c" text-anchor="middle">admin web build · audit</text>
+<text x="555.0" y="141.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#2d323c" text-anchor="middle">docker build amd64+arm64</text>
+<path d="M 435 117 L 458 117" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="675" y="70" width="190" height="95" rx="10" fill="#e8f1fd" stroke="#2f6fd6" stroke-width="1.6"/>
+<text x="770.0" y="100.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="700" fill="#123a73" text-anchor="middle">Merge to main</text>
+<text x="770.0" y="118.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#123a73" text-anchor="middle">CI again on main</text>
+<text x="770.0" y="133.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#123a73" text-anchor="middle">publishes the image</text>
+<path d="M 650 117 L 673 117" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="890" y="70" width="190" height="95" rx="10" fill="#f1eafb" stroke="#7b52c7" stroke-width="1.6"/>
+<text x="985.0" y="100.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="700" fill="#3c2266" text-anchor="middle">ghcr.io</text>
+<text x="985.0" y="118.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3c2266" text-anchor="middle">owis_find_deal_engine</text>
+<text x="985.0" y="133.5" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3c2266" text-anchor="middle">:&lt;commit&gt;  and  :main</text>
+<path d="M 865 117 L 888 117" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="250" y="220" width="600" height="110" rx="10" fill="#e6f6ee" stroke="#2a9a62" stroke-width="1.6"/>
+<text x="550.0" y="243.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#0f4a2d" text-anchor="middle">On the VM:  deploy/deploy.sh [commit]</text>
+<text x="550.0" y="261.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">1. find the commit  ·  2. move /opt/ofd/repo to it  ·  3. docker compose pull</text>
+<text x="550.0" y="276.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">4. compose up -d  ·  5. wait until healthy (+ tunnel connected)</text>
+<text x="550.0" y="291.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">logged in /opt/ofd/deploys.log · .env never touched</text>
+<text x="550.0" y="306.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#0f4a2d" text-anchor="middle">roll back: deploy/deploy.sh &lt;older commit&gt;</text>
+<path d="M 955 167 L 955 275 L 852 275" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="916.2125" y="213.5" width="77.575" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="955" y="225" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">docker pull</text>
+<path d="M 250 300 L 120 300 L 120 170" fill="none" stroke="#4a5262" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#arr)"/>
+<rect x="111.2125" y="280.5" width="77.575" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="150" y="292" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">next change</text>
+</svg>

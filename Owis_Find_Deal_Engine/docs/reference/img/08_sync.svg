@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 618" width="1100" height="618" role="img" aria-label="Waiting (synchronous) search">
+<title>Waiting (synchronous) search</title>
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5262"/></marker><marker id="arrS" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 L0 5 L10 10 z" fill="#4a5262"/></marker></defs>
+<rect width="1100" height="618" fill="#ffffff"/>
+<line x1="95.0" y1="66" x2="95.0" y2="602" stroke="#b9bfca" stroke-width="1.3" stroke-dasharray="4 4"/>
+<rect x="10.0" y="20" width="170" height="44" rx="10" fill="#e8f1fd" stroke="#2f6fd6" stroke-width="1.6"/>
+<text x="95.0" y="46.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#123a73" text-anchor="middle">App / client</text>
+<line x1="277.0" y1="66" x2="277.0" y2="602" stroke="#b9bfca" stroke-width="1.3" stroke-dasharray="4 4"/>
+<rect x="192.0" y="20" width="170" height="44" rx="10" fill="#e6f6ee" stroke="#2a9a62" stroke-width="1.6"/>
+<text x="277.0" y="46.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#0f4a2d" text-anchor="middle">server API</text>
+<line x1="459.0" y1="66" x2="459.0" y2="602" stroke="#b9bfca" stroke-width="1.3" stroke-dasharray="4 4"/>
+<rect x="374.0" y="20" width="170" height="44" rx="10" fill="#e6f6ee" stroke="#2a9a62" stroke-width="1.6"/>
+<text x="459.0" y="46.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#0f4a2d" text-anchor="middle">metering</text>
+<line x1="641.0" y1="66" x2="641.0" y2="602" stroke="#b9bfca" stroke-width="1.3" stroke-dasharray="4 4"/>
+<rect x="556.0" y="20" width="170" height="44" rx="10" fill="#f1eafb" stroke="#7b52c7" stroke-width="1.6"/>
+<text x="641.0" y="46.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#3c2266" text-anchor="middle">cache</text>
+<line x1="823.0" y1="66" x2="823.0" y2="602" stroke="#b9bfca" stroke-width="1.3" stroke-dasharray="4 4"/>
+<rect x="738.0" y="20" width="170" height="44" rx="10" fill="#e6f6ee" stroke="#2a9a62" stroke-width="1.6"/>
+<text x="823.0" y="46.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#0f4a2d" text-anchor="middle">queue + workers</text>
+<line x1="1005.0" y1="66" x2="1005.0" y2="602" stroke="#b9bfca" stroke-width="1.3" stroke-dasharray="4 4"/>
+<rect x="920.0" y="20" width="170" height="44" rx="10" fill="#f1f2f4" stroke="#7a8090" stroke-width="1.6"/>
+<text x="1005.0" y="46.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#2d323c" text-anchor="middle">shops (SerpApi / Apify)</text>
+<path d="M 99.0 90 L 273.0 90" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="68.14999999999999" y="72.5" width="235.70000000000002" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="186.0" y="84" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">POST /api/v1/search {title, country}</text>
+<path d="M 281.0 124 L 455.0 124" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="310.2375" y="106.5" width="115.525" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="368.0" y="118" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">Search(user, req)</text>
+<path d="M 463.0 158 L 637.0 158" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="463.775" y="140.5" width="172.45000000000002" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="550.0" y="152" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">Lookup: every shop cached?</text>
+<rect x="496.0" y="176" width="290" height="24" rx="6" fill="#fffbe6" stroke="#c9a21a" stroke-width="1.6"/>
+<text x="641.0" y="193" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#5a4706" text-anchor="middle">yes → answer at once, free (X-Cache: HIT)</text>
+<path d="M 463.0 222 L 637.0 222" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="410.0125" y="204.5" width="279.975" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="550.0" y="216" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">no → Take 1 from the allowance, then Search</text>
+<path d="M 645.0 256 L 819.0 256" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="601.5" y="238.5" width="261.0" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="732.0" y="250" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">one task per shop without an answer (Do)</text>
+<path d="M 827.0 290 L 1001.0 290" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="748.7125" y="272.5" width="330.57500000000005" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="914.0" y="284" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">amazon (≤ 15 s), aliexpress (≤ 90 s), temu (≤ 45 s)</text>
+<path d="M 1001.0 324 L 827.0 324" fill="none" stroke="#4a5262" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#arr)"/>
+<rect x="884.7" y="306.5" width="58.6" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="914.0" y="318" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">products</text>
+<path d="M 819.0 358 L 645.0 358" fill="none" stroke="#4a5262" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#arr)"/>
+<rect x="607.825" y="340.5" width="248.35000000000002" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="732.0" y="352" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">outcome per shop · stored in the cache</text>
+<rect x="476.0" y="376" width="330" height="24" rx="6" fill="#fffbe6" stroke="#c9a21a" stroke-width="1.6"/>
+<text x="641.0" y="393" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#5a4706" text-anchor="middle">not done in time → last_known (≤ 7 days) or error</text>
+<path d="M 637.0 422 L 463.0 422" fill="none" stroke="#4a5262" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#arr)"/>
+<rect x="504.8875" y="404.5" width="90.22500000000001" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="550.0" y="416" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">merged result</text>
+<rect x="299.0" y="440" width="320" height="24" rx="6" fill="#fffbe6" stroke="#c9a21a" stroke-width="1.6"/>
+<text x="459.0" y="457" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#5a4706" text-anchor="middle">all failed or all cached → allowance given back</text>
+<path d="M 455.0 486 L 281.0 486" fill="none" stroke="#4a5262" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#arr)"/>
+<rect x="316.5625" y="468.5" width="102.87500000000001" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="368.0" y="480" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">outcome + quota</text>
+<path d="M 273.0 520 L 99.0 520" fill="none" stroke="#4a5262" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#arr)"/>
+<rect x="8.0" y="502.5" width="368.52500000000003" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="192.26250000000002" y="514" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">200 {results, markets, shops, fetched_at} + X-RateLimit-*</text>
+<line x1="20" y1="554" x2="1080" y2="554" stroke="#d6dae1" stroke-width="1"/>
+<rect x="296.16249999999997" y="546.5" width="507.67500000000007" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="550.0" y="558" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">waits for the slowest shop: up to 92 s in production (Cloudflare cuts at 125 s)</text>
+</svg>

@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 622" width="1100" height="622" role="img" aria-label="Server restart during an asynchronous search">
+<title>Server restart during an asynchronous search</title>
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4a5262"/></marker><marker id="arrS" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10 0 L0 5 L10 10 z" fill="#4a5262"/></marker></defs>
+<rect width="1100" height="622" fill="#ffffff"/>
+<line x1="95.0" y1="66" x2="95.0" y2="606" stroke="#b9bfca" stroke-width="1.3" stroke-dasharray="4 4"/>
+<rect x="10.0" y="20" width="170" height="44" rx="10" fill="#e8f1fd" stroke="#2f6fd6" stroke-width="1.6"/>
+<text x="95.0" y="46.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#123a73" text-anchor="middle">caller</text>
+<line x1="322.5" y1="66" x2="322.5" y2="606" stroke="#b9bfca" stroke-width="1.3" stroke-dasharray="4 4"/>
+<rect x="237.5" y="20" width="170" height="44" rx="10" fill="#e6f6ee" stroke="#2a9a62" stroke-width="1.6"/>
+<text x="322.5" y="46.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#0f4a2d" text-anchor="middle">server (old)</text>
+<line x1="550.0" y1="66" x2="550.0" y2="606" stroke="#b9bfca" stroke-width="1.3" stroke-dasharray="4 4"/>
+<rect x="465.0" y="20" width="170" height="44" rx="10" fill="#f1eafb" stroke="#7b52c7" stroke-width="1.6"/>
+<text x="550.0" y="46.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#3c2266" text-anchor="middle">Redis</text>
+<line x1="777.5" y1="66" x2="777.5" y2="606" stroke="#b9bfca" stroke-width="1.3" stroke-dasharray="4 4"/>
+<rect x="692.5" y="20" width="170" height="44" rx="10" fill="#e6f6ee" stroke="#2a9a62" stroke-width="1.6"/>
+<text x="777.5" y="46.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#0f4a2d" text-anchor="middle">server (new)</text>
+<line x1="1005.0" y1="66" x2="1005.0" y2="606" stroke="#b9bfca" stroke-width="1.3" stroke-dasharray="4 4"/>
+<rect x="920.0" y="20" width="170" height="44" rx="10" fill="#f1f2f4" stroke="#7a8090" stroke-width="1.6"/>
+<text x="1005.0" y="46.0" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#2d323c" text-anchor="middle">Apify</text>
+<path d="M 99.0 90 L 318.5 90" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="116.19999999999999" y="72.5" width="185.10000000000002" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="208.75" y="84" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">POST /searches → job running</text>
+<path d="M 326.5 124 L 1001.0 124" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="555.3875" y="106.5" width="216.72500000000002" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="663.75" y="118" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">aliexpress run starts (attempt 1)</text>
+<path d="M 326.5 158 L 546.0 158" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="305.75" y="140.5" width="261.0" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="436.25" y="152" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">job saved: amazon ok, aliexpress pending</text>
+<rect x="192.5" y="176" width="260" height="24" rx="6" fill="#fdecec" stroke="#d0453f" stroke-width="1.6"/>
+<text x="322.5" y="193" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#6e1512" text-anchor="middle">SIGTERM (deploy / docker restart)</text>
+<path d="M 326.5 222 L 546.0 222" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="261.475" y="204.5" width="349.55" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="436.25" y="216" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">job left running (cause ErrResumeLater: stays counted)</text>
+<path d="M 326.5 256 L 546.0 256" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="327.8875" y="238.5" width="216.72500000000002" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="436.25" y="250" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">task put back in front, attempt 2</text>
+<line x1="20" y1="290" x2="1080" y2="290" stroke="#d6dae1" stroke-width="1"/>
+<rect x="482.75" y="282.5" width="134.5" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="550.0" y="294" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">new container starts</text>
+<path d="M 773.5 324 L 554.0 324" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="507.95" y="306.5" width="311.6" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="663.75" y="318" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">queue: pick up the task (attempt 2, &lt; 3 min old)</text>
+<path d="M 781.5 358 L 1001.0 358" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="782.8875" y="340.5" width="216.72500000000002" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="891.25" y="352" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">aliexpress run again (paid twice)</text>
+<path d="M 773.5 392 L 554.0 392" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="552.225" y="374.5" width="223.05" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="663.75" y="386" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">ResumeJobs: read owis:jobs:running</text>
+<rect x="547.5" y="410" width="460" height="24" rx="6" fill="#fffbe6" stroke="#c9a21a" stroke-width="1.6"/>
+<text x="777.5" y="427" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#5a4706" text-anchor="middle">job work again: only pending shops, joins the task, not counted again</text>
+<path d="M 1001.0 456 L 781.5 456" fill="none" stroke="#4a5262" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#arr)"/>
+<rect x="861.95" y="438.5" width="58.6" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="891.25" y="450" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">products</text>
+<path d="M 773.5 490 L 554.0 490" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="530.0875" y="472.5" width="267.32500000000005" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="663.75" y="484" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">job done (merged with amazon from before)</text>
+<path d="M 99.0 524 L 773.5 524" fill="none" stroke="#4a5262" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="375.325" y="506.5" width="121.85000000000001" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="436.25" y="518" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">GET /searches/{id}</text>
+<path d="M 773.5 558 L 99.0 558" fill="none" stroke="#4a5262" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#arr)"/>
+<rect x="384.8125" y="540.5" width="102.87500000000001" height="16.5" rx="3" fill="#ffffff" opacity="0.92"/>
+<text x="436.25" y="552" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#3a4150" text-anchor="middle">200 status done</text>
+</svg>
