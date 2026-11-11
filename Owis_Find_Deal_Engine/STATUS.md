@@ -222,9 +222,21 @@ backup removed.
     AliExpress run again once (attempt 2), Temu not run again, job
     `done`, counted once. Not run here: Docker build, real Apify /
     SerpApi.
-  - **Next: owner test in production** (steps below), then part 5 (new
-    sources when ready), part 6 (empty guard + shop-rules page), part 7
-    (guide PDF).
+  - **Merged (PR #26), deployed and tested by the owner 2026-11-11. ✅**
+    Steps 0–3, 5, 6, 9 as expected (start log, app user filled per shop,
+    cached repeat free, webhooks `first_results` then `completed` —
+    after making the `owner-test` webhook secret in the panel through
+    SSH, restart resume, one Apify run per shop for a joined search).
+    Step 4 (MCP): `search_products` answered `done` in 9 s with
+    `pending: []` — every shop was live and fast (amazon 3.1 s, temu
+    7.6 s, **aliexpress 8.3 s**, against ~83 s on 9 November), so the
+    `running` case did not show in production (covered by the end to
+    end test). Step 5 first tried after the search had already finished
+    (no resume logged); repeated with the restart 2 s after the start, on
+    the VM. Steps 7–8 (Apify stop margin, memory) skipped while
+    AliExpress is fast.
+  - Next: part 5 (new sources when ready), part 6 (empty guard +
+    shop-rules page), part 7 (guide PDF); see "Remaining work".
 
   **Owner test — step 14b parts 3 + 4 (Git Bash on your PC).** After the
   PR is merged, deploy on the VM with `deploy/deploy.sh`. Nothing to set:
